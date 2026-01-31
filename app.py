@@ -25,12 +25,12 @@ gamet_text = st.text_area(
 )
 
 # -------------------------------------------------
-# DEFINIÇÃO DAS ZONAS (latitude média)
+# DEFINIÇÃO DAS ZONAS (FAIXAS DE LATITUDE)
 # -------------------------------------------------
-ZONE_LAT = {
-    "NORTE": 41.0,
-    "CENTRO": 39.0,
-    "SUL": 37.5
+ZONE_BANDS = {
+    "NORTE": (39.5, 42.5),
+    "CENTRO": (38.5, 39.5),
+    "SUL": (36.5, 38.5)
 }
 
 # -------------------------------------------------
@@ -41,20 +41,20 @@ def extract_latitudes(text):
     return sorted({int(d) + int(m)/60 for d, m in lats}, reverse=True)
 
 def line_applies_to_zone(line, zone):
-    zlat = ZONE_LAT[zone]
+    zmin, zmax = ZONE_BANDS[zone]
 
     north_of = re.search(r'N OF N(\d{2})(\d{2})', line)
     south_of = re.search(r'S OF N(\d{2})(\d{2})', line)
 
     if north_of:
-        lat = int(north_of.group(1)) + int(north_of.group(2))/60
-        return zlat > lat
+        lat = int(north_of.group(1)) + int(north_of.group(2)) / 60
+        return zmax > lat
 
     if south_of:
-        lat = int(south_of.group(1)) + int(south_of.group(2))/60
-        return zlat < lat
+        lat = int(south_of.group(1)) + int(south_of.group(2)) / 60
+        return zmin < lat
 
-    return True  # sem qualificador → aplica-se a todas
+    return True  # sem qualificador → aplica-se a todas as zonas
 
 def filter_text_for_zone(text, zone):
     relevant = []
@@ -95,7 +95,7 @@ def analyze_zone(text):
     no_go_cond = []
     marginal = []
 
-    # VIS (pior caso)
+    # VIS
     vr = re.search(r'(\d{4})-(\d{4})M', text)
     if vr:
         vis_min = int(vr.group(1))
@@ -168,7 +168,6 @@ def exam_sentence(zone, status):
 if st.button(t("🔍 Analisar GAMET", "🔍 Analyze GAMET")) and gamet_text.strip():
 
     text = gamet_text.upper()
-
     zones = {}
     details = {}
 
@@ -193,60 +192,6 @@ if st.button(t("🔍 Analisar GAMET", "🔍 Analyze GAMET")) and gamet_text.stri
     st.subheader(t("🧠 Conclusão operacional", "🧠 Operational conclusion"))
     for z, (status, _) in zones.items():
         st.write("• " + exam_sentence(z, status))
-
-    # -------------------------------------------------
-    # MAPA
-    # -------------------------------------------------
-    st.subheader(t("🗺️ Mapa VFR – LPPC", "🗺️ VFR Map – LPPC"))
-
-    fig, ax = plt.subplots(figsize=(5.5, 8.5))
-
-    ax.plot([-10, -6, -6, -10, -10],
-            [36.5, 36.5, 42.5, 42.5, 36.5],
-            linewidth=1.5)
-
-    bands = {
-        "NORTE": (39.5, 42.5),
-        "CENTRO": (38.3, 39.5),
-        "SUL": (36.5, 38.3)
-    }
-
-    colors = {
-        "NO-GO ABSOLUTO": "red",
-        "NO-GO (CONDICIONADO)": "red",
-        "MARGINAL": "orange",
-        "POSSIBLE": "green"
-    }
-
-    for z, (y0, y1) in bands.items():
-        ax.axhspan(y0, y1, color=colors[zones[z][0]], alpha=0.3)
-
-    for lat in extract_latitudes(text):
-        ax.axhline(lat, linestyle="--", color="black", linewidth=1)
-
-    cities = {
-        "Porto": (-8.8, 41.1),
-        "Lisboa": (-9.2, 38.8),
-        "Faro": (-8.2, 37.1)
-    }
-
-    for name, (x, y) in cities.items():
-        ax.plot(x, y, "ko")
-        ax.text(x + 0.1, y, name, fontsize=8)
-
-    legend = [
-        mpatches.Patch(color="red", alpha=0.3, label="NO-GO VFR"),
-        mpatches.Patch(color="orange", alpha=0.3, label="VFR Marginal"),
-        mpatches.Patch(color="green", alpha=0.3, label="VFR Possível")
-    ]
-    ax.legend(handles=legend, loc="lower right")
-
-    ax.set_xlim(-10.2, -5.8)
-    ax.set_ylim(36.3, 42.7)
-    ax.set_xticks([])
-    ax.set_yticks([])
-
-    st.pyplot(fig)
 
     st.caption(t(
         "Ferramenta de apoio à decisão. Não substitui o julgamento do piloto.",
