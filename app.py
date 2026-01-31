@@ -126,24 +126,22 @@ if st.button(t("🔍 Analisar GAMET", "🔍 Analyze GAMET")) and gamet_text.stri
     st.subheader(t("🧠 Conclusão operacional", "🧠 Operational conclusion"))
 
     def exam_sentence(zone, status):
-        zl = zone.lower()
-        if status == "NO-GO":
-            return t(
-                f"No {zl}, as condições são incompatíveis com voo VFR.",
-                f"In the {zl}, conditions are incompatible with VFR flight."
-            )
-        if status == "MARGINAL":
-            return t(
-                f"O {zl} apresenta condições marginais para VFR.",
-                f"The {zl} presents marginal VFR conditions."
-            )
+    zl = zone.lower()
+    if status == "NO-GO":
         return t(
-            f"No {zl}, o voo VFR pode ser considerado.",
-            f"In the {zl}, VFR flight may be considered."
+            f"O GAMET indica condições adversas no {zl}, incompatíveis com voo VFR.",
+            f"The GAMET indicates adverse conditions in the {zl}, incompatible with VFR flight."
         )
+    if status == "MARGINAL":
+        return t(
+            f"O {zl} apresenta condições marginais para voo VFR.",
+            f"The {zl} presents marginal conditions for VFR flight."
+        )
+    return t(
+        f"O GAMET indica condições mais favoráveis ao VFR no {zl}.",
+        f"The GAMET indicates more favorable VFR conditions in the {zl}."
+    )
 
-    for zone, (status, _) in zones.items():
-        st.write("• " + exam_sentence(zone, status))
 
     # -------------------------------------------------
     # MAPA
