@@ -127,9 +127,8 @@ if st.button(t("🔍 Analisar GAMET", "🔍 Analyze GAMET")) and gamet_text.stri
         zone_text = filter_text_for_zone(text, zone)
         zones[zone] = analyze_zone(zone_text)
 
-    # RESULTADOS TEXTUAIS
+    # RESULTADO TEXTUAL
     st.subheader(t("📋 Resultado VFR por zona", "📋 VFR result by zone"))
-
     for zone, (status, reasons) in zones.items():
         if status == "NO-GO":
             st.error(f"{zone}: NO-GO VFR — {', '.join(reasons)}")
@@ -138,13 +137,13 @@ if st.button(t("🔍 Analisar GAMET", "🔍 Analyze GAMET")) and gamet_text.stri
         else:
             st.success(f"{zone}: VFR possível")
 
-    # CONCLUSÃO OPERACIONAL
+    # CONCLUSÃO
     st.subheader(t("🧠 Conclusão operacional", "🧠 Operational conclusion"))
     for zone, (status, _) in zones.items():
         st.write("• " + exam_sentence(zone, status))
 
     # -------------------------------------------------
-    # MAPA
+    # MAPA (AGORA COERENTE COM O TEXTO)
     # -------------------------------------------------
     st.subheader(t("🗺️ Mapa VFR – LPPC", "🗺️ VFR Map – LPPC"))
 
@@ -157,10 +156,21 @@ if st.button(t("🔍 Analisar GAMET", "🔍 Analyze GAMET")) and gamet_text.stri
         linewidth=1.5
     )
 
-    # FAIXAS
-    ax.axhspan(39.5, 42.5, color="red", alpha=0.3)
-    ax.axhspan(38.3, 39.5, color="orange", alpha=0.3)
-    ax.axhspan(36.5, 38.3, color="green", alpha=0.3)
+    zone_bands = {
+        "NORTE": (39.5, 42.5),
+        "CENTRO": (38.3, 39.5),
+        "SUL": (36.5, 38.3)
+    }
+
+    zone_colors = {
+        "NO-GO": "red",
+        "MARGINAL": "orange",
+        "POSSIBLE": "green"
+    }
+
+    for zone, (ymin, ymax) in zone_bands.items():
+        status, _ = zones[zone]
+        ax.axhspan(ymin, ymax, color=zone_colors[status], alpha=0.3)
 
     # LATITUDES DO GAMET
     for lat in extract_latitudes(text):
