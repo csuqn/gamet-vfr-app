@@ -61,24 +61,34 @@ def analyze_zone(text):
         else:
             return "MARGINAL", ["ICE ALOFT"]
 
+    # --- VISIBILIDADE ---
+    vis_match = re.search(r'VIS.*?(\d{4})M', text)
+    if vis_match:
+        vis = int(vis_match.group(1))
+        if vis < 3000:
+            reasons.append("VERY LOW VIS")
+        elif vis <= 5000:
+            return "MARGINAL", ["REDUCED VIS"]
+
     # --- OUTROS NO-GO ---
     if "BKN 000" in text or "BKN 00" in text or "OVC" in text:
         reasons.append("LOW CEILING")
-    if re.search(r'VIS.*0[0-4]\d{2}', text):
-        reasons.append("LOW VIS")
-    if "CB" in text or "TCU" in text:
-        reasons.append("CB/TCU")
     if "MT OBSC" in text:
         reasons.append("MT OBSC")
+
+    # --- CB / TCU (afinamos já a seguir) ---
+    if "CB" in text or "TCU" in text:
+        reasons.append("CB/TCU")
 
     if reasons:
         return "NO-GO", reasons
 
-    # --- MARGINAL ---
-    if re.search(r'VIS.*[5-8]\d{3}', text) or "TURB MOD" in text:
-        return "MARGINAL", ["LIMITING CONDITIONS"]
+    # --- TURBULÊNCIA / VENTO ---
+    if "TURB MOD" in text:
+        return "MARGINAL", ["TURB MOD"]
 
     return "POSSIBLE", []
+
 
 
 # -------------------------------------------------
