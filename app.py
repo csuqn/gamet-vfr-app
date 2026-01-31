@@ -21,8 +21,17 @@ st.title(t("✈️ LPPC GAMET – Análise VFR", "✈️ LPPC GAMET – VFR Anal
 gamet_text = st.text_area(
     t("Cole aqui o texto completo do GAMET (LPPC)",
       "Paste the full GAMET text here (LPPC)"),
-    height=320
+    height=330
 )
+
+# -------------------------------------------------
+# DEFINIÇÃO DAS ZONAS (latitude média)
+# -------------------------------------------------
+ZONE_LAT = {
+    "NORTE": 41.0,
+    "CENTRO": 39.0,
+    "SUL": 37.5
+}
 
 # -------------------------------------------------
 # FUNÇÕES AUXILIARES
@@ -31,22 +40,27 @@ def extract_latitudes(text):
     lats = re.findall(r'N(\d{2})(\d{2})', text)
     return sorted({int(d) + int(m)/60 for d, m in lats}, reverse=True)
 
+def line_applies_to_zone(line, zone):
+    zlat = ZONE_LAT[zone]
+
+    north_of = re.search(r'N OF N(\d{2})(\d{2})', line)
+    south_of = re.search(r'S OF N(\d{2})(\d{2})', line)
+
+    if north_of:
+        lat = int(north_of.group(1)) + int(north_of.group(2))/60
+        return zlat > lat
+
+    if south_of:
+        lat = int(south_of.group(1)) + int(south_of.group(2))/60
+        return zlat < lat
+
+    return True  # sem qualificador → aplica-se a todas
+
 def filter_text_for_zone(text, zone):
-    lines = text.splitlines()
     relevant = []
-
-    for line in lines:
-        if "N OF" in line or "S OF" in line:
-            if zone == "NORTE" and "N OF" in line:
-                relevant.append(line)
-            elif zone == "SUL" and "S OF" in line:
-                relevant.append(line)
-            elif zone == "CENTRO":
-                relevant.append(line)
-        else:
-            if zone == "CENTRO":
-                relevant.append(line)
-
+    for line in text.splitlines():
+        if line_applies_to_zone(line, zone):
+            relevant.append(line)
     return " ".join(relevant)
 
 # -------------------------------------------------
@@ -55,58 +69,56 @@ def filter_text_for_zone(text, zone):
 def extract_details(text):
     details = {}
 
-    vis_range = re.findall(r'(\d{4})-(\d{4})M', text)
-    if vis_range:
-        details["VIS"] = f"{vis_range[0][0]}–{vis_range[0][1]} m"
+    vr = re.search(r'(\d{4})-(\d{4})M', text)
+    if vr:
+        details["VIS"] = f"{vr.group(1)}–{vr.group(2)} m"
     else:
-        vis_single = re.findall(r'VIS.*?(\d{4})M', text)
-        if vis_single:
-            details["VIS"] = f"{vis_single[0]} m"
+        vs = re.search(r'VIS.*?(\d{4})M', text)
+        if vs:
+            details["VIS"] = f"{vs.group(1)} m"
 
-    cloud = re.findall(r'(SCT|BKN|OVC)\s*(\d{3})-(\d{3})', text)
-    if cloud:
-        c = cloud[0]
-        details["CLD"] = f"{c[0]} {c[1]}–{c[2]} ft AGL"
+    cld = re.search(r'(SCT|BKN|OVC)\s*(\d{3})-(\d{3})', text)
+    if cld:
+        details["CLD"] = f"{cld.group(1)} {cld.group(2)}–{cld.group(3)} ft AGL"
 
-    ice = re.findall(r'ICE.*?(FL\d{2,3}(?:/FL\d{2,3})?|ABV FL\d{2,3})', text)
+    ice = re.search(r'ICE.*?(FL\d{2,3}(?:/FL\d{2,3})?|ABV FL\d{2,3})', text)
     if ice:
-        details["ICE"] = ice[0]
+        details["ICE"] = ice.group(1)
 
     return details
 
 # -------------------------------------------------
-# LÓGICA METEO (NO-GO ABSOLUTO vs CONDICIONADO)
+# LÓGICA METEO (PRIORIDADE + WORST CASE)
 # -------------------------------------------------
 def analyze_zone(text):
-
-    no_go_absolute = []
-    no_go_conditional = []
+    no_go_abs = []
+    no_go_cond = []
     marginal = []
 
     # VIS (pior caso)
-    vis_range = re.search(r'(\d{4})-(\d{4})M', text)
-    if vis_range:
-        vis_min = int(vis_range.group(1))
+    vr = re.search(r'(\d{4})-(\d{4})M', text)
+    if vr:
+        vis_min = int(vr.group(1))
     else:
-        vis_single = re.search(r'VIS.*?(\d{4})M', text)
-        vis_min = int(vis_single.group(1)) if vis_single else None
+        vs = re.search(r'VIS.*?(\d{4})M', text)
+        vis_min = int(vs.group(1)) if vs else None
 
     if vis_min is not None:
         if vis_min < 3000:
-            no_go_absolute.append("VERY LOW VIS")
+            no_go_abs.append("VERY LOW VIS")
         elif vis_min <= 5000:
             marginal.append("REDUCED VIS")
 
     # TETO
     if re.search(r'BKN 0{2,3}', text) or "OVC" in text:
-        no_go_absolute.append("LOW CEILING")
+        no_go_abs.append("LOW CEILING")
 
     # ICE
-    ice_match = re.search(r'ICE.*FL(\d{2,3})', text)
-    if ice_match:
-        fl = int(ice_match.group(1))
+    ice = re.search(r'ICE.*FL(\d{2,3})', text)
+    if ice:
+        fl = int(ice.group(1))
         if fl <= 60:
-            no_go_conditional.append("ICE (LOW LEVEL)")
+            no_go_cond.append("ICE (LOW LEVEL)")
         else:
             marginal.append("ICE ALOFT")
 
@@ -115,26 +127,23 @@ def analyze_zone(text):
         if "ISOL" in text:
             marginal.append("ISOL CB/TCU")
         else:
-            no_go_conditional.append("CB/TCU")
+            no_go_cond.append("CB/TCU")
 
     # MT OBSC
     if "MT OBSC" in text:
-        no_go_absolute.append("MT OBSC")
+        no_go_abs.append("MT OBSC")
 
     # DECISÃO FINAL
-    if no_go_absolute:
-        return "NO-GO ABSOLUTO", no_go_absolute + no_go_conditional
-
-    if no_go_conditional:
-        return "NO-GO (CONDICIONADO)", no_go_conditional
-
+    if no_go_abs:
+        return "NO-GO ABSOLUTO", no_go_abs + no_go_cond
+    if no_go_cond:
+        return "NO-GO (CONDICIONADO)", no_go_cond
     if marginal:
         return "MARGINAL", marginal
-
     return "POSSIBLE", []
 
 # -------------------------------------------------
-# TEXTO TIPO EXAME
+# TEXTO FINAL
 # -------------------------------------------------
 def exam_sentence(zone, status):
     zl = zone.lower()
@@ -161,29 +170,29 @@ if st.button(t("🔍 Analisar GAMET", "🔍 Analyze GAMET")) and gamet_text.stri
     text = gamet_text.upper()
 
     zones = {}
-    zone_details = {}
+    details = {}
 
-    for zone in ["NORTE", "CENTRO", "SUL"]:
-        zone_text = filter_text_for_zone(text, zone)
-        zones[zone] = analyze_zone(zone_text)
-        zone_details[zone] = extract_details(zone_text)
+    for z in ["NORTE", "CENTRO", "SUL"]:
+        ztext = filter_text_for_zone(text, z)
+        zones[z] = analyze_zone(ztext)
+        details[z] = extract_details(ztext)
 
     st.subheader(t("📋 Resultado VFR por zona", "📋 VFR result by zone"))
 
-    for zone, (status, reasons) in zones.items():
+    for z, (status, reasons) in zones.items():
         if status.startswith("NO-GO"):
-            st.error(f"{zone}: {status} — {', '.join(reasons)}")
+            st.error(f"{z}: {status} — {', '.join(reasons)}")
         elif status == "MARGINAL":
-            st.warning(f"{zone}: VFR marginal — {', '.join(reasons)}")
+            st.warning(f"{z}: VFR marginal — {', '.join(reasons)}")
         else:
-            st.success(f"{zone}: VFR possível")
+            st.success(f"{z}: VFR possível")
 
-        for k, v in zone_details[zone].items():
+        for k, v in details[z].items():
             st.write(f"   • {k}: {v}")
 
     st.subheader(t("🧠 Conclusão operacional", "🧠 Operational conclusion"))
-    for zone, (status, _) in zones.items():
-        st.write("• " + exam_sentence(zone, status))
+    for z, (status, _) in zones.items():
+        st.write("• " + exam_sentence(z, status))
 
     # -------------------------------------------------
     # MAPA
@@ -196,46 +205,41 @@ if st.button(t("🔍 Analisar GAMET", "🔍 Analyze GAMET")) and gamet_text.stri
             [36.5, 36.5, 42.5, 42.5, 36.5],
             linewidth=1.5)
 
-    zone_bands = {
+    bands = {
         "NORTE": (39.5, 42.5),
         "CENTRO": (38.3, 39.5),
         "SUL": (36.5, 38.3)
     }
 
-    zone_colors = {
+    colors = {
         "NO-GO ABSOLUTO": "red",
         "NO-GO (CONDICIONADO)": "red",
         "MARGINAL": "orange",
         "POSSIBLE": "green"
     }
 
-    for zone, (ymin, ymax) in zone_bands.items():
-        status, _ = zones[zone]
-        ax.axhspan(ymin, ymax, color=zone_colors[status], alpha=0.3)
+    for z, (y0, y1) in bands.items():
+        ax.axhspan(y0, y1, color=colors[zones[z][0]], alpha=0.3)
 
     for lat in extract_latitudes(text):
         ax.axhline(lat, linestyle="--", color="black", linewidth=1)
 
     cities = {
         "Porto": (-8.8, 41.1),
-        "Bragança": (-7.2, 41.8),
-        "Viseu": (-8.0, 40.7),
-        "Coimbra": (-8.6, 40.2),
         "Lisboa": (-9.2, 38.8),
-        "Évora": (-8.1, 38.6),
         "Faro": (-8.2, 37.1)
     }
 
     for name, (x, y) in cities.items():
-        ax.plot(x, y, "ko", markersize=3)
-        ax.text(x + 0.1, y + 0.05, name, fontsize=8)
+        ax.plot(x, y, "ko")
+        ax.text(x + 0.1, y, name, fontsize=8)
 
-    legend_patches = [
+    legend = [
         mpatches.Patch(color="red", alpha=0.3, label="NO-GO VFR"),
         mpatches.Patch(color="orange", alpha=0.3, label="VFR Marginal"),
         mpatches.Patch(color="green", alpha=0.3, label="VFR Possível")
     ]
-    ax.legend(handles=legend_patches, loc="lower right")
+    ax.legend(handles=legend, loc="lower right")
 
     ax.set_xlim(-10.2, -5.8)
     ax.set_ylim(36.3, 42.7)
