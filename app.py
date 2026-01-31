@@ -50,7 +50,7 @@ def filter_text_for_zone(text, zone):
     return " ".join(relevant)
 
 # -------------------------------------------------
-# EXTRAÇÃO DE DETALHES METEO
+# EXTRAÇÃO DE DETALHES (MOSTRAR AO UTILIZADOR)
 # -------------------------------------------------
 def extract_details(text):
     details = {}
@@ -64,7 +64,7 @@ def extract_details(text):
         if vis_single:
             details["VIS"] = f"{vis_single[0]} m"
 
-    # NUVENS (SCT/BKN/OVC)
+    # NUVENS
     cloud = re.findall(r'(SCT|BKN|OVC)\s*(\d{3})-(\d{3})', text)
     if cloud:
         c = cloud[0]
@@ -78,28 +78,36 @@ def extract_details(text):
     return details
 
 # -------------------------------------------------
-# LÓGICA METEO POR ZONA
+# LÓGICA METEO POR ZONA (WORST CASE)
 # -------------------------------------------------
 def analyze_zone(text):
     reasons = []
 
-    # ICE por níveis
-    ice_match = re.search(r'ICE.*FL(\d{2,3})', text)
-    if ice_match:
-        fl = int(ice_match.group(1))
-        if fl <= 80:
+    # ICE (usar nível mais baixo)
+    ice_range = re.search(r'ICE.*FL(\d{2,3})', text)
+    if ice_range:
+        fl = int(ice_range.group(1))
+        if fl <= 60:
             reasons.append("ICE (LOW LEVEL)")
         else:
             return "MARGINAL", ["ICE ALOFT"]
 
-    # VISIBILIDADE
-    vis_match = re.search(r'(\d{4})M', text)
-    if vis_match:
-        vis = int(vis_match.group(1))
-        if vis < 3000:
+    # VISIBILIDADE (usar pior valor)
+    vis_range = re.search(r'(\d{4})-(\d{4})M', text)
+    if vis_range:
+        vis_min = int(vis_range.group(1))
+        if vis_min < 3000:
             reasons.append("VERY LOW VIS")
-        elif vis <= 5000:
+        elif vis_min <= 5000:
             return "MARGINAL", ["REDUCED VIS"]
+    else:
+        vis_single = re.search(r'VIS.*?(\d{4})M', text)
+        if vis_single:
+            vis = int(vis_single.group(1))
+            if vis < 3000:
+                reasons.append("VERY LOW VIS")
+            elif vis <= 5000:
+                return "MARGINAL", ["REDUCED VIS"]
 
     # CB / TCU
     if "CB" in text or "TCU" in text:
@@ -108,9 +116,11 @@ def analyze_zone(text):
         else:
             reasons.append("CB/TCU")
 
-    # OUTROS NO-GO
-    if "BKN 000" in text or "BKN 00" in text or "OVC" in text:
+    # TETO (usar base mínima)
+    if re.search(r'BKN 0{2,3}', text) or "OVC" in text:
         reasons.append("LOW CEILING")
+
+    # MONTANHA
     if "MT OBSC" in text:
         reasons.append("MT OBSC")
 
@@ -169,8 +179,7 @@ if st.button(t("🔍 Analisar GAMET", "🔍 Analyze GAMET")) and gamet_text.stri
         else:
             st.success(f"{zone}: VFR possível")
 
-        details = zone_details.get(zone, {})
-        for k, v in details.items():
+        for k, v in zone_details[zone].items():
             st.write(f"   • {k}: {v}")
 
     # CONCLUSÃO
