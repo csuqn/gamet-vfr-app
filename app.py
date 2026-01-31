@@ -48,13 +48,14 @@ def line_applies_to_zone(line, zone):
 
     if north_of:
         lat = int(north_of.group(1)) + int(north_of.group(2)) / 60
-        return zmax > lat
+        return zmax >= lat   # CORRIGIDO (>=)
 
     if south_of:
         lat = int(south_of.group(1)) + int(south_of.group(2)) / 60
-        return zmin < lat
+        return zmin <= lat   # CORRIGIDO (<=)
 
-    return True  # sem qualificador → aplica-se a todas as zonas
+    return True
+
 
 def filter_text_for_zone(text, zone):
     relevant = []
