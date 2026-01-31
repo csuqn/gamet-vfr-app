@@ -44,7 +44,8 @@ def filter_text_for_zone(text, zone):
             elif zone == "CENTRO":
                 relevant.append(line)
         else:
-            relevant.append(line)
+    if zone == "CENTRO":
+        relevant.append(line)
 
     return " ".join(relevant)
 
