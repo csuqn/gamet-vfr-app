@@ -50,12 +50,11 @@ def filter_text_for_zone(text, zone):
     return " ".join(relevant)
 
 # -------------------------------------------------
-# EXTRAÇÃO DE DETALHES (MOSTRAR AO UTILIZADOR)
+# EXTRAÇÃO DE DETALHES (APENAS INFORMATIVO)
 # -------------------------------------------------
 def extract_details(text):
     details = {}
 
-    # VIS
     vis_range = re.findall(r'(\d{4})-(\d{4})M', text)
     if vis_range:
         details["VIS"] = f"{vis_range[0][0]}–{vis_range[0][1]} m"
@@ -64,13 +63,11 @@ def extract_details(text):
         if vis_single:
             details["VIS"] = f"{vis_single[0]} m"
 
-    # NUVENS
     cloud = re.findall(r'(SCT|BKN|OVC)\s*(\d{3})-(\d{3})', text)
     if cloud:
         c = cloud[0]
         details["CLD"] = f"{c[0]} {c[1]}–{c[2]} ft AGL"
 
-    # ICE
     ice = re.findall(r'ICE.*?(FL\d{2,3}(?:/FL\d{2,3})?|ABV FL\d{2,3})', text)
     if ice:
         details["ICE"] = ice[0]
@@ -78,58 +75,57 @@ def extract_details(text):
     return details
 
 # -------------------------------------------------
-# LÓGICA METEO POR ZONA (WORST CASE)
+# LÓGICA METEO POR ZONA (PRIORIDADE CORRETA)
 # -------------------------------------------------
 def analyze_zone(text):
-    reasons = []
 
-    # ICE (usar nível mais baixo)
-    ice_range = re.search(r'ICE.*FL(\d{2,3})', text)
-    if ice_range:
-        fl = int(ice_range.group(1))
-        if fl <= 60:
-            reasons.append("ICE (LOW LEVEL)")
-        else:
-            return "MARGINAL", ["ICE ALOFT"]
+    no_go_reasons = []
+    marginal_reasons = []
 
-    # VISIBILIDADE (usar pior valor)
+    # --- VIS (pior caso manda) ---
     vis_range = re.search(r'(\d{4})-(\d{4})M', text)
     if vis_range:
         vis_min = int(vis_range.group(1))
-        if vis_min < 3000:
-            reasons.append("VERY LOW VIS")
-        elif vis_min <= 5000:
-            return "MARGINAL", ["REDUCED VIS"]
     else:
         vis_single = re.search(r'VIS.*?(\d{4})M', text)
-        if vis_single:
-            vis = int(vis_single.group(1))
-            if vis < 3000:
-                reasons.append("VERY LOW VIS")
-            elif vis <= 5000:
-                return "MARGINAL", ["REDUCED VIS"]
+        vis_min = int(vis_single.group(1)) if vis_single else None
 
-    # CB / TCU
+    if vis_min is not None:
+        if vis_min < 3000:
+            no_go_reasons.append("VERY LOW VIS")
+        elif vis_min <= 5000:
+            marginal_reasons.append("REDUCED VIS")
+
+    # --- NUVENS (base mínima manda) ---
+    if re.search(r'BKN 0{2,3}', text) or "OVC" in text:
+        no_go_reasons.append("LOW CEILING")
+
+    # --- ICE (nível mais baixo manda) ---
+    ice_match = re.search(r'ICE.*FL(\d{2,3})', text)
+    if ice_match:
+        fl = int(ice_match.group(1))
+        if fl <= 60:
+            no_go_reasons.append("ICE (LOW LEVEL)")
+        else:
+            marginal_reasons.append("ICE ALOFT")
+
+    # --- CB / TCU ---
     if "CB" in text or "TCU" in text:
         if "ISOL" in text:
-            return "MARGINAL", ["ISOL CB/TCU"]
+            marginal_reasons.append("ISOL CB/TCU")
         else:
-            reasons.append("CB/TCU")
+            no_go_reasons.append("CB/TCU")
 
-    # TETO (usar base mínima)
-    if re.search(r'BKN 0{2,3}', text) or "OVC" in text:
-        reasons.append("LOW CEILING")
-
-    # MONTANHA
+    # --- MT OBSC ---
     if "MT OBSC" in text:
-        reasons.append("MT OBSC")
+        no_go_reasons.append("MT OBSC")
 
-    if reasons:
-        return "NO-GO", reasons
+    # --- DECISÃO FINAL (PRIORIDADE) ---
+    if no_go_reasons:
+        return "NO-GO", no_go_reasons
 
-    # TURBULÊNCIA
-    if "TURB MOD" in text:
-        return "MARGINAL", ["TURB MOD"]
+    if marginal_reasons:
+        return "MARGINAL", marginal_reasons
 
     return "POSSIBLE", []
 
@@ -154,7 +150,7 @@ def exam_sentence(zone, status):
     )
 
 # -------------------------------------------------
-# BOTÃO PRINCIPAL
+# EXECUÇÃO
 # -------------------------------------------------
 if st.button(t("🔍 Analisar GAMET", "🔍 Analyze GAMET")) and gamet_text.strip():
 
@@ -168,21 +164,19 @@ if st.button(t("🔍 Analisar GAMET", "🔍 Analyze GAMET")) and gamet_text.stri
         zones[zone] = analyze_zone(zone_text)
         zone_details[zone] = extract_details(zone_text)
 
-    # RESULTADO TEXTUAL
     st.subheader(t("📋 Resultado VFR por zona", "📋 VFR result by zone"))
 
     for zone, (status, reasons) in zones.items():
         if status == "NO-GO":
             st.error(f"{zone}: NO-GO VFR — {', '.join(reasons)}")
         elif status == "MARGINAL":
-            st.warning(f"{zone}: VFR marginal")
+            st.warning(f"{zone}: VFR marginal — {', '.join(reasons)}")
         else:
             st.success(f"{zone}: VFR possível")
 
         for k, v in zone_details[zone].items():
             st.write(f"   • {k}: {v}")
 
-    # CONCLUSÃO
     st.subheader(t("🧠 Conclusão operacional", "🧠 Operational conclusion"))
     for zone, (status, _) in zones.items():
         st.write("• " + exam_sentence(zone, status))
