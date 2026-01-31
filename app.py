@@ -53,8 +53,14 @@ def analyze_zone(text):
     reasons = []
 
     # --- NO-GO ---
-    if "ICE" in text:
-        reasons.append("ICE")
+    ice_match = re.search(r'ICE.*FL(\d{2,3})', text)
+if ice_match:
+    fl = int(ice_match.group(1))
+    if fl <= 80:
+        reasons.append("ICE (LOW LEVEL)")
+    else:
+        return "MARGINAL", ["ICE ALOFT"]
+
     if "BKN 000" in text or "BKN 00" in text or "OVC" in text:
         reasons.append("LOW CEILING")
     if re.search(r'VIS.*0[0-4]\d{2}', text):
