@@ -70,24 +70,28 @@ def analyze_zone(text):
         elif vis <= 5000:
             return "MARGINAL", ["REDUCED VIS"]
 
+    # --- CB / TCU ---
+    if "CB" in text or "TCU" in text:
+        if "ISOL" in text:
+            return "MARGINAL", ["ISOL CB/TCU"]
+        else:
+            reasons.append("CB/TCU")
+
     # --- OUTROS NO-GO ---
     if "BKN 000" in text or "BKN 00" in text or "OVC" in text:
         reasons.append("LOW CEILING")
     if "MT OBSC" in text:
         reasons.append("MT OBSC")
 
-    # --- CB / TCU (afinamos já a seguir) ---
-    if "CB" in text or "TCU" in text:
-        reasons.append("CB/TCU")
-
     if reasons:
         return "NO-GO", reasons
 
-    # --- TURBULÊNCIA / VENTO ---
+    # --- TURBULÊNCIA ---
     if "TURB MOD" in text:
         return "MARGINAL", ["TURB MOD"]
 
     return "POSSIBLE", []
+
 
 
 
