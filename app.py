@@ -50,7 +50,7 @@ def filter_text_for_zone(text, zone):
     return " ".join(relevant)
 
 # -------------------------------------------------
-# EXTRAÇÃO DE DETALHES (APENAS INFORMATIVO)
+# EXTRAÇÃO DE DETALHES (INFORMATIVO)
 # -------------------------------------------------
 def extract_details(text):
     details = {}
@@ -75,14 +75,15 @@ def extract_details(text):
     return details
 
 # -------------------------------------------------
-# LÓGICA METEO POR ZONA (PRIORIDADE CORRETA)
+# LÓGICA METEO (NO-GO ABSOLUTO vs CONDICIONADO)
 # -------------------------------------------------
 def analyze_zone(text):
 
-    no_go_reasons = []
-    marginal_reasons = []
+    no_go_absolute = []
+    no_go_conditional = []
+    marginal = []
 
-    # --- VIS (pior caso manda) ---
+    # VIS (pior caso)
     vis_range = re.search(r'(\d{4})-(\d{4})M', text)
     if vis_range:
         vis_min = int(vis_range.group(1))
@@ -92,40 +93,43 @@ def analyze_zone(text):
 
     if vis_min is not None:
         if vis_min < 3000:
-            no_go_reasons.append("VERY LOW VIS")
+            no_go_absolute.append("VERY LOW VIS")
         elif vis_min <= 5000:
-            marginal_reasons.append("REDUCED VIS")
+            marginal.append("REDUCED VIS")
 
-    # --- NUVENS (base mínima manda) ---
+    # TETO
     if re.search(r'BKN 0{2,3}', text) or "OVC" in text:
-        no_go_reasons.append("LOW CEILING")
+        no_go_absolute.append("LOW CEILING")
 
-    # --- ICE (nível mais baixo manda) ---
+    # ICE
     ice_match = re.search(r'ICE.*FL(\d{2,3})', text)
     if ice_match:
         fl = int(ice_match.group(1))
         if fl <= 60:
-            no_go_reasons.append("ICE (LOW LEVEL)")
+            no_go_conditional.append("ICE (LOW LEVEL)")
         else:
-            marginal_reasons.append("ICE ALOFT")
+            marginal.append("ICE ALOFT")
 
-    # --- CB / TCU ---
+    # CB / TCU
     if "CB" in text or "TCU" in text:
         if "ISOL" in text:
-            marginal_reasons.append("ISOL CB/TCU")
+            marginal.append("ISOL CB/TCU")
         else:
-            no_go_reasons.append("CB/TCU")
+            no_go_conditional.append("CB/TCU")
 
-    # --- MT OBSC ---
+    # MT OBSC
     if "MT OBSC" in text:
-        no_go_reasons.append("MT OBSC")
+        no_go_absolute.append("MT OBSC")
 
-    # --- DECISÃO FINAL (PRIORIDADE) ---
-    if no_go_reasons:
-        return "NO-GO", no_go_reasons
+    # DECISÃO FINAL
+    if no_go_absolute:
+        return "NO-GO ABSOLUTO", no_go_absolute + no_go_conditional
 
-    if marginal_reasons:
-        return "MARGINAL", marginal_reasons
+    if no_go_conditional:
+        return "NO-GO (CONDICIONADO)", no_go_conditional
+
+    if marginal:
+        return "MARGINAL", marginal
 
     return "POSSIBLE", []
 
@@ -134,10 +138,10 @@ def analyze_zone(text):
 # -------------------------------------------------
 def exam_sentence(zone, status):
     zl = zone.lower()
-    if status == "NO-GO":
+    if status.startswith("NO-GO"):
         return t(
-            f"O GAMET indica condições adversas no {zl}, incompatíveis com voo VFR.",
-            f"The GAMET indicates adverse conditions in the {zl}, incompatible with VFR flight."
+            f"O GAMET indica condições incompatíveis com voo VFR no {zl}.",
+            f"The GAMET indicates conditions incompatible with VFR flight in the {zl}."
         )
     if status == "MARGINAL":
         return t(
@@ -167,8 +171,8 @@ if st.button(t("🔍 Analisar GAMET", "🔍 Analyze GAMET")) and gamet_text.stri
     st.subheader(t("📋 Resultado VFR por zona", "📋 VFR result by zone"))
 
     for zone, (status, reasons) in zones.items():
-        if status == "NO-GO":
-            st.error(f"{zone}: NO-GO VFR — {', '.join(reasons)}")
+        if status.startswith("NO-GO"):
+            st.error(f"{zone}: {status} — {', '.join(reasons)}")
         elif status == "MARGINAL":
             st.warning(f"{zone}: VFR marginal — {', '.join(reasons)}")
         else:
@@ -199,7 +203,8 @@ if st.button(t("🔍 Analisar GAMET", "🔍 Analyze GAMET")) and gamet_text.stri
     }
 
     zone_colors = {
-        "NO-GO": "red",
+        "NO-GO ABSOLUTO": "red",
+        "NO-GO (CONDICIONADO)": "red",
         "MARGINAL": "orange",
         "POSSIBLE": "green"
     }
