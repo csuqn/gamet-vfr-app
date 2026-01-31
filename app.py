@@ -50,6 +50,34 @@ def filter_text_for_zone(text, zone):
     return " ".join(relevant)
 
 # -------------------------------------------------
+# EXTRAÇÃO DE DETALHES METEO
+# -------------------------------------------------
+def extract_details(text):
+    details = {}
+
+    # VIS
+    vis_range = re.findall(r'(\d{4})-(\d{4})M', text)
+    if vis_range:
+        details["VIS"] = f"{vis_range[0][0]}–{vis_range[0][1]} m"
+    else:
+        vis_single = re.findall(r'VIS.*?(\d{4})M', text)
+        if vis_single:
+            details["VIS"] = f"{vis_single[0]} m"
+
+    # NUVENS (SCT/BKN/OVC)
+    cloud = re.findall(r'(SCT|BKN|OVC)\s*(\d{3})-(\d{3})', text)
+    if cloud:
+        c = cloud[0]
+        details["CLD"] = f"{c[0]} {c[1]}–{c[2]} ft AGL"
+
+    # ICE
+    ice = re.findall(r'ICE.*?(FL\d{2,3}(?:/FL\d{2,3})?|ABV FL\d{2,3})', text)
+    if ice:
+        details["ICE"] = ice[0]
+
+    return details
+
+# -------------------------------------------------
 # LÓGICA METEO POR ZONA
 # -------------------------------------------------
 def analyze_zone(text):
@@ -65,7 +93,7 @@ def analyze_zone(text):
             return "MARGINAL", ["ICE ALOFT"]
 
     # VISIBILIDADE
-    vis_match = re.search(r'VIS.*?(\d{4})M', text)
+    vis_match = re.search(r'(\d{4})M', text)
     if vis_match:
         vis = int(vis_match.group(1))
         if vis < 3000:
@@ -123,12 +151,16 @@ if st.button(t("🔍 Analisar GAMET", "🔍 Analyze GAMET")) and gamet_text.stri
     text = gamet_text.upper()
 
     zones = {}
+    zone_details = {}
+
     for zone in ["NORTE", "CENTRO", "SUL"]:
         zone_text = filter_text_for_zone(text, zone)
         zones[zone] = analyze_zone(zone_text)
+        zone_details[zone] = extract_details(zone_text)
 
     # RESULTADO TEXTUAL
     st.subheader(t("📋 Resultado VFR por zona", "📋 VFR result by zone"))
+
     for zone, (status, reasons) in zones.items():
         if status == "NO-GO":
             st.error(f"{zone}: NO-GO VFR — {', '.join(reasons)}")
@@ -137,24 +169,25 @@ if st.button(t("🔍 Analisar GAMET", "🔍 Analyze GAMET")) and gamet_text.stri
         else:
             st.success(f"{zone}: VFR possível")
 
+        details = zone_details.get(zone, {})
+        for k, v in details.items():
+            st.write(f"   • {k}: {v}")
+
     # CONCLUSÃO
     st.subheader(t("🧠 Conclusão operacional", "🧠 Operational conclusion"))
     for zone, (status, _) in zones.items():
         st.write("• " + exam_sentence(zone, status))
 
     # -------------------------------------------------
-    # MAPA (AGORA COERENTE COM O TEXTO)
+    # MAPA
     # -------------------------------------------------
     st.subheader(t("🗺️ Mapa VFR – LPPC", "🗺️ VFR Map – LPPC"))
 
     fig, ax = plt.subplots(figsize=(5.5, 8.5))
 
-    # FIR
-    ax.plot(
-        [-10, -6, -6, -10, -10],
-        [36.5, 36.5, 42.5, 42.5, 36.5],
-        linewidth=1.5
-    )
+    ax.plot([-10, -6, -6, -10, -10],
+            [36.5, 36.5, 42.5, 42.5, 36.5],
+            linewidth=1.5)
 
     zone_bands = {
         "NORTE": (39.5, 42.5),
@@ -172,11 +205,9 @@ if st.button(t("🔍 Analisar GAMET", "🔍 Analyze GAMET")) and gamet_text.stri
         status, _ = zones[zone]
         ax.axhspan(ymin, ymax, color=zone_colors[status], alpha=0.3)
 
-    # LATITUDES DO GAMET
     for lat in extract_latitudes(text):
         ax.axhline(lat, linestyle="--", color="black", linewidth=1)
 
-    # CIDADES
     cities = {
         "Porto": (-8.8, 41.1),
         "Bragança": (-7.2, 41.8),
@@ -191,7 +222,6 @@ if st.button(t("🔍 Analisar GAMET", "🔍 Analyze GAMET")) and gamet_text.stri
         ax.plot(x, y, "ko", markersize=3)
         ax.text(x + 0.1, y + 0.05, name, fontsize=8)
 
-    # LEGENDA
     legend_patches = [
         mpatches.Patch(color="red", alpha=0.3, label="NO-GO VFR"),
         mpatches.Patch(color="orange", alpha=0.3, label="VFR Marginal"),
