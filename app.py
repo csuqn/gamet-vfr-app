@@ -62,24 +62,17 @@ def filter_text_for_zone(text, zone):
     )
 
 # -------------------------------------------------
-# PARSING ROBUSTO (NOVO)
+# PARSING ROBUSTO
 # -------------------------------------------------
 def extract_min_visibility(text):
-    """
-    Devolve a visibilidade mínima encontrada (em metros),
-    suportando vários formatos GAMET.
-    """
     values = []
 
-    # 0800-5000M → usa o mínimo
     for m in re.findall(r"(\d{4})-(\d{4})M", text):
         values.append(int(m[0]))
 
-    # VIS 3000M
     for m in re.findall(r"VIS\s*(\d{4})M", text):
         values.append(int(m))
 
-    # LOC 1500M
     for m in re.findall(r"LOC\s*(\d{4})M", text):
         values.append(int(m))
 
@@ -87,10 +80,6 @@ def extract_min_visibility(text):
 
 
 def extract_min_ceiling(text):
-    """
-    Devolve o ceiling mais baixo (ft AGL),
-    considerando BKN e OVC.
-    """
     bases = []
 
     for m in re.findall(r"(BKN|OVC)\s*(\d{3})", text):
@@ -99,7 +88,7 @@ def extract_min_ceiling(text):
     return min(bases) if bases else None
 
 # -------------------------------------------------
-# LÓGICA VFR (RESULTADO FINAL IGUAL AO BASE)
+# LÓGICA VFR (INALTERADA NO RESULTADO FINAL)
 # -------------------------------------------------
 def analyze_zone(text):
     reasons = []
@@ -136,25 +125,46 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     text = gamet_text.upper()
     zones = {}
-    details = {}
 
     for z in ZONE_BANDS:
         ztext = filter_text_for_zone(text, z)
         zones[z] = analyze_zone(ztext)
 
     # -------------------------------------------------
-    # RESULTADOS TEXTO (MELHORADOS, MESMOS RÓTULOS)
+    # RESULTADOS TEXTO (CORRIGIDOS)
     # -------------------------------------------------
     st.subheader("📋 Resultado VFR por zona")
 
     for z, (status, reasons) in zones.items():
-        if status == "NO-GO":
-            st.error(f"{z}: {status}")
-        else:
-            st.success(f"{z}: {status}")
 
-        for r in reasons:
-            st.write(f" • {r}")
+        # --- NO-GO PARCIAL ---
+        if status == "NO-GO" and PARTIAL_CUTS[z]:
+            cut_dir, lat = PARTIAL_CUTS[z][0]
+
+            st.error(f"{z}: NO-GO PARCIAL")
+
+            if cut_dir == "NORTH":
+                st.write(f" • NO-GO a norte de {lat:.1f}N")
+                for r in reasons:
+                    st.write(f"    – {r}")
+                st.write(f" • VFR possível a sul de {lat:.1f}N")
+            else:
+                st.write(f" • NO-GO a sul de {lat:.1f}N")
+                for r in reasons:
+                    st.write(f"    – {r}")
+                st.write(f" • VFR possível a norte de {lat:.1f}N")
+
+        # --- NO-GO ABSOLUTO ---
+        elif status == "NO-GO":
+            st.error(f"{z}: NO-GO")
+            for r in reasons:
+                st.write(f" • {r}")
+
+        # --- VFR POSSÍVEL ---
+        else:
+            st.success(f"{z}: VFR POSSÍVEL")
+            for r in reasons:
+                st.write(f" • {r}")
 
     # -------------------------------------------------
     # MAPA ESQUEMÁTICO (INALTERADO)
