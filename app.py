@@ -207,8 +207,10 @@ if st.button(t("🔍 Analisar GAMET", "🔍 Analyze GAMET")) and gamet_text.stri
         else:
             st.success(f"{z}: VFR possível")
 
-        for k, v in details[z].items():
-            st.write(f"   • {k}: {v}")
+       # Mostrar detalhes apenas se NÃO for NO-GO PARCIAL
+if not (status.startswith("NO-GO") and PARTIAL_CUTS[z]):
+    for k, v in details[z].items():
+        st.write(f"   • {k}: {v}")
 
     st.caption(t(
         "Ferramenta de apoio à decisão. Não substitui o julgamento do piloto.",
