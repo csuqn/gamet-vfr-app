@@ -1,3 +1,4 @@
+
 import streamlit as st
 import re
 import matplotlib.pyplot as plt
@@ -72,36 +73,22 @@ def lat_to_y(lat):
 # LÓGICA VFR
 # -------------------------------------------------
 def analyze_zone(text):
-    """
-    Retorna:
-    status   -> 'VFR OK' | 'VFR MARGINAL' | 'VFR NO-GO'
-    reasons  -> lista de strings
-    blocking -> True se NO-GO absoluto/parcial
-    """
     reasons = []
     status = "VFR OK"
     blocking = False
 
-    # -----------------------------
-    # VISIBILIDADE
-    # -----------------------------
     vis_matches = re.findall(r"(\d{4})M", text)
     if vis_matches:
         min_vis = min(int(v) for v in vis_matches)
-
         if min_vis < 3000:
             return "VFR NO-GO", [f"VIS {min_vis} m"], True
         elif min_vis < 5000:
             status = "VFR MARGINAL"
             reasons.append(f"VIS {min_vis} m")
 
-    # -----------------------------
-    # CEILING
-    # -----------------------------
     cld = re.search(r"(BKN|OVC)[ /]*(\d{3})", text)
     if cld:
         base_ft = int(cld.group(2)) * 100
-
         if base_ft < 500:
             return "VFR NO-GO", [f"{cld.group(1)} {base_ft} ft"], True
         elif base_ft < 1500:
@@ -126,33 +113,6 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         zones[z] = analyze_zone(ztext)
 
     # -------------------------------------------------
-    # RESULTADOS TEXTO
-    # -------------------------------------------------
-    st.subheader("📋 Resultado VFR por zona")
-
-    for z, (status, reasons, blocking) in zones.items():
-        if status == "VFR NO-GO":
-            if blocking and PARTIAL_CUTS[z]:
-                cut_dir, lat = PARTIAL_CUTS[z][0]
-                st.error(f"{z}: {status}")
-                st.write(f" • NO-GO a {'norte' if cut_dir=='NORTH' else 'sul'} de {lat:.1f}N")
-                for r in reasons:
-                    st.write(f"   – {r}")
-                st.write(f" • VFR possível a {'sul' if cut_dir=='NORTH' else 'norte'} de {lat:.1f}N")
-            else:
-                st.error(f"{z}: {status}")
-                for r in reasons:
-                    st.write(f" • {r}")
-
-        elif status == "VFR MARGINAL":
-            st.warning(f"{z}: {status}")
-            for r in reasons:
-                st.write(f" • {r}")
-
-        else:
-            st.success(f"{z}: {status}")
-
-    # -------------------------------------------------
     # MAPA ESQUEMÁTICO
     # -------------------------------------------------
     st.subheader("🗺️ Mapa VFR – Portugal Continental (esquemático)")
@@ -168,10 +128,12 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     for z, (y0, y1) in ZONE_Y.items():
         status, reasons, blocking = zones[z]
 
-        # --- NO-GO PARCIAL COM CORTE ---
         if status == "VFR NO-GO" and blocking and PARTIAL_CUTS[z]:
             cut_dir, lat = PARTIAL_CUTS[z][0]
             cut_y = lat_to_y(lat)
+
+            # 🔧 CORREÇÃO CRÍTICA
+            cut_y = max(y0, min(y1, cut_y))
 
             if cut_dir == "NORTH":
                 ax.axhspan(cut_y, y1, color="red", alpha=0.25)
@@ -182,7 +144,6 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
             ax.axhline(cut_y, linestyle="--", color="black")
 
-        # --- SEM CORTE ---
         else:
             if status == "VFR OK":
                 ax.axhspan(y0, y1, color="green", alpha=0.25)
@@ -193,43 +154,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
         if show_reasons:
             label = status if not reasons else status + "\n" + "\n".join(reasons)
-            ax.text(
-                0.02,
-                (y0 + y1) / 2,
-                label,
-                fontsize=8,
-                va="center"
-            )
-
-    # -------------------------------------------------
-    # CIDADES
-    # -------------------------------------------------
-    cities = {
-        "Bragança": (0.8, 13.5),
-        "Viana do Castelo": (0.2, 12.6),
-        "Braga": (0.4, 11.8),
-        "Vila Real": (0.6, 11.0),
-        "Porto": (0.3, 10.5),
-
-        "Viseu": (0.6, 8.6),
-        "Aveiro": (0.3, 8.0),
-        "Guarda": (0.8, 7.4),
-        "Coimbra": (0.5, 6.6),
-        "Leiria": (0.3, 5.6),
-        "Castelo Branco": (0.8, 4.8),
-
-        "Santarém": (0.4, 3.6),
-        "Portalegre": (0.8, 2.8),
-        "Lisboa": (0.3, 2.0),
-        "Setúbal": (0.3, 1.2),
-        "Évora": (0.6, 0.2),
-        "Beja": (0.7, -1.0),
-        "Faro": (0.7, -2.2),
-    }
-
-    for name, (x, y) in cities.items():
-        ax.plot(x, y, "ko", markersize=3)
-        ax.text(x + 0.015, y, name, va="center", fontsize=8)
+            ax.text(0.02, (y0 + y1) / 2, label, fontsize=8, va="center")
 
     ax.set_xlim(0, 1)
     ax.set_ylim(-4.5, 14.0)
@@ -240,5 +165,4 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     st.pyplot(fig)
 
     st.caption("Ferramenta de apoio à decisão. Não substitui o julgamento do piloto.")
-
 
