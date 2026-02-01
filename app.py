@@ -17,7 +17,7 @@ gamet_text = st.text_area(
 )
 
 # -------------------------------------------------
-# ZONAS (FAIXAS REAIS DE LATITUDE)
+# ZONAS (FAIXAS REAIS)
 # -------------------------------------------------
 ZONE_BANDS = {
     "NORTE": (39.5, 42.5),
@@ -137,11 +137,11 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
             st.success(f"{z}: VFR possível")
 
     # -------------------------------------------------
-    # MAPA ESQUEMÁTICO
+    # MAPA ESQUEMÁTICO COM CAPITAIS DE DISTRITO
     # -------------------------------------------------
     st.subheader("🗺️ Mapa VFR – Portugal Continental (esquemático)")
 
-    fig, ax = plt.subplots(figsize=(5, 8))
+    fig, ax = plt.subplots(figsize=(6, 9))
 
     SCHEMATIC_BANDS = {
         "NORTE": (2, 3),
@@ -149,6 +149,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         "SUL": (0, 1)
     }
 
+    # Desenho das zonas
     for z, (y0, y1) in SCHEMATIC_BANDS.items():
         status = zones[z][0]
 
@@ -166,24 +167,34 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
                 ax.axhspan(y0, y0 + 0.5, color="red", alpha=0.35)
                 ax.axhspan(y0 + 0.5, y1, color="green", alpha=0.35)
                 ax.axhline(y0 + 0.5, linestyle="--", color="black")
-
         else:
             ax.axhspan(y0, y1, color="red", alpha=0.35)
 
-    # Rótulos
-    ax.text(0.5, 2.5, "NORTE", ha="center", va="center", fontsize=12)
-    ax.text(0.5, 1.5, "CENTRO", ha="center", va="center", fontsize=12)
-    ax.text(0.5, 0.5, "SUL", ha="center", va="center", fontsize=12)
+    # Capitais de distrito (posição esquemática)
+    cities = {
+        "NORTE": ["Viana do Castelo", "Braga", "Porto", "Vila Real", "Bragança"],
+        "CENTRO": ["Aveiro", "Coimbra", "Viseu", "Guarda", "Castelo Branco", "Leiria"],
+        "SUL": ["Lisboa", "Santarém", "Setúbal", "Évora", "Portalegre", "Beja", "Faro"]
+    }
+
+    for z, names in cities.items():
+        y0, y1 = SCHEMATIC_BANDS[z]
+        y = (y0 + y1) / 2
+        xs = [0.1 + i * 0.8 / (len(names) - 1) for i in range(len(names))]
+
+        for x, name in zip(xs, names):
+            ax.plot(x, y, "ko", markersize=3)
+            ax.text(x, y - 0.08, name, ha="center", va="top", fontsize=8)
 
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 3)
     ax.set_xticks([])
     ax.set_yticks([])
-
-    ax.set_title("VFR por zonas – Portugal Continental")
+    ax.set_title("VFR por zonas – Capitais de Distrito")
 
     st.pyplot(fig)
 
     st.caption("Ferramenta de apoio à decisão. Não substitui o julgamento do piloto.")
+
 
 
