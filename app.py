@@ -173,7 +173,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         st.write(f" • {z}: {label}")
 
     # -------------------------------------------------
-    # MAPA (INALTERADO)
+    # MAPA (INALTERADO) + CIDADES RESTAURADAS
     # -------------------------------------------------
     st.subheader("🗺️ Mapa VFR – Portugal Continental (esquemático)")
 
@@ -202,10 +202,31 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         else:
             ax.axhspan(y0, y1, color="red", alpha=0.25)
 
+    # CIDADES – versão completa (baseline)
     cities = {
-        "Porto": (0.3, 10.5),
-        "Lisboa": (0.3, 2.0),
-        "Faro": (0.7, -2.2),
+        # NORTE
+        "Bragança":         (0.8, 13.5),
+        "Viana do Castelo": (0.2, 12.6),
+        "Braga":            (0.4, 11.8),
+        "Vila Real":        (0.6, 11.0),
+        "Porto":            (0.3, 10.5),
+
+        # CENTRO
+        "Viseu":            (0.6, 8.6),
+        "Aveiro":           (0.3, 8.0),
+        "Guarda":           (0.8, 7.4),
+        "Coimbra":          (0.5, 6.6),
+        "Leiria":           (0.3, 5.6),
+        "Castelo Branco":   (0.8, 4.8),
+
+        # SUL
+        "Santarém":         (0.4, 3.6),
+        "Portalegre":       (0.8, 2.8),
+        "Lisboa":           (0.3, 2.0),
+        "Setúbal":          (0.3, 1.2),
+        "Évora":            (0.6, 0.2),
+        "Beja":             (0.7, -1.0),
+        "Faro":             (0.7, -2.2),
     }
 
     for name, (x, y) in cities.items():
