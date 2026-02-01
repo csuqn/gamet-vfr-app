@@ -17,181 +17,131 @@ gamet_text = st.text_area(
 )
 
 # -------------------------------------------------
-# ZONAS (LATITUDES APROXIMADAS)
+# AJUSTE VISUAL
 # -------------------------------------------------
-ZONE_BANDS = {
-    "NORTE": (39.5, 42.5),
-    "CENTRO": (38.5, 39.5),
-    "SUL": (36.5, 38.5)
+VISUAL_LINE_OFFSET = 0.35   # apenas estético (não altera o significado)
+
+# -------------------------------------------------
+# GEOMETRIA DO MAPA (TOPOLÓGICA)
+# -------------------------------------------------
+LAT_MIN = 36.5
+LAT_MAX = 42.5
+Y_MIN = -4.5
+Y_MAX = 14.0
+
+def lat_to_y(lat):
+    return Y_MIN + (lat - LAT_MIN) * (Y_MAX - Y_MIN) / (LAT_MAX - LAT_MIN)
+
+# -------------------------------------------------
+# ZONAS (REFERÊNCIA VISUAL)
+# -------------------------------------------------
+ZONE_Y = {
+    "NORTE": (9.0, 14.0),
+    "CENTRO": (4.0, 9.0),
+    "SUL": (-4.5, 4.0)
 }
 
-PARTIAL_CUTS = {z: [] for z in ZONE_BANDS}
+# -------------------------------------------------
+# EXTRAÇÃO DO CORTE GLOBAL
+# -------------------------------------------------
+def extract_cut(text):
+    m = re.search(r"N OF N(\d{2})(\d{2})", text)
+    if m:
+        return ("NORTH", int(m.group(1)) + int(m.group(2)) / 60)
+
+    m = re.search(r"S OF N(\d{2})(\d{2})", text)
+    if m:
+        return ("SOUTH", int(m.group(1)) + int(m.group(2)) / 60)
+
+    return None
 
 # -------------------------------------------------
-# FUNÇÕES ESPACIAIS
+# ANÁLISE METEOROLÓGICA SIMPLES
 # -------------------------------------------------
-def line_applies_to_zone(line, zone):
-    zmin, zmax = ZONE_BANDS[zone]
-
-    north_of = re.search(r"N OF N(\d{2})(\d{2})", line)
-    south_of = re.search(r"S OF N(\d{2})(\d{2})", line)
-
-    if north_of:
-        lat = int(north_of.group(1)) + int(north_of.group(2)) / 60
-        if zmax < lat:
-            return False
-        if zmin < lat < zmax:
-            PARTIAL_CUTS[zone].append(("NORTH", lat))
-        return True
-
-    if south_of:
-        lat = int(south_of.group(1)) + int(south_of.group(2)) / 60
-        if zmin > lat:
-            return False
-        if zmin < lat < zmax:
-            PARTIAL_CUTS[zone].append(("SOUTH", lat))
-        return True
-
-    return True
-
-
-def filter_text_for_zone(text, zone):
-    return " ".join(
-        line for line in text.splitlines()
-        if line_applies_to_zone(line, zone)
-    )
-
-# -------------------------------------------------
-# EXTRAÇÃO DE DETALHES
-# -------------------------------------------------
-def extract_details(text):
-    details = {}
-
-    vis = re.search(r"(\d{4})-(\d{4})M", text)
-    if vis:
-        details["VIS"] = f"{vis.group(1)}–{vis.group(2)} m"
-
-    cld = re.search(r"(BKN|OVC)\s*(\d{3})-(\d{3})", text)
-    if cld:
-        details["CLD"] = f"{cld.group(1)} {cld.group(2)}–{cld.group(3)} ft AGL"
-
-    ice = re.search(r"ICE.*?(ABV FL\d{2,3}|FL\d{2,3})", text)
-    if ice:
-        details["ICE"] = ice.group(1)
-
-    return details
-
-# -------------------------------------------------
-# LÓGICA VFR
-# -------------------------------------------------
-def analyze_zone(text):
-    reasons = []
-    no_go = False
-
-    vis = re.search(r"(\d{4})-(\d{4})M", text)
-    if vis and int(vis.group(1)) < 3000:
-        no_go = True
-        reasons.append("VERY LOW VIS")
-
-    if re.search(r"BKN 0{2,3}", text):
-        no_go = True
-        reasons.append("LOW CEILING")
-
-    if no_go:
-        return "NO-GO", reasons
-
-    return "VFR POSSÍVEL", []
+def analyze(text):
+    if re.search(r"BKN\s*004", text):
+        return "VFR NO-GO", "BKN 400 ft"
+    return "VFR OK", None
 
 # -------------------------------------------------
 # EXECUÇÃO
 # -------------------------------------------------
 if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
-    for z in PARTIAL_CUTS:
-        PARTIAL_CUTS[z].clear()
-
     text = gamet_text.upper()
-    zones = {}
-    details = {}
+    cut = extract_cut(text)
+    status, reason = analyze(text)
 
-    for z in ZONE_BANDS:
-        ztext = filter_text_for_zone(text, z)
-        zones[z] = analyze_zone(ztext)
-        details[z] = extract_details(ztext)
-
-    # -------------------------------------------------
-    # RESULTADOS TEXTO
-    # -------------------------------------------------
-    st.subheader("📋 Resultado VFR por zona")
-
-    for z, (status, reasons) in zones.items():
-        if status == "NO-GO":
-            if PARTIAL_CUTS[z]:
-                cut_dir, lat = PARTIAL_CUTS[z][0]
-                st.error(f"{z}: NO-GO PARCIAL — {', '.join(reasons)}")
-                st.write(f" • NO-GO a {'norte' if cut_dir=='NORTH' else 'sul'} de {lat:.1f}N")
-                for k, v in details[z].items():
-                    st.write(f"    – {k}: {v}")
-                st.write(f" • VFR possível a {'sul' if cut_dir=='NORTH' else 'norte'} de {lat:.1f}N")
-            else:
-                st.error(f"{z}: NO-GO ABSOLUTO — {', '.join(reasons)}")
-                for k, v in details[z].items():
-                    st.write(f" • {k}: {v}")
-        else:
-            st.success(f"{z}: VFR possível")
-
-    # -------------------------------------------------
-    # MAPA ESQUEMÁTICO TOPOGRÁFICO
-    # -------------------------------------------------
     st.subheader("🗺️ Mapa VFR – Portugal Continental (esquemático)")
 
     fig, ax = plt.subplots(figsize=(6, 10))
 
-    ZONE_Y = {
-        "NORTE": (9.0, 14.0),
-        "CENTRO": (4.0, 9.0),
-        "SUL": (-4.5, 4.0)
-    }
+    # -------------------------------------------------
+    # DESENHO DAS ÁREAS
+    # -------------------------------------------------
+    if cut and status == "VFR NO-GO":
+        direction, lat = cut
+        cut_y = lat_to_y(lat)
+        visual_y = cut_y + VISUAL_LINE_OFFSET
 
-    for z, (y0, y1) in ZONE_Y.items():
-        status = zones[z][0]
-        if status == "VFR POSSÍVEL":
-            ax.axhspan(y0, y1, color="green", alpha=0.25)
-        elif PARTIAL_CUTS[z]:
-            mid = (y0 + y1) / 2
-            ax.axhspan(mid, y1, color="red", alpha=0.25)
-            ax.axhspan(y0, mid, color="green", alpha=0.25)
-            ax.axhline(mid, linestyle="--", color="black")
+        if direction == "NORTH":
+            # Norte NO-GO
+            ax.axhspan(cut_y, Y_MAX, color="red", alpha=0.30)
+            ax.text(0.02, (cut_y + Y_MAX) / 2, f"VFR NO-GO\n{reason}", fontsize=9, va="center")
+
+            # Sul OK
+            ax.axhspan(Y_MIN, cut_y, color="green", alpha=0.30)
+            ax.text(0.02, (Y_MIN + cut_y) / 2, "VFR OK", fontsize=9, va="center")
+
         else:
-            ax.axhspan(y0, y1, color="red", alpha=0.25)
+            # Sul NO-GO
+            ax.axhspan(Y_MIN, cut_y, color="red", alpha=0.30)
+            ax.text(0.02, (Y_MIN + cut_y) / 2, f"VFR NO-GO\n{reason}", fontsize=9, va="center")
+
+            # Norte OK
+            ax.axhspan(cut_y, Y_MAX, color="green", alpha=0.30)
+            ax.text(0.02, (cut_y + Y_MAX) / 2, "VFR OK", fontsize=9, va="center")
+
+        # Linha tracejada (offset visual)
+        ax.axhline(visual_y, linestyle="--", color="black")
+        ax.text(0.75, visual_y + 0.1, f"{lat:.1f}N", fontsize=9)
+
+    else:
+        color = "green" if status == "VFR OK" else "red"
+        ax.axhspan(Y_MIN, Y_MAX, color=color, alpha=0.30)
+        label = status if not reason else f"{status}\n{reason}"
+        ax.text(0.02, (Y_MIN + Y_MAX) / 2, label, fontsize=9, va="center")
 
     # -------------------------------------------------
-    # CIDADES — POSIÇÕES DEFINITIVAS
+    # LINHAS DE ZONA (REFERÊNCIA)
+    # -------------------------------------------------
+    for _, (y0, y1) in ZONE_Y.items():
+        ax.axhline(y0, color="red", alpha=0.5)
+
+    # -------------------------------------------------
+    # CIDADES (TOPOLÓGICAS)
     # -------------------------------------------------
     cities = {
-        # NORTE
-        "Bragança":         (0.8, 13.5),
+        "Bragança": (0.8, 13.5),
         "Viana do Castelo": (0.2, 12.6),
-        "Braga":            (0.4, 11.8),
-        "Vila Real":        (0.6, 11.0),
-        "Porto":            (0.3, 10.5),
+        "Braga": (0.4, 11.8),
+        "Vila Real": (0.6, 11.0),
+        "Porto": (0.3, 10.5),
 
-        # CENTRO (hierarquia corrigida)
-        "Viseu":            (0.6, 8.6),
-        "Aveiro":           (0.3, 8.0),
-        "Guarda":           (0.8, 7.4),
-        "Coimbra":          (0.5, 6.6),
-        "Leiria":           (0.3, 5.6),
-        "Castelo Branco":   (0.8, 4.8),
+        "Viseu": (0.6, 8.6),
+        "Aveiro": (0.3, 8.0),
+        "Guarda": (0.8, 7.4),
+        "Coimbra": (0.5, 6.6),
+        "Leiria": (0.3, 5.6),
+        "Castelo Branco": (0.8, 4.8),
 
-        # SUL
-        "Santarém":         (0.4, 3.6),
-        "Portalegre":       (0.8, 2.8),
-        "Lisboa":           (0.3, 2.0),
-        "Setúbal":          (0.3, 1.2),
-        "Évora":            (0.6, 0.2),
-        "Beja":             (0.7, -1.0),
-        "Faro":             (0.7, -2.2),
+        "Santarém": (0.4, 3.6),
+        "Portalegre": (0.8, 2.8),
+        "Lisboa": (0.3, 2.0),
+        "Setúbal": (0.3, 1.2),
+        "Évora": (0.6, 0.2),
+        "Beja": (0.7, -1.0),
+        "Faro": (0.7, -2.2),
     }
 
     for name, (x, y) in cities.items():
@@ -199,7 +149,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         ax.text(x + 0.015, y, name, va="center", fontsize=8)
 
     ax.set_xlim(0, 1)
-    ax.set_ylim(-4.5, 14.0)
+    ax.set_ylim(Y_MIN, Y_MAX)
     ax.set_xticks([])
     ax.set_yticks([])
     ax.set_title("Mapa esquemático de orientação (topológico)")
