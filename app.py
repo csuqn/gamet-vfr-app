@@ -3,7 +3,7 @@ import re
 import matplotlib.pyplot as plt
 
 # -------------------------------------------------
-# CONFIGURAÇÃO
+# CONFIGURAÇÃO STREAMLIT
 # -------------------------------------------------
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="centered")
 st.title("✈️ LPPC GAMET – Análise VFR")
@@ -15,6 +15,8 @@ gamet_text = st.text_area(
     "Cole aqui o texto completo do GAMET (LPPC)",
     height=330
 )
+
+show_reasons = st.checkbox("Mostrar motivos no mapa", value=True)
 
 # -------------------------------------------------
 # ZONAS (LATITUDES APROXIMADAS)
@@ -61,46 +63,45 @@ def filter_text_for_zone(text, zone):
         if line_applies_to_zone(line, zone)
     )
 
-# -------------------------------------------------
-# EXTRAÇÃO DE DETALHES
-# -------------------------------------------------
-def extract_details(text):
-    details = {}
 
-    vis = re.search(r"(\d{4})-(\d{4})M", text)
-    if vis:
-        details["VIS"] = f"{vis.group(1)}–{vis.group(2)} m"
-
-    cld = re.search(r"(BKN|OVC)\s*(\d{3})-(\d{3})", text)
-    if cld:
-        details["CLD"] = f"{cld.group(1)} {cld.group(2)}–{cld.group(3)} ft AGL"
-
-    ice = re.search(r"ICE.*?(ABV FL\d{2,3}|FL\d{2,3})", text)
-    if ice:
-        details["ICE"] = ice.group(1)
-
-    return details
+def lat_to_y(lat):
+    # 36.5N → -4.5 | 42.5N → 14.0
+    return -4.5 + (lat - 36.5) * (18.5 / 6.0)
 
 # -------------------------------------------------
 # LÓGICA VFR
 # -------------------------------------------------
 def analyze_zone(text):
     reasons = []
-    no_go = False
+    status = "VFR OK"
 
-    vis = re.search(r"(\d{4})-(\d{4})M", text)
-    if vis and int(vis.group(1)) < 3000:
-        no_go = True
-        reasons.append("VERY LOW VIS")
+    # -----------------------------
+    # VISIBILIDADE
+    # -----------------------------
+    vis_matches = re.findall(r"(\d{4})M", text)
+    if vis_matches:
+        min_vis = min(int(v) for v in vis_matches)
 
-    if re.search(r"BKN 0{2,3}", text):
-        no_go = True
-        reasons.append("LOW CEILING")
+        if min_vis < 3000:
+            return "VFR NO-GO", [f"VIS {min_vis} m"]
+        elif min_vis < 5000:
+            status = "VFR MARGINAL"
+            reasons.append(f"VIS {min_vis} m")
 
-    if no_go:
-        return "NO-GO", reasons
+    # -----------------------------
+    # CEILING
+    # -----------------------------
+    cld = re.search(r"(BKN|OVC)[ /]*(\d{3})", text)
+    if cld:
+        base_ft = int(cld.group(2)) * 100
 
-    return "VFR POSSÍVEL", []
+        if base_ft < 500:
+            return "VFR NO-GO", [f"{cld.group(1)} {base_ft} ft"]
+        elif base_ft < 1500:
+            status = "VFR MARGINAL"
+            reasons.append(f"{cld.group(1)} {base_ft} ft")
+
+    return status, reasons
 
 # -------------------------------------------------
 # EXECUÇÃO
@@ -112,12 +113,10 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     text = gamet_text.upper()
     zones = {}
-    details = {}
 
     for z in ZONE_BANDS:
         ztext = filter_text_for_zone(text, z)
         zones[z] = analyze_zone(ztext)
-        details[z] = extract_details(ztext)
 
     # -------------------------------------------------
     # RESULTADOS TEXTO
@@ -125,23 +124,27 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     st.subheader("📋 Resultado VFR por zona")
 
     for z, (status, reasons) in zones.items():
-        if status == "NO-GO":
+        if status == "VFR NO-GO":
             if PARTIAL_CUTS[z]:
                 cut_dir, lat = PARTIAL_CUTS[z][0]
-                st.error(f"{z}: NO-GO PARCIAL — {', '.join(reasons)}")
+                st.error(f"{z}: {status}")
                 st.write(f" • NO-GO a {'norte' if cut_dir=='NORTH' else 'sul'} de {lat:.1f}N")
-                for k, v in details[z].items():
-                    st.write(f"    – {k}: {v}")
+                for r in reasons:
+                    st.write(f"   – {r}")
                 st.write(f" • VFR possível a {'sul' if cut_dir=='NORTH' else 'norte'} de {lat:.1f}N")
             else:
-                st.error(f"{z}: NO-GO ABSOLUTO — {', '.join(reasons)}")
-                for k, v in details[z].items():
-                    st.write(f" • {k}: {v}")
+                st.error(f"{z}: {status}")
+                for r in reasons:
+                    st.write(f" • {r}")
+        elif status == "VFR MARGINAL":
+            st.warning(f"{z}: {status}")
+            for r in reasons:
+                st.write(f" • {r}")
         else:
-            st.success(f"{z}: VFR possível")
+            st.success(f"{z}: {status}")
 
     # -------------------------------------------------
-    # MAPA ESQUEMÁTICO TOPOGRÁFICO
+    # MAPA ESQUEMÁTICO
     # -------------------------------------------------
     st.subheader("🗺️ Mapa VFR – Portugal Continental (esquemático)")
 
@@ -154,44 +157,63 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     }
 
     for z, (y0, y1) in ZONE_Y.items():
-        status = zones[z][0]
-        if status == "VFR POSSÍVEL":
-            ax.axhspan(y0, y1, color="green", alpha=0.25)
-        elif PARTIAL_CUTS[z]:
-            mid = (y0 + y1) / 2
-            ax.axhspan(mid, y1, color="red", alpha=0.25)
-            ax.axhspan(y0, mid, color="green", alpha=0.25)
-            ax.axhline(mid, linestyle="--", color="black")
+        status, reasons = zones[z]
+
+        if PARTIAL_CUTS[z]:
+            cut_dir, lat = PARTIAL_CUTS[z][0]
+            cut_y = lat_to_y(lat)
+
+            if cut_dir == "NORTH":
+                ax.axhspan(cut_y, y1, color="red", alpha=0.25)
+                ax.axhspan(y0, cut_y, color="green", alpha=0.25)
+            else:
+                ax.axhspan(y0, cut_y, color="red", alpha=0.25)
+                ax.axhspan(cut_y, y1, color="green", alpha=0.25)
+
+            ax.axhline(cut_y, linestyle="--", color="black")
+
         else:
-            ax.axhspan(y0, y1, color="red", alpha=0.25)
+            if status == "VFR OK":
+                ax.axhspan(y0, y1, color="green", alpha=0.25)
+            elif status == "VFR MARGINAL":
+                ax.axhspan(y0, y1, color="yellow", alpha=0.35)
+            else:
+                ax.axhspan(y0, y1, color="red", alpha=0.25)
+
+        if show_reasons:
+            label = status if not reasons else status + "\n" + "\n".join(reasons)
+            ax.text(
+                0.02,
+                (y0 + y1) / 2,
+                label,
+                fontsize=8,
+                va="center"
+            )
 
     # -------------------------------------------------
-    # CIDADES — POSIÇÕES DEFINITIVAS
+    # CIDADES
     # -------------------------------------------------
     cities = {
-        # NORTE
-        "Bragança":         (0.8, 13.5),
+        "Bragança": (0.8, 13.5),
         "Viana do Castelo": (0.2, 12.6),
-        "Braga":            (0.4, 11.8),
-        "Vila Real":        (0.6, 11.0),
-        "Porto":            (0.3, 10.5),
+        "Braga": (0.4, 11.8),
+        "Vila Real": (0.6, 11.0),
+        "Porto": (0.3, 10.5),
 
-        # CENTRO (hierarquia corrigida)
-        "Viseu":            (0.6, 8.6),
-        "Aveiro":           (0.3, 8.0),
-        "Guarda":           (0.8, 7.4),
-        "Coimbra":          (0.5, 6.6),
-        "Leiria":           (0.3, 5.6),
-        "Castelo Branco":   (0.8, 4.8),
+        "Viseu": (0.6, 8.6),
+        "Aveiro": (0.3, 8.0),
+        "Guarda": (0.8, 7.4),
+        "Coimbra": (0.5, 6.6),
+        "Leiria": (0.3, 5.6),
+        "Castelo Branco": (0.8, 4.8),
 
-        # SUL
-        "Santarém":         (0.4, 3.6),
-        "Portalegre":       (0.8, 2.8),
-        "Lisboa":           (0.3, 2.0),
-        "Setúbal":          (0.3, 1.2),
-        "Évora":            (0.6, 0.2),
-        "Beja":             (0.7, -1.0),
-        "Faro":             (0.7, -2.2),
+        "Santarém": (0.4, 3.6),
+        "Portalegre": (0.8, 2.8),
+        "Lisboa": (0.3, 2.0),
+        "Setúbal": (0.3, 1.2),
+        "Évora": (0.6, 0.2),
+        "Beja": (0.7, -1.0),
+        "Faro": (0.7, -2.2),
     }
 
     for name, (x, y) in cities.items():
@@ -207,3 +229,4 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     st.pyplot(fig)
 
     st.caption("Ferramenta de apoio à decisão. Não substitui o julgamento do piloto.")
+
