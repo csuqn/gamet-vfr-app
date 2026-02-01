@@ -72,8 +72,15 @@ def lat_to_y(lat):
 # LÓGICA VFR
 # -------------------------------------------------
 def analyze_zone(text):
+    """
+    Retorna:
+    status   -> 'VFR OK' | 'VFR MARGINAL' | 'VFR NO-GO'
+    reasons  -> lista de strings
+    blocking -> True se NO-GO absoluto/parcial
+    """
     reasons = []
     status = "VFR OK"
+    blocking = False
 
     # -----------------------------
     # VISIBILIDADE
@@ -83,7 +90,7 @@ def analyze_zone(text):
         min_vis = min(int(v) for v in vis_matches)
 
         if min_vis < 3000:
-            return "VFR NO-GO", [f"VIS {min_vis} m"]
+            return "VFR NO-GO", [f"VIS {min_vis} m"], True
         elif min_vis < 5000:
             status = "VFR MARGINAL"
             reasons.append(f"VIS {min_vis} m")
@@ -96,12 +103,12 @@ def analyze_zone(text):
         base_ft = int(cld.group(2)) * 100
 
         if base_ft < 500:
-            return "VFR NO-GO", [f"{cld.group(1)} {base_ft} ft"]
+            return "VFR NO-GO", [f"{cld.group(1)} {base_ft} ft"], True
         elif base_ft < 1500:
             status = "VFR MARGINAL"
             reasons.append(f"{cld.group(1)} {base_ft} ft")
 
-    return status, reasons
+    return status, reasons, blocking
 
 # -------------------------------------------------
 # EXECUÇÃO
@@ -123,9 +130,9 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     # -------------------------------------------------
     st.subheader("📋 Resultado VFR por zona")
 
-    for z, (status, reasons) in zones.items():
+    for z, (status, reasons, blocking) in zones.items():
         if status == "VFR NO-GO":
-            if PARTIAL_CUTS[z]:
+            if blocking and PARTIAL_CUTS[z]:
                 cut_dir, lat = PARTIAL_CUTS[z][0]
                 st.error(f"{z}: {status}")
                 st.write(f" • NO-GO a {'norte' if cut_dir=='NORTH' else 'sul'} de {lat:.1f}N")
@@ -136,10 +143,12 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
                 st.error(f"{z}: {status}")
                 for r in reasons:
                     st.write(f" • {r}")
+
         elif status == "VFR MARGINAL":
             st.warning(f"{z}: {status}")
             for r in reasons:
                 st.write(f" • {r}")
+
         else:
             st.success(f"{z}: {status}")
 
@@ -157,9 +166,10 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     }
 
     for z, (y0, y1) in ZONE_Y.items():
-        status, reasons = zones[z]
+        status, reasons, blocking = zones[z]
 
-        if PARTIAL_CUTS[z]:
+        # --- NO-GO PARCIAL COM CORTE ---
+        if status == "VFR NO-GO" and blocking and PARTIAL_CUTS[z]:
             cut_dir, lat = PARTIAL_CUTS[z][0]
             cut_y = lat_to_y(lat)
 
@@ -172,6 +182,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
             ax.axhline(cut_y, linestyle="--", color="black")
 
+        # --- SEM CORTE ---
         else:
             if status == "VFR OK":
                 ax.axhspan(y0, y1, color="green", alpha=0.25)
@@ -229,4 +240,5 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     st.pyplot(fig)
 
     st.caption("Ferramenta de apoio à decisão. Não substitui o julgamento do piloto.")
+
 
