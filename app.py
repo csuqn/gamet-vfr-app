@@ -166,28 +166,31 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         else:
             ax.axhspan(y0, y1, color="red", alpha=0.25)
 
-    # Cidades (posições FIXAS)
+    # Cidades (posições FIXAS) — VILA REAL CORRIGIDO
     cities = {
-        "Bragança":        (0.8, 13),
-        "Viana do Castelo":(0.2, 12),
-        "Braga":           (0.4, 11),
-        "Porto":           (0.3, 10),
-        "Vila Real":       (0.6, 9),
+        # NORTE
+        "Bragança":         (0.8, 13),
+        "Viana do Castelo": (0.2, 12),
+        "Braga":            (0.4, 11),
+        "Vila Real":        (0.6, 10.5),  # <-- corrigido
+        "Porto":            (0.3, 10),
 
-        "Viseu":           (0.6, 8),
-        "Guarda":          (0.8, 7),
-        "Coimbra":         (0.5, 6),
-        "Aveiro":          (0.3, 5),
-        "Leiria":          (0.3, 4),
-        "Castelo Branco":  (0.8, 3),
+        # CENTRO
+        "Viseu":            (0.6, 8),
+        "Guarda":           (0.8, 7),
+        "Coimbra":          (0.5, 6),
+        "Aveiro":           (0.3, 5),
+        "Leiria":           (0.3, 4),
+        "Castelo Branco":   (0.8, 3),
 
-        "Santarém":        (0.4, 2),
-        "Portalegre":      (0.8, 1),
-        "Lisboa":          (0.3, 0),
-        "Setúbal":         (0.3, -1),
-        "Évora":           (0.6, -2),
-        "Beja":            (0.7, -3),
-        "Faro":            (0.7, -4),
+        # SUL
+        "Santarém":         (0.4, 2),
+        "Portalegre":       (0.8, 1),
+        "Lisboa":           (0.3, 0),
+        "Setúbal":          (0.3, -1),
+        "Évora":            (0.6, -2),
+        "Beja":             (0.7, -3),
+        "Faro":             (0.7, -4),
     }
 
     for name, (x, y) in cities.items():
@@ -203,7 +206,3 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     st.pyplot(fig)
 
     st.caption("Ferramenta de apoio à decisão. Não substitui o julgamento do piloto.")
-
-
-
-
