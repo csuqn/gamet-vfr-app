@@ -17,7 +17,7 @@ gamet_text = st.text_area(
 )
 
 # -------------------------------------------------
-# ZONAS (FAIXAS REAIS DE LATITUDE)
+# ZONAS (LATITUDES APROXIMADAS)
 # -------------------------------------------------
 ZONE_BANDS = {
     "NORTE": (39.5, 42.5),
@@ -53,6 +53,7 @@ def line_applies_to_zone(line, zone):
         return True
 
     return True
+
 
 def filter_text_for_zone(text, zone):
     return " ".join(
@@ -118,9 +119,9 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         zones[z] = analyze_zone(ztext)
         details[z] = extract_details(ztext)
 
-    # -------------------------------
+    # -------------------------------------------------
     # RESULTADOS TEXTO
-    # -------------------------------
+    # -------------------------------------------------
     st.subheader("📋 Resultado VFR por zona")
 
     for z, (status, reasons) in zones.items():
@@ -140,22 +141,20 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
             st.success(f"{z}: VFR possível")
 
     # -------------------------------------------------
-    # MAPA ESQUEMÁTICO TOPOGRÁFICO COM CIDADES
+    # MAPA ESQUEMÁTICO TOPOGRÁFICO
     # -------------------------------------------------
     st.subheader("🗺️ Mapa VFR – Portugal Continental (esquemático)")
 
     fig, ax = plt.subplots(figsize=(6, 10))
 
-    # Zonas para fundo
     ZONE_Y = {
-        "NORTE": (8.5, 13.5),
-        "CENTRO": (3.5, 8.5),
-        "SUL": (-4.5, 3.5)
+        "NORTE": (9.0, 14.0),
+        "CENTRO": (4.0, 9.0),
+        "SUL": (-4.5, 4.0)
     }
 
     for z, (y0, y1) in ZONE_Y.items():
         status = zones[z][0]
-
         if status == "VFR POSSÍVEL":
             ax.axhspan(y0, y1, color="green", alpha=0.25)
         elif PARTIAL_CUTS[z]:
@@ -166,31 +165,33 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         else:
             ax.axhspan(y0, y1, color="red", alpha=0.25)
 
-    # Cidades (posições FIXAS) — VILA REAL CORRIGIDO
+    # -------------------------------------------------
+    # CIDADES — POSIÇÕES DEFINITIVAS
+    # -------------------------------------------------
     cities = {
         # NORTE
-        "Bragança":         (0.8, 13),
-        "Viana do Castelo": (0.2, 12),
-        "Braga":            (0.4, 11),
-        "Vila Real":        (0.6, 10.5),  # <-- corrigido
-        "Porto":            (0.3, 10),
+        "Bragança":         (0.8, 13.5),
+        "Viana do Castelo": (0.2, 12.6),
+        "Braga":            (0.4, 11.8),
+        "Vila Real":        (0.6, 11.0),
+        "Porto":            (0.3, 10.5),
 
-        # CENTRO
-        "Viseu":            (0.6, 8),
-        "Guarda":           (0.8, 7),
-        "Coimbra":          (0.5, 6),
-        "Aveiro":           (0.3, 5),
-        "Leiria":           (0.3, 4),
-        "Castelo Branco":   (0.8, 3),
+        # CENTRO (hierarquia corrigida)
+        "Viseu":            (0.6, 8.6),
+        "Aveiro":           (0.3, 8.0),
+        "Guarda":           (0.8, 7.4),
+        "Coimbra":          (0.5, 6.6),
+        "Leiria":           (0.3, 5.6),
+        "Castelo Branco":   (0.8, 4.8),
 
         # SUL
-        "Santarém":         (0.4, 2),
-        "Portalegre":       (0.8, 1),
-        "Lisboa":           (0.3, 0),
-        "Setúbal":          (0.3, -1),
-        "Évora":            (0.6, -2),
-        "Beja":             (0.7, -3),
-        "Faro":             (0.7, -4),
+        "Santarém":         (0.4, 3.6),
+        "Portalegre":       (0.8, 2.8),
+        "Lisboa":           (0.3, 2.0),
+        "Setúbal":          (0.3, 1.2),
+        "Évora":            (0.6, 0.2),
+        "Beja":             (0.7, -1.0),
+        "Faro":             (0.7, -2.2),
     }
 
     for name, (x, y) in cities.items():
@@ -198,7 +199,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         ax.text(x + 0.015, y, name, va="center", fontsize=8)
 
     ax.set_xlim(0, 1)
-    ax.set_ylim(-4.5, 13.5)
+    ax.set_ylim(-4.5, 14.0)
     ax.set_xticks([])
     ax.set_yticks([])
     ax.set_title("Mapa esquemático de orientação (topológico)")
