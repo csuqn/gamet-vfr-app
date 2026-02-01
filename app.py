@@ -4,28 +4,22 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 
 # -------------------------------------------------
-# CONFIGURAÇÃO BASE
+# CONFIG
 # -------------------------------------------------
-st.set_page_config(page_title="LPPC GAMET – VFR Analysis", layout="centered")
+st.set_page_config(page_title="LPPC GAMET – VFR", layout="centered")
 
-LANG = st.radio("Language / Idioma", ["PT", "EN"], horizontal=True)
-
-def t(pt, en):
-    return pt if LANG == "PT" else en
-
-st.title(t("✈️ LPPC GAMET – Análise VFR", "✈️ LPPC GAMET – VFR Analysis"))
+st.title("✈️ LPPC GAMET – Análise VFR")
 
 # -------------------------------------------------
 # INPUT
 # -------------------------------------------------
 gamet_text = st.text_area(
-    t("Cole aqui o texto completo do GAMET (LPPC)",
-      "Paste the full GAMET text here (LPPC)"),
+    "Cole aqui o texto completo do GAMET (LPPC)",
     height=330
 )
 
 # -------------------------------------------------
-# DEFINIÇÃO DAS ZONAS (FAIXAS DE LATITUDE)
+# ZONAS (FAIXAS DE LATITUDE)
 # -------------------------------------------------
 ZONE_BANDS = {
     "NORTE": (39.5, 42.5),
@@ -33,144 +27,87 @@ ZONE_BANDS = {
     "SUL": (36.5, 38.5)
 }
 
-# -------------------------------------------------
-# REGISTO DE CORTES PARCIAIS (reset por análise)
-# -------------------------------------------------
-PARTIAL_CUTS = {
-    "NORTE": [],
-    "CENTRO": [],
-    "SUL": []
-}
+PARTIAL_CUTS = {z: [] for z in ZONE_BANDS}
 
 # -------------------------------------------------
-# FUNÇÕES AUXILIARES
+# FUNÇÕES ESPACIAIS
 # -------------------------------------------------
-def extract_latitudes(text):
-    lats = re.findall(r'N(\d{2})(\d{2})', text)
-    return sorted({int(d) + int(m)/60 for d, m in lats}, reverse=True)
-
 def line_applies_to_zone(line, zone):
     zmin, zmax = ZONE_BANDS[zone]
 
-    north_of = re.search(r'N OF N(\d{2})(\d{2})', line)
-    south_of = re.search(r'S OF N(\d{2})(\d{2})', line)
+    north_of = re.search(r"N OF N(\d{2})(\d{2})", line)
+    south_of = re.search(r"S OF N(\d{2})(\d{2})", line)
 
     if north_of:
         lat = int(north_of.group(1)) + int(north_of.group(2)) / 60
-
         if zmax < lat:
             return False
-
         if zmin < lat < zmax:
             PARTIAL_CUTS[zone].append(("NORTH", lat))
-
         return True
 
     if south_of:
         lat = int(south_of.group(1)) + int(south_of.group(2)) / 60
-
         if zmin > lat:
             return False
-
         if zmin < lat < zmax:
             PARTIAL_CUTS[zone].append(("SOUTH", lat))
-
         return True
 
     return True
 
 def filter_text_for_zone(text, zone):
-    relevant = []
-    for line in text.splitlines():
-        if line_applies_to_zone(line, zone):
-            relevant.append(line)
-    return " ".join(relevant)
+    return " ".join(
+        line for line in text.splitlines()
+        if line_applies_to_zone(line, zone)
+    )
 
 # -------------------------------------------------
-# EXTRAÇÃO DE DETALHES (INFORMATIVO)
+# EXTRAÇÃO DE DETALHES
 # -------------------------------------------------
 def extract_details(text):
     details = {}
 
-    vr = re.search(r'(\d{4})-(\d{4})M', text)
-    if vr:
-        details["VIS"] = f"{vr.group(1)}–{vr.group(2)} m"
-    else:
-        vs = re.search(r'VIS.*?(\d{4})M', text)
-        if vs:
-            details["VIS"] = f"{vs.group(1)} m"
+    vis = re.search(r"(\d{4})-(\d{4})M", text)
+    if vis:
+        details["VIS"] = f"{vis.group(1)}–{vis.group(2)} m"
 
-    cld = re.search(r'(SCT|BKN|OVC)\s*(\d{3})-(\d{3})', text)
+    cld = re.search(r"(BKN|OVC)\s*(\d{3})-(\d{3})", text)
     if cld:
         details["CLD"] = f"{cld.group(1)} {cld.group(2)}–{cld.group(3)} ft AGL"
 
-    ice = re.search(r'ICE.*?(FL\d{2,3}(?:/FL\d{2,3})?|ABV FL\d{2,3})', text)
+    ice = re.search(r"ICE.*?(ABV FL\d{2,3}|FL\d{2,3})", text)
     if ice:
         details["ICE"] = ice.group(1)
 
     return details
 
 # -------------------------------------------------
-# LÓGICA METEO (PRIORIDADE + WORST CASE)
+# LÓGICA VFR
 # -------------------------------------------------
 def analyze_zone(text):
-    no_go_abs = []
-    no_go_cond = []
-    marginal = []
+    reasons = []
+    no_go = False
 
-    # VIS
-    vr = re.search(r'(\d{4})-(\d{4})M', text)
-    if vr:
-        vis_min = int(vr.group(1))
-    else:
-        vs = re.search(r'VIS.*?(\d{4})M', text)
-        vis_min = int(vs.group(1)) if vs else None
+    vis = re.search(r"(\d{4})-(\d{4})M", text)
+    if vis and int(vis.group(1)) < 3000:
+        no_go = True
+        reasons.append("VERY LOW VIS")
 
-    if vis_min is not None:
-        if vis_min < 3000:
-            no_go_abs.append("VERY LOW VIS")
-        elif vis_min <= 5000:
-            marginal.append("REDUCED VIS")
+    if re.search(r"BKN 0{2,3}", text):
+        no_go = True
+        reasons.append("LOW CEILING")
 
-    # TETO
-    if re.search(r'BKN 0{2,3}', text) or "OVC" in text:
-        no_go_abs.append("LOW CEILING")
+    if no_go:
+        return "NO-GO", reasons
 
-    # ICE
-    ice = re.search(r'ICE.*FL(\d{2,3})', text)
-    if ice:
-        fl = int(ice.group(1))
-        if fl <= 60:
-            no_go_cond.append("ICE (LOW LEVEL)")
-        else:
-            marginal.append("ICE ALOFT")
-
-    # CB / TCU
-    if "CB" in text or "TCU" in text:
-        if "ISOL" in text:
-            marginal.append("ISOL CB/TCU")
-        else:
-            no_go_cond.append("CB/TCU")
-
-    # MT OBSC
-    if "MT OBSC" in text:
-        no_go_abs.append("MT OBSC")
-
-    # DECISÃO FINAL
-    if no_go_abs:
-        return "NO-GO ABSOLUTO", no_go_abs + no_go_cond
-    if no_go_cond:
-        return "NO-GO (CONDICIONADO)", no_go_cond
-    if marginal:
-        return "MARGINAL", marginal
-    return "POSSIBLE", []
+    return "VFR POSSÍVEL", []
 
 # -------------------------------------------------
 # EXECUÇÃO
 # -------------------------------------------------
-if st.button(t("🔍 Analisar GAMET", "🔍 Analyze GAMET")) and gamet_text.strip():
+if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
-    # reset cortes
     for z in PARTIAL_CUTS:
         PARTIAL_CUTS[z].clear()
 
@@ -178,41 +115,61 @@ if st.button(t("🔍 Analisar GAMET", "🔍 Analyze GAMET")) and gamet_text.stri
     zones = {}
     details = {}
 
-    for z in ["NORTE", "CENTRO", "SUL"]:
+    for z in ZONE_BANDS:
         ztext = filter_text_for_zone(text, z)
         zones[z] = analyze_zone(ztext)
         details[z] = extract_details(ztext)
 
-    st.subheader(t("📋 Resultado VFR por zona", "📋 VFR result by zone"))
+    st.subheader("📋 Resultado VFR por zona")
 
     for z, (status, reasons) in zones.items():
-        if status.startswith("NO-GO"):
+        if status == "NO-GO":
             if PARTIAL_CUTS[z]:
                 cut_dir, lat = PARTIAL_CUTS[z][0]
-                lat_txt = f"{lat:.1f}N"
-
                 st.error(f"{z}: NO-GO PARCIAL — {', '.join(reasons)}")
-                if cut_dir == "NORTH":
-                    st.write(f" • NO-GO a norte de {lat_txt}")
-                    st.write(f" • VFR possível a sul de {lat_txt}")
-                else:
-                    st.write(f" • NO-GO a sul de {lat_txt}")
-                    st.write(f" • VFR possível a norte de {lat_txt}")
+                st.write(f" • NO-GO a {'norte' if cut_dir=='NORTH' else 'sul'} de {lat:.1f}N")
+                for k, v in details[z].items():
+                    st.write(f"    – {k}: {v}")
+                st.write(f" • VFR possível a {'sul' if cut_dir=='NORTH' else 'norte'} de {lat:.1f}N")
             else:
-                st.error(f"{z}: {status} — {', '.join(reasons)}")
-
-        elif status == "MARGINAL":
-            st.warning(f"{z}: VFR marginal — {', '.join(reasons)}")
-
+                st.error(f"{z}: NO-GO ABSOLUTO — {', '.join(reasons)}")
+                for k, v in details[z].items():
+                    st.write(f" • {k}: {v}")
         else:
             st.success(f"{z}: VFR possível")
 
-       # Mostrar detalhes apenas se NÃO for NO-GO PARCIAL
-if not (status.startswith("NO-GO") and PARTIAL_CUTS[z]):
-    for k, v in details[z].items():
-        st.write(f"   • {k}: {v}")
+    # -------------------------------------------------
+    # MAPA
+    # -------------------------------------------------
+    st.subheader("🗺️ Mapa VFR – LPPC")
 
-    st.caption(t(
-        "Ferramenta de apoio à decisão. Não substitui o julgamento do piloto.",
-        "Decision-support tool. Does not replace pilot judgment."
-    ))
+    fig, ax = plt.subplots(figsize=(5, 8))
+
+    for z, (y0, y1) in ZONE_BANDS.items():
+        status = zones[z][0]
+
+        if status == "VFR POSSÍVEL":
+            ax.axhspan(y0, y1, color="green", alpha=0.35)
+        elif PARTIAL_CUTS[z]:
+            cut_dir, lat = PARTIAL_CUTS[z][0]
+            if cut_dir == "NORTH":
+                ax.axhspan(lat, y1, color="red", alpha=0.35)
+                ax.axhspan(y0, lat, color="green", alpha=0.35)
+            else:
+                ax.axhspan(y0, lat, color="red", alpha=0.35)
+                ax.axhspan(lat, y1, color="green", alpha=0.35)
+            ax.axhline(lat, linestyle="--", color="black")
+        else:
+            ax.axhspan(y0, y1, color="red", alpha=0.35)
+
+    ax.set_xlim(-10, -6)
+    ax.set_ylim(36.5, 42.5)
+    ax.set_xticks([])
+    ax.set_yticks([])
+
+    ax.set_title("VFR por zonas – Portugal Continental")
+
+    st.pyplot(fig)
+
+    st.caption("Ferramenta de apoio à decisão. Não substitui o julgamento do piloto.")
+
