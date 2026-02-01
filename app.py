@@ -16,8 +16,6 @@ gamet_text = st.text_area(
     height=330
 )
 
-show_reasons = st.checkbox("Mostrar motivos no mapa", value=True)
-
 # -------------------------------------------------
 # GEOMETRIA BASE
 # -------------------------------------------------
@@ -28,15 +26,6 @@ Y_MAX = 14.0
 
 def lat_to_y(lat):
     return Y_MIN + (lat - LAT_MIN) * (Y_MAX - Y_MIN) / (LAT_MAX - LAT_MIN)
-
-# -------------------------------------------------
-# ZONAS (APENAS VISUAIS)
-# -------------------------------------------------
-ZONE_Y = {
-    "NORTE": (9.0, 14.0),
-    "CENTRO": (4.0, 9.0),
-    "SUL": (-4.5, 4.0)
-}
 
 # -------------------------------------------------
 # EXTRAÇÃO DO CORTE GLOBAL
@@ -53,12 +42,12 @@ def extract_cut(text):
     return None
 
 # -------------------------------------------------
-# LÓGICA VFR GLOBAL (SIMPLIFICADA)
+# AVALIAÇÃO GLOBAL (SIMPLIFICADA)
 # -------------------------------------------------
-def analyze_global(text):
+def analyze(text):
     if re.search(r"BKN\s*004", text):
-        return "VFR NO-GO", ["BKN 400 ft"]
-    return "VFR OK", []
+        return "VFR NO-GO", "BKN 400 ft"
+    return "VFR OK", None
 
 # -------------------------------------------------
 # EXECUÇÃO
@@ -67,7 +56,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     text = gamet_text.upper()
     cut = extract_cut(text)
-    status, reasons = analyze_global(text)
+    status, reason = analyze(text)
 
     # -------------------------------------------------
     # MAPA
@@ -76,33 +65,38 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     fig, ax = plt.subplots(figsize=(6, 10))
 
-    # Fundo base (NO-GO)
-    ax.axhspan(Y_MIN, Y_MAX, color="red", alpha=0.25)
-
-    # Corte global
+    # CASO COM CORTE
     if cut and status == "VFR NO-GO":
         direction, lat = cut
         cut_y = lat_to_y(lat)
 
         if direction == "NORTH":
-            # SUL é OK
-            ax.axhspan(Y_MIN, cut_y, color="green", alpha=0.25)
+            # Norte NO-GO
+            ax.axhspan(cut_y, Y_MAX, color="red", alpha=0.30)
+            ax.text(0.02, (cut_y + Y_MAX) / 2, f"VFR NO-GO\n{reason}", fontsize=9, va="center")
+
+            # Sul OK
+            ax.axhspan(Y_MIN, cut_y, color="green", alpha=0.30)
+            ax.text(0.02, (Y_MIN + cut_y) / 2, "VFR OK", fontsize=9, va="center")
+
         else:
-            # NORTE é OK
-            ax.axhspan(cut_y, Y_MAX, color="green", alpha=0.25)
+            # Sul NO-GO
+            ax.axhspan(Y_MIN, cut_y, color="red", alpha=0.30)
+            ax.text(0.02, (Y_MIN + cut_y) / 2, f"VFR NO-GO\n{reason}", fontsize=9, va="center")
+
+            # Norte OK
+            ax.axhspan(cut_y, Y_MAX, color="green", alpha=0.30)
+            ax.text(0.02, (cut_y + Y_MAX) / 2, "VFR OK", fontsize=9, va="center")
 
         ax.axhline(cut_y, linestyle="--", color="black")
         ax.text(0.75, cut_y + 0.1, f"{lat:.1f}N", fontsize=9)
 
-    # Rótulos das zonas
-    for z, (y0, y1) in ZONE_Y.items():
-        ax.text(
-            0.02,
-            (y0 + y1) / 2,
-            status if not reasons else status + "\n" + "\n".join(reasons),
-            fontsize=8,
-            va="center"
-        )
+    # CASO SEM CORTE
+    else:
+        color = "green" if status == "VFR OK" else "red"
+        ax.axhspan(Y_MIN, Y_MAX, color=color, alpha=0.30)
+        label = status if not reason else f"{status}\n{reason}"
+        ax.text(0.02, (Y_MIN + Y_MAX) / 2, label, fontsize=9, va="center")
 
     # -------------------------------------------------
     # CIDADES
