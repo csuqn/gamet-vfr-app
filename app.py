@@ -34,6 +34,15 @@ ZONE_BANDS = {
 }
 
 # -------------------------------------------------
+# REGISTO DE CORTES PARCIAIS (reset por análise)
+# -------------------------------------------------
+PARTIAL_CUTS = {
+    "NORTE": [],
+    "CENTRO": [],
+    "SUL": []
+}
+
+# -------------------------------------------------
 # FUNÇÕES AUXILIARES
 # -------------------------------------------------
 def extract_latitudes(text):
@@ -43,24 +52,32 @@ def extract_latitudes(text):
 def line_applies_to_zone(line, zone):
     zmin, zmax = ZONE_BANDS[zone]
 
-    # Caso especial: fenómenos MAR/COT limitados ao Norte/Centro
-    if ("MAR" in line or "COT" in line) and "N OF N38" in line:
-        if zone == "SUL":
-            return False
-
     north_of = re.search(r'N OF N(\d{2})(\d{2})', line)
     south_of = re.search(r'S OF N(\d{2})(\d{2})', line)
 
     if north_of:
         lat = int(north_of.group(1)) + int(north_of.group(2)) / 60
-        return zmax >= lat
+
+        if zmax < lat:
+            return False
+
+        if zmin < lat < zmax:
+            PARTIAL_CUTS[zone].append(("NORTH", lat))
+
+        return True
 
     if south_of:
         lat = int(south_of.group(1)) + int(south_of.group(2)) / 60
-        return zmin <= lat
+
+        if zmin > lat:
+            return False
+
+        if zmin < lat < zmax:
+            PARTIAL_CUTS[zone].append(("SOUTH", lat))
+
+        return True
 
     return True
-
 
 def filter_text_for_zone(text, zone):
     relevant = []
@@ -149,29 +166,13 @@ def analyze_zone(text):
     return "POSSIBLE", []
 
 # -------------------------------------------------
-# TEXTO FINAL
-# -------------------------------------------------
-def exam_sentence(zone, status):
-    zl = zone.lower()
-    if status.startswith("NO-GO"):
-        return t(
-            f"O GAMET indica condições incompatíveis com voo VFR no {zl}.",
-            f"The GAMET indicates conditions incompatible with VFR flight in the {zl}."
-        )
-    if status == "MARGINAL":
-        return t(
-            f"O {zl} apresenta condições marginais para voo VFR.",
-            f"The {zl} presents marginal conditions for VFR flight."
-        )
-    return t(
-        f"O GAMET indica condições mais favoráveis ao VFR no {zl}.",
-        f"The GAMET indicates more favorable VFR conditions in the {zl}."
-    )
-
-# -------------------------------------------------
 # EXECUÇÃO
 # -------------------------------------------------
 if st.button(t("🔍 Analisar GAMET", "🔍 Analyze GAMET")) and gamet_text.strip():
+
+    # reset cortes
+    for z in PARTIAL_CUTS:
+        PARTIAL_CUTS[z].clear()
 
     text = gamet_text.upper()
     zones = {}
@@ -186,18 +187,28 @@ if st.button(t("🔍 Analisar GAMET", "🔍 Analyze GAMET")) and gamet_text.stri
 
     for z, (status, reasons) in zones.items():
         if status.startswith("NO-GO"):
-            st.error(f"{z}: {status} — {', '.join(reasons)}")
+            if PARTIAL_CUTS[z]:
+                cut_dir, lat = PARTIAL_CUTS[z][0]
+                lat_txt = f"{lat:.1f}N"
+
+                st.error(f"{z}: NO-GO PARCIAL — {', '.join(reasons)}")
+                if cut_dir == "NORTH":
+                    st.write(f" • NO-GO a norte de {lat_txt}")
+                    st.write(f" • VFR possível a sul de {lat_txt}")
+                else:
+                    st.write(f" • NO-GO a sul de {lat_txt}")
+                    st.write(f" • VFR possível a norte de {lat_txt}")
+            else:
+                st.error(f"{z}: {status} — {', '.join(reasons)}")
+
         elif status == "MARGINAL":
             st.warning(f"{z}: VFR marginal — {', '.join(reasons)}")
+
         else:
             st.success(f"{z}: VFR possível")
 
         for k, v in details[z].items():
             st.write(f"   • {k}: {v}")
-
-    st.subheader(t("🧠 Conclusão operacional", "🧠 Operational conclusion"))
-    for z, (status, _) in zones.items():
-        st.write("• " + exam_sentence(z, status))
 
     st.caption(t(
         "Ferramenta de apoio à decisão. Não substitui o julgamento do piloto.",
