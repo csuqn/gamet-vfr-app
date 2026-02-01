@@ -62,26 +62,6 @@ def filter_text_for_zone(text, zone):
     )
 
 # -------------------------------------------------
-# EXTRAÇÃO DE DETALHES
-# -------------------------------------------------
-def extract_details(text):
-    details = {}
-
-    vis = re.search(r"(\d{4})-(\d{4})M", text)
-    if vis:
-        details["VIS"] = f"{vis.group(1)}–{vis.group(2)} m"
-
-    cld = re.search(r"(BKN|OVC)\s*(\d{3})-(\d{3})", text)
-    if cld:
-        details["CLD"] = f"{cld.group(1)} {cld.group(2)}–{cld.group(3)} ft AGL"
-
-    ice = re.search(r"ICE.*?(ABV FL\d{2,3}|FL\d{2,3})", text)
-    if ice:
-        details["ICE"] = ice.group(1)
-
-    return details
-
-# -------------------------------------------------
 # LÓGICA VFR
 # -------------------------------------------------
 def analyze_zone(text):
@@ -112,36 +92,13 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     text = gamet_text.upper()
     zones = {}
-    details = {}
 
     for z in ZONE_BANDS:
         ztext = filter_text_for_zone(text, z)
         zones[z] = analyze_zone(ztext)
-        details[z] = extract_details(ztext)
 
     # -------------------------------------------------
-    # RESULTADOS TEXTO
-    # -------------------------------------------------
-    st.subheader("📋 Resultado VFR por zona")
-
-    for z, (status, reasons) in zones.items():
-        if status == "NO-GO":
-            if PARTIAL_CUTS[z]:
-                cut_dir, lat = PARTIAL_CUTS[z][0]
-                st.error(f"{z}: NO-GO PARCIAL — {', '.join(reasons)}")
-                st.write(f" • NO-GO a {'norte' if cut_dir=='NORTH' else 'sul'} de {lat:.1f}N")
-                for k, v in details[z].items():
-                    st.write(f"    – {k}: {v}")
-                st.write(f" • VFR possível a {'sul' if cut_dir=='NORTH' else 'norte'} de {lat:.1f}N")
-            else:
-                st.error(f"{z}: NO-GO ABSOLUTO — {', '.join(reasons)}")
-                for k, v in details[z].items():
-                    st.write(f" • {k}: {v}")
-        else:
-            st.success(f"{z}: VFR possível")
-
-    # -------------------------------------------------
-    # MAPA ESQUEMÁTICO TOPOGRÁFICO
+    # MAPA ESQUEMÁTICO
     # -------------------------------------------------
     st.subheader("🗺️ Mapa VFR – Portugal Continental (esquemático)")
 
@@ -155,13 +112,30 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     for z, (y0, y1) in ZONE_Y.items():
         status = zones[z][0]
+
         if status == "VFR POSSÍVEL":
             ax.axhspan(y0, y1, color="green", alpha=0.25)
+
         elif PARTIAL_CUTS[z]:
             mid = (y0 + y1) / 2
+
             ax.axhspan(mid, y1, color="red", alpha=0.25)
             ax.axhspan(y0, mid, color="green", alpha=0.25)
+
+            # LINHA TRACEJADA
             ax.axhline(mid, linestyle="--", color="black")
+
+            # LEGENDA DA LINHA (PT / EN)
+            ax.text(
+                0.5,
+                mid + 0.15,
+                "Limite VFR / VFR boundary",
+                ha="center",
+                va="bottom",
+                fontsize=8,
+                style="italic"
+            )
+
         else:
             ax.axhspan(y0, y1, color="red", alpha=0.25)
 
@@ -169,29 +143,24 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     # CIDADES
     # -------------------------------------------------
     cities = {
-        # NORTE
-        "Bragança":         (0.8, 13.5),
+        "Bragança": (0.8, 13.5),
         "Viana do Castelo": (0.2, 12.6),
-        "Braga":            (0.4, 11.8),
-        "Vila Real":        (0.6, 11.0),
-        "Porto":            (0.3, 10.5),
-
-        # CENTRO
-        "Viseu":            (0.6, 8.6),
-        "Aveiro":           (0.3, 8.0),
-        "Guarda":           (0.8, 7.4),
-        "Coimbra":          (0.5, 6.6),
-        "Leiria":           (0.3, 5.6),
-        "Castelo Branco":   (0.8, 4.8),
-
-        # SUL
-        "Santarém":         (0.4, 3.6),
-        "Portalegre":       (0.8, 2.8),
-        "Lisboa":           (0.3, 2.0),
-        "Setúbal":          (0.3, 1.2),
-        "Évora":            (0.6, 0.2),
-        "Beja":             (0.7, -1.0),
-        "Faro":             (0.7, -2.2),
+        "Braga": (0.4, 11.8),
+        "Vila Real": (0.6, 11.0),
+        "Porto": (0.3, 10.5),
+        "Viseu": (0.6, 8.6),
+        "Aveiro": (0.3, 8.0),
+        "Guarda": (0.8, 7.4),
+        "Coimbra": (0.5, 6.6),
+        "Leiria": (0.3, 5.6),
+        "Castelo Branco": (0.8, 4.8),
+        "Santarém": (0.4, 3.6),
+        "Portalegre": (0.8, 2.8),
+        "Lisboa": (0.3, 2.0),
+        "Setúbal": (0.3, 1.2),
+        "Évora": (0.6, 0.2),
+        "Beja": (0.7, -1.0),
+        "Faro": (0.7, -2.2),
     }
 
     for name, (x, y) in cities.items():
