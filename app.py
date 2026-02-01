@@ -43,16 +43,21 @@ def extract_latitudes(text):
 def line_applies_to_zone(line, zone):
     zmin, zmax = ZONE_BANDS[zone]
 
+    # Caso especial: fenómenos MAR/COT limitados ao Norte/Centro
+    if ("MAR" in line or "COT" in line) and "N OF N38" in line:
+        if zone == "SUL":
+            return False
+
     north_of = re.search(r'N OF N(\d{2})(\d{2})', line)
     south_of = re.search(r'S OF N(\d{2})(\d{2})', line)
 
     if north_of:
         lat = int(north_of.group(1)) + int(north_of.group(2)) / 60
-        return zmax >= lat   # CORRIGIDO (>=)
+        return zmax >= lat
 
     if south_of:
         lat = int(south_of.group(1)) + int(south_of.group(2)) / 60
-        return zmin <= lat   # CORRIGIDO (<=)
+        return zmin <= lat
 
     return True
 
