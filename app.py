@@ -79,11 +79,10 @@ def extract_min_visibility(text):
     return min(values) if values else None
 
 
-def extract_min_ceiling(text):
+def extract_min_cloud_base(text):
     """
-    Devolve o ceiling mais baixo como:
+    Devolve a base de nuvens mais baixa como:
     (tipo_nuvem, base_em_ft)
-    Ex: ("BKN", 400)
     """
     clouds = []
 
@@ -95,7 +94,6 @@ def extract_min_ceiling(text):
     if not clouds:
         return None
 
-    # escolher o mais baixo
     return min(clouds, key=lambda x: x[1])
 
 # -------------------------------------------------
@@ -107,7 +105,7 @@ def analyze_zone(text):
     no_go = False
 
     vis = extract_min_visibility(text)
-    ceiling = extract_min_ceiling(text)
+    cloud_base = extract_min_cloud_base(text)
 
     if vis is not None:
         reasons.append(f"VIS: {vis} m")
@@ -115,11 +113,11 @@ def analyze_zone(text):
             limiting.append("VIS < 3000 m")
             no_go = True
 
-    if ceiling is not None:
-        cloud_type, base_ft = ceiling
-        reasons.append(f"CEILING: {cloud_type} {base_ft} ft")
+    if cloud_base is not None:
+        cloud_type, base_ft = cloud_base
+        reasons.append(f"BASE DAS NUVENS: {cloud_type} {base_ft} ft")
         if base_ft < 500:
-            limiting.append("CEILING < 500 ft")
+            limiting.append("Base das nuvens < 500 ft")
             no_go = True
 
     if no_go:
@@ -216,7 +214,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         else:
             ax.axhspan(y0, y1, color="red", alpha=0.25)
 
-    # CIDADES (baseline completo)
+    # CIDADES (baseline)
     cities = {
         "Bragança":         (0.8, 13.5),
         "Viana do Castelo": (0.2, 12.6),
