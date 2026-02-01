@@ -141,35 +141,52 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     # -------------------------------------------------
     # MAPA
     # -------------------------------------------------
-    st.subheader("🗺️ Mapa VFR – LPPC")
+    st.subheader("🗺️ Mapa VFR – LPPC (esquemático)")
 
-    fig, ax = plt.subplots(figsize=(5, 8))
+fig, ax = plt.subplots(figsize=(5, 8))
 
-    for z, (y0, y1) in ZONE_BANDS.items():
-        status = zones[z][0]
+# Zonas esquemáticas (alturas iguais)
+SCHEMATIC_BANDS = {
+    "NORTE": (2, 3),
+    "CENTRO": (1, 2),
+    "SUL": (0, 1)
+}
 
-        if status == "VFR POSSÍVEL":
-            ax.axhspan(y0, y1, color="green", alpha=0.35)
-        elif PARTIAL_CUTS[z]:
-            cut_dir, lat = PARTIAL_CUTS[z][0]
-            if cut_dir == "NORTH":
-                ax.axhspan(lat, y1, color="red", alpha=0.35)
-                ax.axhspan(y0, lat, color="green", alpha=0.35)
-            else:
-                ax.axhspan(y0, lat, color="red", alpha=0.35)
-                ax.axhspan(lat, y1, color="green", alpha=0.35)
-            ax.axhline(lat, linestyle="--", color="black")
+for z, (y0, y1) in SCHEMATIC_BANDS.items():
+    status = zones[z][0]
+
+    # Zona sem corte
+    if status == "VFR POSSÍVEL":
+        ax.axhspan(y0, y1, color="green", alpha=0.35)
+
+    elif PARTIAL_CUTS[z]:
+        cut_dir, lat = PARTIAL_CUTS[z][0]
+
+        if cut_dir == "NORTH":
+            ax.axhspan(y0 + 0.5, y1, color="red", alpha=0.35)
+            ax.axhspan(y0, y0 + 0.5, color="green", alpha=0.35)
+            ax.axhline(y0 + 0.5, linestyle="--", color="black")
         else:
-            ax.axhspan(y0, y1, color="red", alpha=0.35)
+            ax.axhspan(y0, y0 + 0.5, color="red", alpha=0.35)
+            ax.axhspan(y0 + 0.5, y1, color="green", alpha=0.35)
+            ax.axhline(y0 + 0.5, linestyle="--", color="black")
 
-    ax.set_xlim(-10, -6)
-    ax.set_ylim(36.5, 42.5)
-    ax.set_xticks([])
-    ax.set_yticks([])
+    else:
+        ax.axhspan(y0, y1, color="red", alpha=0.35)
 
-    ax.set_title("VFR por zonas – Portugal Continental")
+# Rótulos
+ax.text(0.5, 2.5, "NORTE", ha="center", va="center", fontsize=12)
+ax.text(0.5, 1.5, "CENTRO", ha="center", va="center", fontsize=12)
+ax.text(0.5, 0.5, "SUL", ha="center", va="center", fontsize=12)
 
-    st.pyplot(fig)
+ax.set_xlim(0, 1)
+ax.set_ylim(0, 3)
+ax.set_xticks([])
+ax.set_yticks([])
+
+ax.set_title("VFR por zonas – Portugal Continental")
+
+st.pyplot(fig)
 
     st.caption("Ferramenta de apoio à decisão. Não substitui o julgamento do piloto.")
 
