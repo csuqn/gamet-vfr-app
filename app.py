@@ -17,9 +17,9 @@ gamet_text = st.text_area(
 )
 
 # -------------------------------------------------
-# AJUSTE VISUAL
+# AJUSTE VISUAL (OFFSET CONSISTENTE)
 # -------------------------------------------------
-VISUAL_LINE_OFFSET = 0.35   # apenas estético (não altera o significado)
+VISUAL_OFFSET = 0.35   # puramente estético, aplicado a TUDO
 
 # -------------------------------------------------
 # GEOMETRIA DO MAPA (TOPOLÓGICA)
@@ -77,45 +77,74 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     fig, ax = plt.subplots(figsize=(6, 10))
 
     # -------------------------------------------------
-    # DESENHO DAS ÁREAS
+    # DESENHO DAS ÁREAS (OFFSET APLICADO A TUDO)
     # -------------------------------------------------
     if cut and status == "VFR NO-GO":
         direction, lat = cut
-        cut_y = lat_to_y(lat)
-        visual_y = cut_y + VISUAL_LINE_OFFSET
+        cut_y = lat_to_y(lat) + VISUAL_OFFSET
 
         if direction == "NORTH":
             # Norte NO-GO
             ax.axhspan(cut_y, Y_MAX, color="red", alpha=0.30)
-            ax.text(0.02, (cut_y + Y_MAX) / 2, f"VFR NO-GO\n{reason}", fontsize=9, va="center")
+            ax.text(
+                0.02,
+                (cut_y + Y_MAX) / 2,
+                f"VFR NO-GO\n{reason}",
+                fontsize=9,
+                va="center"
+            )
 
             # Sul OK
             ax.axhspan(Y_MIN, cut_y, color="green", alpha=0.30)
-            ax.text(0.02, (Y_MIN + cut_y) / 2, "VFR OK", fontsize=9, va="center")
+            ax.text(
+                0.02,
+                (Y_MIN + cut_y) / 2,
+                "VFR OK",
+                fontsize=9,
+                va="center"
+            )
 
         else:
             # Sul NO-GO
             ax.axhspan(Y_MIN, cut_y, color="red", alpha=0.30)
-            ax.text(0.02, (Y_MIN + cut_y) / 2, f"VFR NO-GO\n{reason}", fontsize=9, va="center")
+            ax.text(
+                0.02,
+                (Y_MIN + cut_y) / 2,
+                f"VFR NO-GO\n{reason}",
+                fontsize=9,
+                va="center"
+            )
 
             # Norte OK
             ax.axhspan(cut_y, Y_MAX, color="green", alpha=0.30)
-            ax.text(0.02, (cut_y + Y_MAX) / 2, "VFR OK", fontsize=9, va="center")
+            ax.text(
+                0.02,
+                (cut_y + Y_MAX) / 2,
+                "VFR OK",
+                fontsize=9,
+                va="center"
+            )
 
-        # Linha tracejada (offset visual)
-        ax.axhline(visual_y, linestyle="--", color="black")
-        ax.text(0.75, visual_y + 0.1, f"{lat:.1f}N", fontsize=9)
+        # Linha tracejada (alinhada com a transição)
+        ax.axhline(cut_y, linestyle="--", color="black")
+        ax.text(0.75, cut_y + 0.1, f"{lat:.1f}N", fontsize=9)
 
     else:
         color = "green" if status == "VFR OK" else "red"
         ax.axhspan(Y_MIN, Y_MAX, color=color, alpha=0.30)
         label = status if not reason else f"{status}\n{reason}"
-        ax.text(0.02, (Y_MIN + Y_MAX) / 2, label, fontsize=9, va="center")
+        ax.text(
+            0.02,
+            (Y_MIN + Y_MAX) / 2,
+            label,
+            fontsize=9,
+            va="center"
+        )
 
     # -------------------------------------------------
     # LINHAS DE ZONA (REFERÊNCIA)
     # -------------------------------------------------
-    for _, (y0, y1) in ZONE_Y.items():
+    for _, (y0, _) in ZONE_Y.items():
         ax.axhline(y0, color="red", alpha=0.5)
 
     # -------------------------------------------------
