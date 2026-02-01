@@ -80,10 +80,23 @@ def extract_min_visibility(text):
 
 
 def extract_min_ceiling(text):
-    bases = []
+    """
+    Devolve o ceiling mais baixo como:
+    (tipo_nuvem, base_em_ft)
+    Ex: ("BKN", 400)
+    """
+    clouds = []
+
     for m in re.findall(r"(BKN|OVC)\s*(\d{3})", text):
-        bases.append(int(m[1]) * 100)
-    return min(bases) if bases else None
+        cloud_type = m[0]
+        base_ft = int(m[1]) * 100
+        clouds.append((cloud_type, base_ft))
+
+    if not clouds:
+        return None
+
+    # escolher o mais baixo
+    return min(clouds, key=lambda x: x[1])
 
 # -------------------------------------------------
 # LÓGICA VFR
@@ -94,7 +107,7 @@ def analyze_zone(text):
     no_go = False
 
     vis = extract_min_visibility(text)
-    cld = extract_min_ceiling(text)
+    ceiling = extract_min_ceiling(text)
 
     if vis is not None:
         reasons.append(f"VIS: {vis} m")
@@ -102,9 +115,10 @@ def analyze_zone(text):
             limiting.append("VIS < 3000 m")
             no_go = True
 
-    if cld is not None:
-        reasons.append(f"CEILING: {cld} ft")
-        if cld < 500:
+    if ceiling is not None:
+        cloud_type, base_ft = ceiling
+        reasons.append(f"CEILING: {cloud_type} {base_ft} ft")
+        if base_ft < 500:
             limiting.append("CEILING < 500 ft")
             no_go = True
 
@@ -173,7 +187,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         st.write(f" • {z}: {label}")
 
     # -------------------------------------------------
-    # MAPA (INALTERADO) + CIDADES RESTAURADAS
+    # MAPA (INALTERADO)
     # -------------------------------------------------
     st.subheader("🗺️ Mapa VFR – Portugal Continental (esquemático)")
 
@@ -202,24 +216,19 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         else:
             ax.axhspan(y0, y1, color="red", alpha=0.25)
 
-    # CIDADES – versão completa (baseline)
+    # CIDADES (baseline completo)
     cities = {
-        # NORTE
         "Bragança":         (0.8, 13.5),
         "Viana do Castelo": (0.2, 12.6),
         "Braga":            (0.4, 11.8),
         "Vila Real":        (0.6, 11.0),
         "Porto":            (0.3, 10.5),
-
-        # CENTRO
         "Viseu":            (0.6, 8.6),
         "Aveiro":           (0.3, 8.0),
         "Guarda":           (0.8, 7.4),
         "Coimbra":          (0.5, 6.6),
         "Leiria":           (0.3, 5.6),
         "Castelo Branco":   (0.8, 4.8),
-
-        # SUL
         "Santarém":         (0.4, 3.6),
         "Portalegre":       (0.8, 2.8),
         "Lisboa":           (0.3, 2.0),
@@ -242,3 +251,4 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     st.pyplot(fig)
 
     st.caption("Ferramenta de apoio à decisão. Não substitui o julgamento do piloto.")
+
