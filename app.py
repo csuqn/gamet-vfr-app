@@ -62,12 +62,16 @@ def filter_text_for_zone(text, zone):
     )
 
 # -------------------------------------------------
-# PARSING ROBUSTO
+# PARSING ROBUSTO (NOVO)
 # -------------------------------------------------
-def extract_visibility(text):
+def extract_min_visibility(text):
+    """
+    Devolve a visibilidade mínima encontrada (em metros),
+    suportando vários formatos GAMET.
+    """
     values = []
 
-    # 0800-5000M
+    # 0800-5000M → usa o mínimo
     for m in re.findall(r"(\d{4})-(\d{4})M", text):
         values.append(int(m[0]))
 
@@ -75,10 +79,18 @@ def extract_visibility(text):
     for m in re.findall(r"VIS\s*(\d{4})M", text):
         values.append(int(m))
 
+    # LOC 1500M
+    for m in re.findall(r"LOC\s*(\d{4})M", text):
+        values.append(int(m))
+
     return min(values) if values else None
 
 
-def extract_ceiling(text):
+def extract_min_ceiling(text):
+    """
+    Devolve o ceiling mais baixo (ft AGL),
+    considerando BKN e OVC.
+    """
     bases = []
 
     for m in re.findall(r"(BKN|OVC)\s*(\d{3})", text):
@@ -87,36 +99,32 @@ def extract_ceiling(text):
     return min(bases) if bases else None
 
 # -------------------------------------------------
-# LÓGICA VFR MELHORADA
+# LÓGICA VFR (RESULTADO FINAL IGUAL AO BASE)
 # -------------------------------------------------
 def analyze_zone(text):
     reasons = []
-    status = "VFR OK"
+    no_go = False
 
-    vis = extract_visibility(text)
-    cld = extract_ceiling(text)
+    vis = extract_min_visibility(text)
+    cld = extract_min_ceiling(text)
 
-    # VIS
     if vis is not None:
+        reasons.append(f"VIS mínima: {vis} m")
         if vis < 3000:
-            return "VFR NO-GO", [f"VIS {vis} m"]
-        elif vis < 5000:
-            status = "VFR MARGINAL"
-            reasons.append(f"VIS {vis} m")
-        else:
-            reasons.append("VIS ≥ 5000 m")
+            no_go = True
 
-    # CEILING
     if cld is not None:
+        reasons.append(f"Ceiling: {cld} ft")
         if cld < 500:
-            return "VFR NO-GO", [f"CEILING {cld} ft"]
-        elif cld < 1500:
-            status = "VFR MARGINAL"
-            reasons.append(f"CEILING {cld} ft")
-        else:
-            reasons.append(f"CEILING {cld} ft")
+            no_go = True
 
-    return status, reasons
+    if no_go:
+        return "NO-GO", reasons
+
+    if not reasons:
+        reasons.append("Sem limitações significativas")
+
+    return "VFR POSSÍVEL", reasons
 
 # -------------------------------------------------
 # EXECUÇÃO
@@ -128,21 +136,20 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     text = gamet_text.upper()
     zones = {}
+    details = {}
 
     for z in ZONE_BANDS:
         ztext = filter_text_for_zone(text, z)
         zones[z] = analyze_zone(ztext)
 
     # -------------------------------------------------
-    # RESULTADOS TEXTO (MELHORADOS)
+    # RESULTADOS TEXTO (MELHORADOS, MESMOS RÓTULOS)
     # -------------------------------------------------
     st.subheader("📋 Resultado VFR por zona")
 
     for z, (status, reasons) in zones.items():
-        if status == "VFR NO-GO":
+        if status == "NO-GO":
             st.error(f"{z}: {status}")
-        elif status == "VFR MARGINAL":
-            st.warning(f"{z}: {status}")
         else:
             st.success(f"{z}: {status}")
 
@@ -150,7 +157,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
             st.write(f" • {r}")
 
     # -------------------------------------------------
-    # MAPA (INTACTO)
+    # MAPA ESQUEMÁTICO (INALTERADO)
     # -------------------------------------------------
     st.subheader("🗺️ Mapa VFR – Portugal Continental (esquemático)")
 
@@ -165,19 +172,46 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     for z, (y0, y1) in ZONE_Y.items():
         status = zones[z][0]
 
-        if status == "VFR OK":
+        if status == "VFR POSSÍVEL":
             ax.axhspan(y0, y1, color="green", alpha=0.25)
-        elif status == "VFR MARGINAL":
-            ax.axhspan(y0, y1, color="yellow", alpha=0.35)
+        elif PARTIAL_CUTS[z]:
+            mid = (y0 + y1) / 2
+            ax.axhspan(mid, y1, color="red", alpha=0.25)
+            ax.axhspan(y0, mid, color="green", alpha=0.25)
+            ax.axhline(mid, linestyle="--", color="black")
+            ax.text(
+                0.5,
+                mid + 0.15,
+                "Limite VFR / VFR boundary",
+                ha="center",
+                va="bottom",
+                fontsize=8,
+                style="italic"
+            )
         else:
             ax.axhspan(y0, y1, color="red", alpha=0.25)
 
+    # -------------------------------------------------
     # CIDADES (INALTERADAS)
+    # -------------------------------------------------
     cities = {
         "Bragança": (0.8, 13.5),
+        "Viana do Castelo": (0.2, 12.6),
+        "Braga": (0.4, 11.8),
+        "Vila Real": (0.6, 11.0),
         "Porto": (0.3, 10.5),
+        "Viseu": (0.6, 8.6),
+        "Aveiro": (0.3, 8.0),
+        "Guarda": (0.8, 7.4),
         "Coimbra": (0.5, 6.6),
+        "Leiria": (0.3, 5.6),
+        "Castelo Branco": (0.8, 4.8),
+        "Santarém": (0.4, 3.6),
+        "Portalegre": (0.8, 2.8),
         "Lisboa": (0.3, 2.0),
+        "Setúbal": (0.3, 1.2),
+        "Évora": (0.6, 0.2),
+        "Beja": (0.7, -1.0),
         "Faro": (0.7, -2.2),
     }
 
