@@ -17,7 +17,7 @@ gamet_text = st.text_area(
 )
 
 # -------------------------------------------------
-# GEOMETRIA BASE
+# ESCALA GEOGRÁFICA REAL
 # -------------------------------------------------
 LAT_MIN = 36.5
 LAT_MAX = 42.5
@@ -26,6 +26,17 @@ Y_MAX = 14.0
 
 def lat_to_y(lat):
     return Y_MIN + (lat - LAT_MIN) * (Y_MAX - Y_MIN) / (LAT_MAX - LAT_MIN)
+
+# -------------------------------------------------
+# CIDADES (LATITUDE REAL)
+# -------------------------------------------------
+CITIES = {
+    "Bragança": (0.75, 41.81),
+    "Porto":    (0.30, 41.15),
+    "Coimbra":  (0.50, 40.21),
+    "Lisboa":   (0.30, 38.72),
+    "Faro":     (0.70, 37.02),
+}
 
 # -------------------------------------------------
 # EXTRAÇÃO DO CORTE GLOBAL
@@ -42,7 +53,7 @@ def extract_cut(text):
     return None
 
 # -------------------------------------------------
-# AVALIAÇÃO GLOBAL (SIMPLIFICADA)
+# ANÁLISE GLOBAL (SIMPLIFICADA)
 # -------------------------------------------------
 def analyze(text):
     if re.search(r"BKN\s*004", text):
@@ -58,59 +69,44 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     cut = extract_cut(text)
     status, reason = analyze(text)
 
-    # -------------------------------------------------
-    # MAPA
-    # -------------------------------------------------
     st.subheader("🗺️ Mapa VFR – Portugal Continental (esquemático)")
 
     fig, ax = plt.subplots(figsize=(6, 10))
 
-    # CASO COM CORTE
+    # -----------------------------
+    # DESENHO DAS ÁREAS
+    # -----------------------------
     if cut and status == "VFR NO-GO":
         direction, lat = cut
         cut_y = lat_to_y(lat)
 
         if direction == "NORTH":
-            # Norte NO-GO
             ax.axhspan(cut_y, Y_MAX, color="red", alpha=0.30)
             ax.text(0.02, (cut_y + Y_MAX) / 2, f"VFR NO-GO\n{reason}", fontsize=9, va="center")
 
-            # Sul OK
             ax.axhspan(Y_MIN, cut_y, color="green", alpha=0.30)
             ax.text(0.02, (Y_MIN + cut_y) / 2, "VFR OK", fontsize=9, va="center")
 
         else:
-            # Sul NO-GO
             ax.axhspan(Y_MIN, cut_y, color="red", alpha=0.30)
             ax.text(0.02, (Y_MIN + cut_y) / 2, f"VFR NO-GO\n{reason}", fontsize=9, va="center")
 
-            # Norte OK
             ax.axhspan(cut_y, Y_MAX, color="green", alpha=0.30)
             ax.text(0.02, (cut_y + Y_MAX) / 2, "VFR OK", fontsize=9, va="center")
 
         ax.axhline(cut_y, linestyle="--", color="black")
-        ax.text(0.75, cut_y + 0.1, f"{lat:.1f}N", fontsize=9)
+        ax.text(0.78, cut_y + 0.1, f"{lat:.1f}N", fontsize=9)
 
-    # CASO SEM CORTE
     else:
         color = "green" if status == "VFR OK" else "red"
         ax.axhspan(Y_MIN, Y_MAX, color=color, alpha=0.30)
-        label = status if not reason else f"{status}\n{reason}"
-        ax.text(0.02, (Y_MIN + Y_MAX) / 2, label, fontsize=9, va="center")
 
-    # -------------------------------------------------
-    # CIDADES
-    # -------------------------------------------------
-    cities = {
-        "Bragança": (0.8, 13.5),
-        "Porto": (0.3, 10.5),
-        "Coimbra": (0.5, 6.6),
-        "Lisboa": (0.3, 2.0),
-        "Faro": (0.7, -2.2),
-    }
-
-    for name, (x, y) in cities.items():
-        ax.plot(x, y, "ko", markersize=3)
+    # -----------------------------
+    # CIDADES (AGORA COERENTES)
+    # -----------------------------
+    for name, (x, lat) in CITIES.items():
+        y = lat_to_y(lat)
+        ax.plot(x, y, "ko", markersize=4)
         ax.text(x + 0.015, y, name, va="center", fontsize=8)
 
     ax.set_xlim(0, 1)
