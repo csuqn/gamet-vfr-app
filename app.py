@@ -17,7 +17,7 @@ gamet_text = st.text_area(
 )
 
 # -------------------------------------------------
-# ZONAS (FAIXAS REAIS)
+# ZONAS (FAIXAS REAIS DE LATITUDE)
 # -------------------------------------------------
 ZONE_BANDS = {
     "NORTE": (39.5, 42.5),
@@ -118,6 +118,9 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         zones[z] = analyze_zone(ztext)
         details[z] = extract_details(ztext)
 
+    # -------------------------------
+    # RESULTADOS TEXTO
+    # -------------------------------
     st.subheader("📋 Resultado VFR por zona")
 
     for z, (status, reasons) in zones.items():
@@ -137,64 +140,70 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
             st.success(f"{z}: VFR possível")
 
     # -------------------------------------------------
-    # MAPA ESQUEMÁTICO COM CAPITAIS DE DISTRITO
+    # MAPA ESQUEMÁTICO TOPOGRÁFICO COM CIDADES
     # -------------------------------------------------
     st.subheader("🗺️ Mapa VFR – Portugal Continental (esquemático)")
 
-    fig, ax = plt.subplots(figsize=(6, 9))
+    fig, ax = plt.subplots(figsize=(6, 10))
 
-    SCHEMATIC_BANDS = {
-        "NORTE": (2, 3),
-        "CENTRO": (1, 2),
-        "SUL": (0, 1)
+    # Zonas para fundo
+    ZONE_Y = {
+        "NORTE": (8.5, 13.5),
+        "CENTRO": (3.5, 8.5),
+        "SUL": (-4.5, 3.5)
     }
 
-    # Desenho das zonas
-    for z, (y0, y1) in SCHEMATIC_BANDS.items():
+    for z, (y0, y1) in ZONE_Y.items():
         status = zones[z][0]
 
         if status == "VFR POSSÍVEL":
-            ax.axhspan(y0, y1, color="green", alpha=0.35)
-
+            ax.axhspan(y0, y1, color="green", alpha=0.25)
         elif PARTIAL_CUTS[z]:
-            cut_dir, _ = PARTIAL_CUTS[z][0]
-
-            if cut_dir == "NORTH":
-                ax.axhspan(y0 + 0.5, y1, color="red", alpha=0.35)
-                ax.axhspan(y0, y0 + 0.5, color="green", alpha=0.35)
-                ax.axhline(y0 + 0.5, linestyle="--", color="black")
-            else:
-                ax.axhspan(y0, y0 + 0.5, color="red", alpha=0.35)
-                ax.axhspan(y0 + 0.5, y1, color="green", alpha=0.35)
-                ax.axhline(y0 + 0.5, linestyle="--", color="black")
+            mid = (y0 + y1) / 2
+            ax.axhspan(mid, y1, color="red", alpha=0.25)
+            ax.axhspan(y0, mid, color="green", alpha=0.25)
+            ax.axhline(mid, linestyle="--", color="black")
         else:
-            ax.axhspan(y0, y1, color="red", alpha=0.35)
+            ax.axhspan(y0, y1, color="red", alpha=0.25)
 
-    # Capitais de distrito (posição esquemática)
+    # Cidades (posições FIXAS)
     cities = {
-        "NORTE": ["Viana do Castelo", "Braga", "Porto", "Vila Real", "Bragança"],
-        "CENTRO": ["Aveiro", "Coimbra", "Viseu", "Guarda", "Castelo Branco", "Leiria"],
-        "SUL": ["Lisboa", "Santarém", "Setúbal", "Évora", "Portalegre", "Beja", "Faro"]
+        "Bragança":        (0.8, 13),
+        "Viana do Castelo":(0.2, 12),
+        "Braga":           (0.4, 11),
+        "Porto":           (0.3, 10),
+        "Vila Real":       (0.6, 9),
+
+        "Viseu":           (0.6, 8),
+        "Guarda":          (0.8, 7),
+        "Coimbra":         (0.5, 6),
+        "Aveiro":          (0.3, 5),
+        "Leiria":          (0.3, 4),
+        "Castelo Branco":  (0.8, 3),
+
+        "Santarém":        (0.4, 2),
+        "Portalegre":      (0.8, 1),
+        "Lisboa":          (0.3, 0),
+        "Setúbal":         (0.3, -1),
+        "Évora":           (0.6, -2),
+        "Beja":            (0.7, -3),
+        "Faro":            (0.7, -4),
     }
 
-    for z, names in cities.items():
-        y0, y1 = SCHEMATIC_BANDS[z]
-        y = (y0 + y1) / 2
-        xs = [0.1 + i * 0.8 / (len(names) - 1) for i in range(len(names))]
-
-        for x, name in zip(xs, names):
-            ax.plot(x, y, "ko", markersize=3)
-            ax.text(x, y - 0.08, name, ha="center", va="top", fontsize=8)
+    for name, (x, y) in cities.items():
+        ax.plot(x, y, "ko", markersize=3)
+        ax.text(x + 0.015, y, name, va="center", fontsize=8)
 
     ax.set_xlim(0, 1)
-    ax.set_ylim(0, 3)
+    ax.set_ylim(-4.5, 13.5)
     ax.set_xticks([])
     ax.set_yticks([])
-    ax.set_title("VFR por zonas – Capitais de Distrito")
+    ax.set_title("Mapa esquemático de orientação (topológico)")
 
     st.pyplot(fig)
 
     st.caption("Ferramenta de apoio à decisão. Não substitui o julgamento do piloto.")
+
 
 
 
