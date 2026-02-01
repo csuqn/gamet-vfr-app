@@ -85,11 +85,6 @@ def extract_min_ceiling(text):
         bases.append(int(m[1]) * 100)
     return min(bases) if bases else None
 
-
-def extract_info(text, key):
-    m = re.search(rf"{key}:(.+?)(?=\n|$)", text)
-    return m.group(1).strip() if m else None
-
 # -------------------------------------------------
 # LÓGICA VFR
 # -------------------------------------------------
@@ -113,22 +108,13 @@ def analyze_zone(text):
             limiting.append("CEILING < 500 ft")
             no_go = True
 
-    ice = extract_info(text, "ICE")
-    turb = extract_info(text, "TURB")
-
-    info = []
-    if ice:
-        info.append(f"ICE: {ice}")
-    if turb:
-        info.append(f"TURB: {turb}")
-
     if no_go:
-        return "NO-GO", reasons, limiting, info
+        return "NO-GO", reasons, limiting
 
     if not reasons:
         reasons.append("Sem limitações significativas")
 
-    return "VFR POSSÍVEL", reasons, [], info
+    return "VFR POSSÍVEL", reasons, []
 
 # -------------------------------------------------
 # EXECUÇÃO
@@ -150,7 +136,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     # -------------------------------------------------
     st.subheader("📋 Resultado VFR por zona")
 
-    for z, (status, reasons, limiting, info) in zones.items():
+    for z, (status, reasons, limiting) in zones.items():
 
         if status == "NO-GO" and PARTIAL_CUTS[z]:
             cut_dir, lat = PARTIAL_CUTS[z][0]
@@ -174,11 +160,6 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
             st.success(f"{z}: VFR POSSÍVEL")
             for r in reasons:
                 st.write(f" • {r}")
-
-        if info:
-            st.write(" Informação adicional:")
-            for i in info:
-                st.write(f" • {i}")
 
     # -------------------------------------------------
     # RESUMO GLOBAL
