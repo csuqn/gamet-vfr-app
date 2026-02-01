@@ -62,6 +62,26 @@ def filter_text_for_zone(text, zone):
     )
 
 # -------------------------------------------------
+# EXTRAÇÃO DE DETALHES
+# -------------------------------------------------
+def extract_details(text):
+    details = {}
+
+    vis = re.search(r"(\d{4})-(\d{4})M", text)
+    if vis:
+        details["VIS"] = f"{vis.group(1)}–{vis.group(2)} m"
+
+    cld = re.search(r"(BKN|OVC)\s*(\d{3})-(\d{3})", text)
+    if cld:
+        details["CLD"] = f"{cld.group(1)} {cld.group(2)}–{cld.group(3)} ft AGL"
+
+    ice = re.search(r"ICE.*?(ABV FL\d{2,3}|FL\d{2,3})", text)
+    if ice:
+        details["ICE"] = ice.group(1)
+
+    return details
+
+# -------------------------------------------------
 # LÓGICA VFR
 # -------------------------------------------------
 def analyze_zone(text):
@@ -92,10 +112,33 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     text = gamet_text.upper()
     zones = {}
+    details = {}
 
     for z in ZONE_BANDS:
         ztext = filter_text_for_zone(text, z)
         zones[z] = analyze_zone(ztext)
+        details[z] = extract_details(ztext)
+
+    # -------------------------------------------------
+    # RESULTADOS TEXTO
+    # -------------------------------------------------
+    st.subheader("📋 Resultado VFR por zona")
+
+    for z, (status, reasons) in zones.items():
+        if status == "NO-GO":
+            if PARTIAL_CUTS[z]:
+                cut_dir, lat = PARTIAL_CUTS[z][0]
+                st.error(f"{z}: NO-GO PARCIAL — {', '.join(reasons)}")
+                st.write(f" • NO-GO a {'norte' if cut_dir=='NORTH' else 'sul'} de {lat:.1f}N")
+                for k, v in details[z].items():
+                    st.write(f"    – {k}: {v}")
+                st.write(f" • VFR possível a {'sul' if cut_dir=='NORTH' else 'norte'} de {lat:.1f}N")
+            else:
+                st.error(f"{z}: NO-GO ABSOLUTO — {', '.join(reasons)}")
+                for k, v in details[z].items():
+                    st.write(f" • {k}: {v}")
+        else:
+            st.success(f"{z}: VFR possível")
 
     # -------------------------------------------------
     # MAPA ESQUEMÁTICO
