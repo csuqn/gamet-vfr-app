@@ -28,15 +28,23 @@ ZONE_BANDS = {
 PARTIAL_CUTS = {z: [] for z in ZONE_BANDS}
 
 # -------------------------------------------------
-# FUNÇÕES ESPACIAIS
+# FUNÇÕES ESPACIAIS (CORRIGIDAS)
 # -------------------------------------------------
 def line_applies_to_zone(line, zone):
+    """
+    Só VIS e CLD podem gerar cortes VFR.
+    Linhas irrelevantes (TURB, SIGWX, MT, ICE, etc.)
+    NÃO influenciam PARTIAL_CUTS.
+    """
     zmin, zmax = ZONE_BANDS[zone]
+
+    # Apenas fenómenos relevantes para VFR
+    is_vfr_relevant = ("VIS" in line) or ("CLD" in line)
 
     north_of = re.search(r"N OF N(\d{2})(\d{2})", line)
     south_of = re.search(r"S OF N(\d{2})(\d{2})", line)
 
-    if north_of:
+    if north_of and is_vfr_relevant:
         lat = int(north_of.group(1)) + int(north_of.group(2)) / 60
         if zmax < lat:
             return False
@@ -44,7 +52,7 @@ def line_applies_to_zone(line, zone):
             PARTIAL_CUTS[zone].append(("NORTH", lat))
         return True
 
-    if south_of:
+    if south_of and is_vfr_relevant:
         lat = int(south_of.group(1)) + int(south_of.group(2)) / 60
         if zmin > lat:
             return False
@@ -52,6 +60,7 @@ def line_applies_to_zone(line, zone):
             PARTIAL_CUTS[zone].append(("SOUTH", lat))
         return True
 
+    # Linhas irrelevantes não cortam zonas
     return True
 
 
@@ -133,6 +142,7 @@ def analyze_zone(text):
 # -------------------------------------------------
 if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
+    # Limpar cortes anteriores
     for z in PARTIAL_CUTS:
         PARTIAL_CUTS[z].clear()
 
@@ -214,7 +224,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         else:
             ax.axhspan(y0, y1, color="red", alpha=0.25)
 
-    # CIDADES (baseline)
+    # CIDADES (baseline completo)
     cities = {
         "Bragança":         (0.8, 13.5),
         "Viana do Castelo": (0.2, 12.6),
