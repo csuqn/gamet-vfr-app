@@ -10,18 +10,24 @@ from matplotlib.patches import Patch
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="centered")
 
 col1, col2 = st.columns([0.95, 0.05])
+
 with col1:
     st.title("✈️ LPPC GAMET – Análise VFR")
+
 with col2:
-    st.tooltip(
-        "ℹ️",
+    st.markdown(
         """
-VIS < 3000 m ⇒ NO-GO global
-BKN/OVC < 500 ft ⇒ NO-GO (parcial só com N/S OF)
-Fenómenos não-VFR não bloqueiam
-Decisão sempre conservadora
-Não substitui o julgamento do piloto
-"""
+        <span title="
+        VIS < 3000 m ⇒ NO-GO global
+        BKN/OVC < 500 ft ⇒ NO-GO (parcial só com N/S OF)
+        Fenómenos não-VFR (TS, ICE, TURB) não bloqueiam
+        Em caso de dúvida, decisão conservadora
+        Não substitui o julgamento do piloto
+        ">
+        ℹ️
+        </span>
+        """,
+        unsafe_allow_html=True
     )
 
 # -------------------------------------------------
@@ -41,49 +47,13 @@ ZONE_BANDS = {
     "SUL": (36.5, 38.5)
 }
 
-PARTIAL_CUTS = {z: [] for z in ZONE_BANDS}
-
-# -------------------------------------------------
-# FUNÇÕES ESPACIAIS (APENAS PARA CLD)
-# -------------------------------------------------
-def line_applies_to_zone(line, zone):
-    zmin, zmax = ZONE_BANDS[zone]
-    is_vfr_relevant = "CLD" in line
-
-    north_of = re.search(r"N OF N(\d{2})(\d{2})", line)
-    south_of = re.search(r"S OF N(\d{2})(\d{2})", line)
-
-    if north_of and is_vfr_relevant:
-        lat = int(north_of.group(1)) + int(north_of.group(2)) / 60
-        if zmax < lat:
-            return False
-        if zmin < lat < zmax:
-            PARTIAL_CUTS[zone].append(("NORTH", lat))
-        return True
-
-    if south_of and is_vfr_relevant:
-        lat = int(south_of.group(1)) + int(south_of.group(2)) / 60
-        if zmin > lat:
-            return False
-        if zmin < lat < zmax:
-            PARTIAL_CUTS[zone].append(("SOUTH", lat))
-        return True
-
-    return True
-
-
-def filter_text_for_zone(text, zone):
-    return "\n".join(
-        line for line in text.splitlines()
-        if line_applies_to_zone(line, zone)
-    )
-
 # -------------------------------------------------
 # PARSING
 # -------------------------------------------------
 def extract_min_visibility(text):
     """
-    VIS global: se existir VIS < 3000 m em qualquer parte,
+    VIS GLOBAL:
+    Se existir VIS < 3000 m em qualquer parte do GAMET,
     resulta em NO-GO global.
     """
     values = []
@@ -120,9 +90,6 @@ def extract_min_cloud_base(text):
 # -------------------------------------------------
 if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
-    for z in PARTIAL_CUTS:
-        PARTIAL_CUTS[z].clear()
-
     text = gamet_text.upper()
     zones = {}
 
@@ -140,13 +107,12 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
                 ["VIS < 3000 m"]
             )
     else:
-        # Avaliação por CLD
+        # Avaliação simples por CLD (sem parcial nesta V1)
         for z in ZONE_BANDS:
-            ztext = filter_text_for_zone(text, z)
             reasons = []
             limiting = []
 
-            cloud = extract_min_cloud_base(ztext)
+            cloud = extract_min_cloud_base(text)
             if cloud:
                 ctype, base = cloud
                 reasons.append(f"BASE DAS NUVENS: {ctype} {base} ft")
@@ -164,7 +130,6 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     st.subheader("📋 Resultado VFR por zona")
 
     for z, (status, reasons, limiting) in zones.items():
-
         if status == "NO-GO":
             st.error(f"{z}: NO-GO")
         else:
@@ -194,7 +159,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         ax.axhspan(y0, y1, color=color, alpha=0.25)
 
     # -------------------------------------------------
-    # CIDADES (COMPLETO, DEFINITIVO)
+    # CIDADES (COMPLETO)
     # -------------------------------------------------
     cities = {
         # NORTE
@@ -233,7 +198,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         handles=[
             Patch(facecolor="red", alpha=0.25, label="🟥 NO-GO"),
             Patch(facecolor="green", alpha=0.25, label="🟩 VFR POSSÍVEL"),
-            Line2D([0], [0], linestyle="--", color="black", label="Limite aproximado GAMET")
+            Line2D([0], [0], linestyle="--", color="black", label="Limite aproximado GAMET"),
         ],
         loc="lower left",
         fontsize=8
@@ -248,5 +213,3 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     st.pyplot(fig)
 
     st.caption("Ferramenta de apoio à decisão. Não substitui o julgamento do piloto.")
-
-
