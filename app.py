@@ -19,9 +19,9 @@ with col2:
         """
         <span title="
         VIS < 3000 m ⇒ NO-GO global
-        BKN/OVC < 500 ft ⇒ NO-GO (parcial só com N/S OF)
-        Fenómenos não-VFR (TS, ICE, TURB) não bloqueiam
-        Em caso de dúvida, decisão conservadora
+        BKN/OVC < 500 ft ⇒ NO-GO
+        Fenómenos não-VFR não bloqueiam
+        Decisão sempre conservadora
         Não substitui o julgamento do piloto
         ">
         ℹ️
@@ -52,15 +52,20 @@ ZONE_BANDS = {
 # -------------------------------------------------
 def extract_min_visibility(text):
     """
-    VIS GLOBAL:
-    Se existir VIS < 3000 m em qualquer parte do GAMET,
-    resulta em NO-GO global.
+    Extrai visibilidade mínima e contexto.
+    Retorna (vis, contexto) ou (None, None)
     """
     values = []
+    context = []
 
     for line in text.splitlines():
         if "VIS" not in line:
             continue
+
+        if "SFC" in line:
+            context.append("superfície")
+        if "LCA" in line:
+            context.append("LCA")
 
         for m in re.findall(r"(\d{4})-(\d{4})M", line):
             values.append(int(m[0]))
@@ -71,7 +76,8 @@ def extract_min_visibility(text):
         for m in re.findall(r"LOC\s*(\d{4})M", line):
             values.append(int(m))
 
-    return min(values) if values else None
+    ctx = ", ".join(sorted(set(context))) if context else None
+    return (min(values), ctx) if values else (None, None)
 
 
 def extract_min_cloud_base(text):
@@ -96,18 +102,22 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     # -------------------------------------------------
     # REGRA ABSOLUTA: VIS GLOBAL
     # -------------------------------------------------
-    global_vis = extract_min_visibility(text)
+    global_vis, vis_context = extract_min_visibility(text)
 
     if global_vis is not None and global_vis < 3000:
         # NO-GO GLOBAL
         for z in ZONE_BANDS:
             zones[z] = (
                 "NO-GO",
-                [f"VIS: {global_vis} m"],
+                [
+                    f"VIS mínima: {global_vis} m",
+                    f"Contexto: VIS {vis_context}" if vis_context else "Contexto: VIS",
+                    "Fonte: SECN I – SFC VIS"
+                ],
                 ["VIS < 3000 m"]
             )
     else:
-        # Avaliação simples por CLD (sem parcial nesta V1)
+        # Avaliação simples por CLD
         for z in ZONE_BANDS:
             reasons = []
             limiting = []
@@ -115,14 +125,19 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
             cloud = extract_min_cloud_base(text)
             if cloud:
                 ctype, base = cloud
-                reasons.append(f"BASE DAS NUVENS: {ctype} {base} ft")
+                reasons.append(f"Base de nuvens: {ctype} {base} ft")
+                reasons.append("Fonte: SECN I – CLD")
                 if base < 500:
-                    limiting.append("Base das nuvens < 500 ft")
+                    limiting.append("Base de nuvens < 500 ft")
 
             if limiting:
                 zones[z] = ("NO-GO", reasons, limiting)
             else:
-                zones[z] = ("VFR POSSÍVEL", ["Sem limitações significativas"], [])
+                zones[z] = (
+                    "VFR POSSÍVEL",
+                    ["Sem limitações VFR identificadas", "Fonte: GAMET SECN I / II"],
+                    []
+                )
 
     # -------------------------------------------------
     # RESULTADOS TEXTO
@@ -159,7 +174,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         ax.axhspan(y0, y1, color=color, alpha=0.25)
 
     # -------------------------------------------------
-    # CIDADES (COMPLETO)
+    # CIDADES (completo)
     # -------------------------------------------------
     cities = {
         # NORTE
@@ -213,3 +228,4 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     st.pyplot(fig)
 
     st.caption("Ferramenta de apoio à decisão. Não substitui o julgamento do piloto.")
+
