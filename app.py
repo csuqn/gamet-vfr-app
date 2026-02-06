@@ -52,7 +52,7 @@ ZONE_BANDS = {
 # -------------------------------------------------
 def extract_min_visibility(text):
     """
-    Extrai visibilidade mínima e contexto.
+    Extrai visibilidade mínima global e contexto.
     Retorna (vis, contexto) ou (None, None)
     """
     values = []
@@ -63,7 +63,7 @@ def extract_min_visibility(text):
             continue
 
         if "SFC" in line:
-            context.append("superfície")
+            context.append("SFC")
         if "LCA" in line:
             context.append("LCA")
 
@@ -82,7 +82,8 @@ def extract_min_visibility(text):
 
 def extract_min_cloud_base(text):
     """
-    Base mínima de nuvens BKN/OVC.
+    Extrai base mínima de nuvens BKN/OVC.
+    Retorna (tipo, base_ft) ou None
     """
     clouds = []
 
@@ -107,17 +108,24 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     if global_vis is not None and global_vis < 3000:
         # NO-GO GLOBAL
         for z in ZONE_BANDS:
+            reasons = [
+                f"Visibilidade mínima: {global_vis} m" + (f" ({vis_context})" if vis_context else ""),
+                "Fonte: GAMET SECN I"
+            ]
+
+            cloud = extract_min_cloud_base(text)
+            if cloud:
+                ctype, base = cloud
+                reasons.insert(1, f"Base das nuvens: {ctype} {base} ft")
+
             zones[z] = (
                 "NO-GO",
-                [
-                    f"VIS mínima: {global_vis} m",
-                    f"Contexto: VIS {vis_context}" if vis_context else "Contexto: VIS",
-                    "Fonte: SECN I – SFC VIS"
-                ],
+                reasons,
                 ["VIS < 3000 m"]
             )
+
     else:
-        # Avaliação simples por CLD
+        # Avaliação por base de nuvens (informativa ou limitante)
         for z in ZONE_BANDS:
             reasons = []
             limiting = []
@@ -125,17 +133,20 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
             cloud = extract_min_cloud_base(text)
             if cloud:
                 ctype, base = cloud
-                reasons.append(f"Base de nuvens: {ctype} {base} ft")
-                reasons.append("Fonte: SECN I – CLD")
+                reasons.append(f"Base das nuvens: {ctype} {base} ft")
+                reasons.append("Fonte: GAMET SECN I")
                 if base < 500:
-                    limiting.append("Base de nuvens < 500 ft")
+                    limiting.append("Base das nuvens < 500 ft")
 
             if limiting:
                 zones[z] = ("NO-GO", reasons, limiting)
             else:
                 zones[z] = (
                     "VFR POSSÍVEL",
-                    ["Sem limitações VFR identificadas", "Fonte: GAMET SECN I / II"],
+                    reasons if reasons else [
+                        "Sem limitações VFR identificadas",
+                        "Fonte: GAMET SECN I / II"
+                    ],
                     []
                 )
 
@@ -174,7 +185,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         ax.axhspan(y0, y1, color=color, alpha=0.25)
 
     # -------------------------------------------------
-    # CIDADES (completo)
+    # CIDADES (mapa completo)
     # -------------------------------------------------
     cities = {
         # NORTE
@@ -228,4 +239,3 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     st.pyplot(fig)
 
     st.caption("Ferramenta de apoio à decisão. Não substitui o julgamento do piloto.")
-
