@@ -28,17 +28,13 @@ ZONE_BANDS = {
 PARTIAL_CUTS = {z: [] for z in ZONE_BANDS}
 
 # -------------------------------------------------
-# FUNÇÕES ESPACIAIS (CORRIGIDAS)
+# FUNÇÕES ESPACIAIS
 # -------------------------------------------------
 def line_applies_to_zone(line, zone):
     """
     Só VIS e CLD podem gerar cortes VFR.
-    Linhas irrelevantes (TURB, SIGWX, MT, ICE, etc.)
-    NÃO influenciam PARTIAL_CUTS.
     """
     zmin, zmax = ZONE_BANDS[zone]
-
-    # Apenas fenómenos relevantes para VFR
     is_vfr_relevant = ("VIS" in line) or ("CLD" in line)
 
     north_of = re.search(r"N OF N(\d{2})(\d{2})", line)
@@ -60,7 +56,6 @@ def line_applies_to_zone(line, zone):
             PARTIAL_CUTS[zone].append(("SOUTH", lat))
         return True
 
-    # Linhas irrelevantes não cortam zonas
     return True
 
 
@@ -75,35 +70,20 @@ def filter_text_for_zone(text, zone):
 # -------------------------------------------------
 def extract_min_visibility(text):
     values = []
-
     for m in re.findall(r"(\d{4})-(\d{4})M", text):
         values.append(int(m[0]))
-
     for m in re.findall(r"VIS\s*(\d{4})M", text):
         values.append(int(m))
-
     for m in re.findall(r"LOC\s*(\d{4})M", text):
         values.append(int(m))
-
     return min(values) if values else None
 
 
 def extract_min_cloud_base(text):
-    """
-    Devolve a base de nuvens mais baixa como:
-    (tipo_nuvem, base_em_ft)
-    """
     clouds = []
-
     for m in re.findall(r"(BKN|OVC)\s*(\d{3})", text):
-        cloud_type = m[0]
-        base_ft = int(m[1]) * 100
-        clouds.append((cloud_type, base_ft))
-
-    if not clouds:
-        return None
-
-    return min(clouds, key=lambda x: x[1])
+        clouds.append((m[0], int(m[1]) * 100))
+    return min(clouds, key=lambda x: x[1]) if clouds else None
 
 # -------------------------------------------------
 # LÓGICA VFR
@@ -122,10 +102,10 @@ def analyze_zone(text):
             limiting.append("VIS < 3000 m")
             no_go = True
 
-    if cloud_base is not None:
-        cloud_type, base_ft = cloud_base
-        reasons.append(f"BASE DAS NUVENS: {cloud_type} {base_ft} ft")
-        if base_ft < 500:
+    if cloud_base:
+        ctype, base = cloud_base
+        reasons.append(f"BASE DAS NUVENS: {ctype} {base} ft")
+        if base < 500:
             limiting.append("Base das nuvens < 500 ft")
             no_go = True
 
@@ -142,16 +122,11 @@ def analyze_zone(text):
 # -------------------------------------------------
 if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
-    # Limpar cortes anteriores
     for z in PARTIAL_CUTS:
         PARTIAL_CUTS[z].clear()
 
     text = gamet_text.upper()
-    zones = {}
-
-    for z in ZONE_BANDS:
-        ztext = filter_text_for_zone(text, z)
-        zones[z] = analyze_zone(ztext)
+    zones = {z: analyze_zone(filter_text_for_zone(text, z)) for z in ZONE_BANDS}
 
     # -------------------------------------------------
     # RESULTADOS TEXTO
@@ -159,43 +134,28 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     st.subheader("📋 Resultado VFR por zona")
 
     for z, (status, reasons, limiting) in zones.items():
-
         if status == "NO-GO" and PARTIAL_CUTS[z]:
             cut_dir, lat = PARTIAL_CUTS[z][0]
             st.error(f"{z}: NO-GO PARCIAL")
-
             st.write(f" • NO-GO a {'norte' if cut_dir=='NORTH' else 'sul'} de {lat:.1f}N")
             for r in reasons:
                 st.write(f"    – {r}")
             if limiting:
                 st.write(f"   Critério limitante: {limiting[0]}")
             st.write(f" • VFR possível a {'sul' if cut_dir=='NORTH' else 'norte'} de {lat:.1f}N")
-
         elif status == "NO-GO":
             st.error(f"{z}: NO-GO")
             for r in reasons:
                 st.write(f" • {r}")
             if limiting:
                 st.write(f" • Critério limitante: {limiting[0]}")
-
         else:
             st.success(f"{z}: VFR POSSÍVEL")
             for r in reasons:
                 st.write(f" • {r}")
 
     # -------------------------------------------------
-    # RESUMO GLOBAL
-    # -------------------------------------------------
-    st.subheader("🧭 Resumo global")
-
-    for z, (status, *_ ) in zones.items():
-        label = status
-        if status == "NO-GO" and PARTIAL_CUTS[z]:
-            label = "NO-GO PARCIAL"
-        st.write(f" • {z}: {label}")
-
-    # -------------------------------------------------
-    # MAPA (INALTERADO)
+    # MAPA
     # -------------------------------------------------
     st.subheader("🗺️ Mapa VFR – Portugal Continental (esquemático)")
 
@@ -216,29 +176,31 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
             ax.axhspan(mid, y1, color="red", alpha=0.25)
             ax.axhspan(y0, mid, color="green", alpha=0.25)
             ax.axhline(mid, linestyle="--", color="black")
-            ax.text(
-                0.5, mid + 0.15,
-                "Limite VFR / VFR boundary",
-                ha="center", va="bottom", fontsize=8, style="italic"
-            )
         else:
             ax.axhspan(y0, y1, color="red", alpha=0.25)
 
-    # CIDADES (baseline completo)
+    # -------------------------------------------------
+    # CIDADES (AJUSTADAS)
+    # -------------------------------------------------
     cities = {
+        # NORTE
         "Bragança":         (0.8, 13.5),
         "Viana do Castelo": (0.2, 12.6),
         "Braga":            (0.4, 11.8),
         "Vila Real":        (0.6, 11.0),
         "Porto":            (0.3, 10.5),
+
+        # CENTRO
         "Viseu":            (0.6, 8.6),
         "Aveiro":           (0.3, 8.0),
         "Guarda":           (0.8, 7.4),
         "Coimbra":          (0.5, 6.6),
         "Leiria":           (0.3, 5.6),
-        "Castelo Branco":   (0.8, 4.8),
-        "Santarém":         (0.4, 3.6),
-        "Portalegre":       (0.8, 2.8),
+        "Castelo Branco":   (0.8, 5.9),  # ligeiramente a norte de Leiria
+
+        # SUL
+        "Santarém":         (0.4, 3.0),  # alinhado com Portalegre
+        "Portalegre":       (0.8, 3.0),
         "Lisboa":           (0.3, 2.0),
         "Setúbal":          (0.3, 1.2),
         "Évora":            (0.6, 0.2),
@@ -259,4 +221,3 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     st.pyplot(fig)
 
     st.caption("Ferramenta de apoio à decisão. Não substitui o julgamento do piloto.")
-
