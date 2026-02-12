@@ -39,7 +39,7 @@ gamet_text = st.text_area(
 )
 
 # -------------------------------------------------
-# ZONAS (latitudes aproximadas)
+# ZONAS
 # -------------------------------------------------
 ZONE_BANDS = {
     "NORTE": (39.5, 42.5),
@@ -51,10 +51,6 @@ ZONE_BANDS = {
 # PARSING
 # -------------------------------------------------
 def extract_min_visibility(text):
-    """
-    Extrai visibilidade mínima global e contexto.
-    Retorna (vis, contexto) ou (None, None)
-    """
     values = []
     context = []
 
@@ -81,16 +77,24 @@ def extract_min_visibility(text):
 
 
 def extract_min_cloud_base(text):
-    """
-    Extrai base mínima de nuvens BKN/OVC.
-    Retorna (tipo, base_ft) ou None
-    """
     clouds = []
+    source = None
 
-    for m in re.findall(r"(BKN|OVC)\s*(\d{3})", text):
-        clouds.append((m[0], int(m[1]) * 100))
+    for line in text.splitlines():
+        if "CLD" in line:
+            if "SECN I" in text.split("CLD")[0]:
+                source = "GAMET SECN I"
+            else:
+                source = "GAMET SECN II"
 
-    return min(clouds, key=lambda x: x[1]) if clouds else None
+        for m in re.findall(r"(BKN|OVC)\s*(\d{3})", line):
+            clouds.append((m[0], int(m[1]) * 100))
+
+    if clouds:
+        ctype, base = min(clouds, key=lambda x: x[1])
+        return ctype, base, source if source else "GAMET SECN II"
+
+    return None
 
 # -------------------------------------------------
 # EXECUÇÃO
@@ -100,22 +104,23 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     text = gamet_text.upper()
     zones = {}
 
-    # -------------------------------------------------
-    # REGRA ABSOLUTA: VIS GLOBAL
-    # -------------------------------------------------
     global_vis, vis_context = extract_min_visibility(text)
 
+    # -------------------------------------------------
+    # REGRA ABSOLUTA VIS
+    # -------------------------------------------------
     if global_vis is not None and global_vis < 3000:
-        # NO-GO GLOBAL
+
+        cloud = extract_min_cloud_base(text)
+
         for z in ZONE_BANDS:
             reasons = [
                 f"Visibilidade mínima: {global_vis} m" + (f" ({vis_context})" if vis_context else ""),
                 "Fonte: GAMET SECN I"
             ]
 
-            cloud = extract_min_cloud_base(text)
             if cloud:
-                ctype, base = cloud
+                ctype, base, source = cloud
                 reasons.insert(1, f"Base das nuvens: {ctype} {base} ft")
 
             zones[z] = (
@@ -124,17 +129,21 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
                 ["VIS < 3000 m"]
             )
 
+    # -------------------------------------------------
+    # SEM VIS LIMITANTE
+    # -------------------------------------------------
     else:
-        # Avaliação por base de nuvens (informativa ou limitante)
+        cloud = extract_min_cloud_base(text)
+
         for z in ZONE_BANDS:
             reasons = []
             limiting = []
 
-            cloud = extract_min_cloud_base(text)
             if cloud:
-                ctype, base = cloud
+                ctype, base, source = cloud
                 reasons.append(f"Base das nuvens: {ctype} {base} ft")
-                reasons.append("Fonte: GAMET SECN I")
+                reasons.append(f"Fonte: {source}")
+
                 if base < 500:
                     limiting.append("Base das nuvens < 500 ft")
 
@@ -167,7 +176,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
             st.write(f" • Critério limitante: {limiting[0]}")
 
     # -------------------------------------------------
-    # MAPA ESQUEMÁTICO
+    # MAPA
     # -------------------------------------------------
     st.subheader("🗺️ Mapa VFR – Portugal Continental (esquemático)")
 
@@ -184,42 +193,31 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         color = "green" if status == "VFR POSSÍVEL" else "red"
         ax.axhspan(y0, y1, color=color, alpha=0.25)
 
-    # -------------------------------------------------
-    # CIDADES (mapa completo)
-    # -------------------------------------------------
     cities = {
-        # NORTE
-        "Bragança":         (0.8, 13.5),
+        "Bragança": (0.8, 13.5),
         "Viana do Castelo": (0.2, 12.6),
-        "Braga":            (0.4, 11.8),
-        "Vila Real":        (0.6, 11.0),
-        "Porto":            (0.3, 10.5),
-
-        # CENTRO
-        "Viseu":            (0.6, 8.6),
-        "Aveiro":           (0.3, 8.0),
-        "Guarda":           (0.8, 7.4),
-        "Coimbra":          (0.5, 6.6),
-        "Leiria":           (0.3, 5.6),
-        "Castelo Branco":   (0.8, 5.9),
-
-        # SUL
-        "Santarém":         (0.4, 3.0),
-        "Portalegre":       (0.8, 3.0),
-        "Lisboa":           (0.3, 2.0),
-        "Setúbal":          (0.3, 1.2),
-        "Évora":            (0.6, 0.2),
-        "Beja":             (0.7, -1.0),
-        "Faro":             (0.7, -2.2),
+        "Braga": (0.4, 11.8),
+        "Vila Real": (0.6, 11.0),
+        "Porto": (0.3, 10.5),
+        "Viseu": (0.6, 8.6),
+        "Aveiro": (0.3, 8.0),
+        "Guarda": (0.8, 7.4),
+        "Coimbra": (0.5, 6.6),
+        "Leiria": (0.3, 5.6),
+        "Castelo Branco": (0.8, 5.9),
+        "Santarém": (0.4, 3.0),
+        "Portalegre": (0.8, 3.0),
+        "Lisboa": (0.3, 2.0),
+        "Setúbal": (0.3, 1.2),
+        "Évora": (0.6, 0.2),
+        "Beja": (0.7, -1.0),
+        "Faro": (0.7, -2.2),
     }
 
     for name, (x, y) in cities.items():
         ax.plot(x, y, "ko", markersize=3)
         ax.text(x + 0.015, y, name, va="center", fontsize=8)
 
-    # -------------------------------------------------
-    # LEGENDA
-    # -------------------------------------------------
     ax.legend(
         handles=[
             Patch(facecolor="red", alpha=0.25, label="🟥 NO-GO"),
@@ -239,3 +237,4 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     st.pyplot(fig)
 
     st.caption("Ferramenta de apoio à decisão. Não substitui o julgamento do piloto.")
+
