@@ -48,9 +48,13 @@ ZONE_BANDS = {
 }
 
 # -------------------------------------------------
-# PARSING
+# FUNÇÕES DE PARSING
 # -------------------------------------------------
 def extract_min_visibility(text):
+    """
+    Extrai visibilidade mínima global e contexto.
+    Retorna (vis, contexto) ou (None, None)
+    """
     values = []
     context = []
 
@@ -77,22 +81,17 @@ def extract_min_visibility(text):
 
 
 def extract_min_cloud_base(text):
+    """
+    Extrai base mínima de nuvens BKN/OVC.
+    Retorna (tipo, base_ft) ou None
+    """
     clouds = []
-    source = None
 
-    for line in text.splitlines():
-        if "CLD" in line:
-            if "SECN I" in text.split("CLD")[0]:
-                source = "GAMET SECN I"
-            else:
-                source = "GAMET SECN II"
-
-        for m in re.findall(r"(BKN|OVC)\s*(\d{3})", line):
-            clouds.append((m[0], int(m[1]) * 100))
+    for m in re.findall(r"(BKN|OVC)\s*(\d{3})", text):
+        clouds.append((m[0], int(m[1]) * 100))
 
     if clouds:
-        ctype, base = min(clouds, key=lambda x: x[1])
-        return ctype, base, source if source else "GAMET SECN II"
+        return min(clouds, key=lambda x: x[1])
 
     return None
 
@@ -107,7 +106,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     global_vis, vis_context = extract_min_visibility(text)
 
     # -------------------------------------------------
-    # REGRA ABSOLUTA VIS
+    # REGRA ABSOLUTA: VIS < 3000 ⇒ NO-GO GLOBAL
     # -------------------------------------------------
     if global_vis is not None and global_vis < 3000:
 
@@ -115,12 +114,13 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
         for z in ZONE_BANDS:
             reasons = [
-                f"Visibilidade mínima: {global_vis} m" + (f" ({vis_context})" if vis_context else ""),
-                "Fonte: GAMET SECN I"
+                f"Visibilidade mínima: {global_vis} m" +
+                (f" ({vis_context})" if vis_context else ""),
+                "Fonte: GAMET"
             ]
 
             if cloud:
-                ctype, base, source = cloud
+                ctype, base = cloud
                 reasons.insert(1, f"Base das nuvens: {ctype} {base} ft")
 
             zones[z] = (
@@ -140,9 +140,9 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
             limiting = []
 
             if cloud:
-                ctype, base, source = cloud
+                ctype, base = cloud
                 reasons.append(f"Base das nuvens: {ctype} {base} ft")
-                reasons.append(f"Fonte: {source}")
+                reasons.append("Fonte: GAMET")
 
                 if base < 500:
                     limiting.append("Base das nuvens < 500 ft")
@@ -154,7 +154,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
                     "VFR POSSÍVEL",
                     reasons if reasons else [
                         "Sem limitações VFR identificadas",
-                        "Fonte: GAMET SECN I / II"
+                        "Fonte: GAMET"
                     ],
                     []
                 )
@@ -172,11 +172,12 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
         for r in reasons:
             st.write(f" • {r}")
+
         if limiting:
             st.write(f" • Critério limitante: {limiting[0]}")
 
     # -------------------------------------------------
-    # MAPA
+    # MAPA ESQUEMÁTICO
     # -------------------------------------------------
     st.subheader("🗺️ Mapa VFR – Portugal Continental (esquemático)")
 
@@ -193,6 +194,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         color = "green" if status == "VFR POSSÍVEL" else "red"
         ax.axhspan(y0, y1, color=color, alpha=0.25)
 
+    # Localidades
     cities = {
         "Bragança": (0.8, 13.5),
         "Viana do Castelo": (0.2, 12.6),
@@ -222,7 +224,8 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         handles=[
             Patch(facecolor="red", alpha=0.25, label="🟥 NO-GO"),
             Patch(facecolor="green", alpha=0.25, label="🟩 VFR POSSÍVEL"),
-            Line2D([0], [0], linestyle="--", color="black", label="Limite aproximado GAMET"),
+            Line2D([0], [0], linestyle="--", color="black",
+                   label="Limite aproximado GAMET"),
         ],
         loc="lower left",
         fontsize=8
@@ -237,4 +240,5 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     st.pyplot(fig)
 
     st.caption("Ferramenta de apoio à decisão. Não substitui o julgamento do piloto.")
+
 
