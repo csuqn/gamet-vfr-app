@@ -16,7 +16,7 @@ gamet_text = st.text_area(
 )
 
 # -------------------------------------------------
-# DEFINIÇÃO DAS ZONAS (latitudes simplificadas)
+# DEFINIÇÃO DAS ZONAS
 # -------------------------------------------------
 ZONES = {
     "NORTE": {"min_lat": 39.5, "max_lat": 42.5},
@@ -50,6 +50,7 @@ def zones_from_lat_condition(line):
             affected.append(zone)
 
     return affected
+
 
 # -------------------------------------------------
 # PARSER GEOGRÁFICO
@@ -99,6 +100,7 @@ def parse_gamet_geographical(text):
 
     return zone_data
 
+
 # -------------------------------------------------
 # MOTOR DE DECISÃO – FILOSOFIA REALISTA GA
 # -------------------------------------------------
@@ -116,10 +118,10 @@ def decision_for_zone(events):
 
     # ---------------- HARD LIMITS ----------------
     if vis is not None and vis < 3000:
-        return "NO-GO", ["Visibilidade < 3000m"]
+        return "NO-GO", ["Visibilidade < 3000m"], vis, base, ts, turb_sev, turb_mod
 
     if base is not None and base < 500:
-        return "NO-GO", ["Base < 500ft"]
+        return "NO-GO", ["Base < 500ft"], vis, base, ts, turb_sev, turb_mod
 
     # ---------------- SOFT SCORING ----------------
     score = 0
@@ -144,13 +146,15 @@ def decision_for_zone(events):
         score += 25
         reasons.append("Turb moderada")
 
-    # ---------------- CLASSIFICAÇÃO ----------------
     if score >= 140:
-        return "NO-GO", reasons
+        decision = "NO-GO"
     elif score >= 70:
-        return "MARGINAL", reasons
+        decision = "MARGINAL"
     else:
-        return "GO", reasons
+        decision = "GO"
+
+    return decision, reasons, vis, base, ts, turb_sev, turb_mod
+
 
 # -------------------------------------------------
 # EXECUÇÃO
@@ -158,15 +162,17 @@ def decision_for_zone(events):
 if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     zone_data = parse_gamet_geographical(gamet_text)
+
     results = {}
 
     for zone in ZONES:
-        decision, reasons = decision_for_zone(zone_data[zone])
-        results[zone] = (decision, reasons)
+        results[zone] = decision_for_zone(zone_data[zone])
 
     st.subheader("📋 Resultado por Zona")
 
-    for zone, (decision, reasons) in results.items():
+    for zone in ZONES:
+
+        decision, reasons, vis, base, ts, turb_sev, turb_mod = results[zone]
 
         if decision == "NO-GO":
             st.error(f"{zone}: ❌ NO-GO")
@@ -175,6 +181,19 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         else:
             st.success(f"{zone}: ✅ GO")
 
+        # -------- Informação Meteorológica --------
+        if vis is not None:
+            st.write(f"👁️ Vis mínima: {vis} m")
+        if base is not None:
+            st.write(f"☁️ Base mínima: {base} ft")
+        if ts:
+            st.write("⛈️ Trovoadas presentes")
+        if turb_sev:
+            st.write("🌪️ Turbulência severa")
+        elif turb_mod:
+            st.write("🌬️ Turbulência moderada")
+
+        # -------- Fatores de decisão --------
         for r in reasons:
             st.write(f"• {r}")
 
@@ -201,7 +220,6 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         decision = results[zone][0]
         ax.axhspan(y0, y1, color=color_map[decision], alpha=0.18)
 
-    # CIDADES
     cities = {
         "Bragança": (0.8, 13.5),
         "Viana do Castelo": (0.2, 12.6),
@@ -248,5 +266,6 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     st.pyplot(fig)
 
     st.caption("Ferramenta de apoio à decisão. Não substitui julgamento do piloto.")
+
 
 
