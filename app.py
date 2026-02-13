@@ -8,7 +8,7 @@ from matplotlib.patches import Patch
 # CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="centered")
-st.title("✈️ LPPC GAMET – Análise VFR (v2.0 Profissional)")
+st.title("✈️ LPPC GAMET – Análise VFR Geográfica")
 
 gamet_text = st.text_area(
     "Cole aqui o texto completo do GAMET (LPPC)",
@@ -16,144 +16,143 @@ gamet_text = st.text_area(
 )
 
 # -------------------------------------------------
-# FASE 2 – PARSER ROBUSTO
+# DEFINIÇÃO DAS ZONAS
 # -------------------------------------------------
-def parse_gamet(text):
+ZONES = {
+    "NORTE": {"min_lat": 39.5, "max_lat": 90},
+    "CENTRO": {"min_lat": 38.5, "max_lat": 39.5},
+    "SUL": {"min_lat": -90, "max_lat": 38.5}
+}
 
-    data = {
-        "visibility": {"min": None},
-        "clouds": {"extended_min_base": None},
-        "hazards": {"ts": False, "embedded_ts": False, "turbulence": None},
-        "freezing_level": {"min": None}
+# -------------------------------------------------
+# FUNÇÃO AUXILIAR – DETETAR ZONA POR LATITUDE
+# -------------------------------------------------
+def zones_from_lat_condition(condition):
+
+    match = re.search(r"([NS])\s?OF\s?N(\d{2})(\d{2})", condition)
+
+    if not match:
+        return list(ZONES.keys())  # aplica globalmente
+
+    direction = match.group(1)
+    lat_deg = int(match.group(2))
+    lat_min = int(match.group(3))
+
+    latitude = lat_deg + lat_min / 60
+
+    affected = []
+
+    for zone, limits in ZONES.items():
+        if direction == "N" and limits["max_lat"] >= latitude:
+            if limits["min_lat"] >= latitude:
+                affected.append(zone)
+        elif direction == "S" and limits["min_lat"] <= latitude:
+            if limits["max_lat"] <= latitude:
+                affected.append(zone)
+
+    return affected if affected else list(ZONES.keys())
+
+
+# -------------------------------------------------
+# PARSER GEOGRÁFICO
+# -------------------------------------------------
+def parse_gamet_geographical(text):
+
+    text = text.upper()
+    lines = text.splitlines()
+
+    zone_data = {
+        "NORTE": [],
+        "CENTRO": [],
+        "SUL": []
     }
 
-    lines = text.splitlines()
-    text_upper = text.upper()
-
-    # ---------------- VISIBILITY (GLOBAL) ----------------
-    vis_values = []
-
-    # Ranges tipo 0400-5000M
-    ranges = re.findall(r"(\d{4})-(\d{4})M", text_upper)
-    for low, _ in ranges:
-        vis_values.append(int(low))
-
-    # Valores isolados tipo 3000M
-    singles = re.findall(r"\b(\d{4})M\b", text_upper)
-    for val in singles:
-        vis_values.append(int(val))
-
-    if vis_values:
-        data["visibility"]["min"] = min(vis_values)
-
-    # ---------------- CLOUD BASE (BKN / OVC) ----------------
-    cloud_bases = []
-
     for line in lines:
+
+        affected_zones = zones_from_lat_condition(line)
+
+        # VIS
+        vis_matches = re.findall(r"(\d{4})-(\d{4})M", line)
+        for low, _ in vis_matches:
+            for z in affected_zones:
+                zone_data[z].append(("VIS", int(low)))
+
+        singles = re.findall(r"\b(\d{4})M\b", line)
+        for val in singles:
+            for z in affected_zones:
+                zone_data[z].append(("VIS", int(val)))
+
+        # CLOUD BASE
         if "BKN" in line or "OVC" in line:
-            # BKN005 ou BKN 005
-            matches = re.findall(r"(BKN|OVC)\s?(\d{3})", line)
-            for _, base in matches:
-                cloud_bases.append(int(base) * 100)
+            bases = re.findall(r"(BKN|OVC)\s?(\d{3})", line)
+            for _, base in bases:
+                for z in affected_zones:
+                    zone_data[z].append(("BASE", int(base) * 100))
 
-            # ranges 000-006
-            ranges = re.findall(r"(\d{3})-(\d{3})", line)
-            for low, _ in ranges:
-                cloud_bases.append(int(low) * 100)
+        # TS
+        if "TS" in line:
+            for z in affected_zones:
+                zone_data[z].append(("TS", 1))
 
-    if cloud_bases:
-        data["clouds"]["extended_min_base"] = min(cloud_bases)
-
-    # ---------------- TS ----------------
-    if "TS" in text_upper:
-        data["hazards"]["ts"] = True
-
-    if "EMBD TS" in text_upper or "EMBEDDED TS" in text_upper:
-        data["hazards"]["embedded_ts"] = True
-
-    # ---------------- TURB ----------------
-    for line in lines:
+        # TURB
         if "TURB" in line:
             if "SEV" in line:
-                data["hazards"]["turbulence"] = "SEV"
+                for z in affected_zones:
+                    zone_data[z].append(("TURB", "SEV"))
             elif "MOD" in line:
-                data["hazards"]["turbulence"] = "MOD"
+                for z in affected_zones:
+                    zone_data[z].append(("TURB", "MOD"))
 
-    # ---------------- FREEZING LEVEL ----------------
-    fzl = re.findall(r"FZLVL:\s*(\d+)FT", text_upper)
-    if fzl:
-        data["freezing_level"]["min"] = min([int(x) for x in fzl])
-
-    return data
+    return zone_data
 
 
 # -------------------------------------------------
-# FASE 3 – MOTOR PROFISSIONAL
+# MOTOR POR ZONA
 # -------------------------------------------------
-def vfr_decision(data):
+def decision_for_zone(zone_events):
 
-    vis = data["visibility"]["min"]
-    base = data["clouds"]["extended_min_base"]
-    turb = data["hazards"]["turbulence"]
-    ts = data["hazards"]["ts"]
-    embd_ts = data["hazards"]["embedded_ts"]
-    fzl = data["freezing_level"]["min"]
+    vis = min([v for t, v in zone_events if t == "VIS"], default=None)
+    base = min([v for t, v in zone_events if t == "BASE"], default=None)
+    ts = any(t == "TS" for t, _ in zone_events)
+    turb_sev = any(t == "TURB" and v == "SEV" for t, v in zone_events)
+    turb_mod = any(t == "TURB" and v == "MOD" for t, v in zone_events)
 
-    # =============================
-    # 🔴 HARD LIMITS
-    # =============================
-
+    # HARD LIMITS
     if vis is not None and vis < 3000:
-        return "NO-GO", "HARD LIMIT", ["Visibilidade < 3000m"]
+        return "NO-GO", ["Visibilidade < 3000m"]
 
     if base is not None and base < 500:
-        return "NO-GO", "HARD LIMIT", ["Base de nuvens < 500ft"]
+        return "NO-GO", ["Base < 500ft"]
 
-    if embd_ts:
-        return "NO-GO", "HARD LIMIT", ["Trovoadas embebidas"]
-
-    # =============================
-    # 🟡 SOFT SCORING
-    # =============================
-
+    # SOFT
     score = 0
     reasons = []
 
-    if vis is not None and 3000 <= vis < 5000:
+    if vis is not None and vis < 5000:
         score += 40
-        reasons.append("Visibilidade 3000–5000m")
+        reasons.append("Vis 3000–5000m")
 
-    if base is not None and 500 <= base < 1500:
+    if base is not None and base < 1500:
         score += 50
         reasons.append("Base 500–1500ft")
 
     if ts:
         score += 60
-        reasons.append("Trovoadas isoladas")
+        reasons.append("Trovoadas")
 
-    if turb == "SEV":
+    if turb_sev:
         score += 60
-        reasons.append("Turbulência severa")
-    elif turb == "MOD":
+        reasons.append("Turb severa")
+    elif turb_mod:
         score += 35
-        reasons.append("Turbulência moderada")
-
-    if fzl is not None and fzl < 4000:
-        score += 25
-        reasons.append("Freezing level < 4000ft")
-
-    # =============================
-    # CLASSIFICAÇÃO FINAL
-    # =============================
+        reasons.append("Turb moderada")
 
     if score >= 100:
-        decision = "NO-GO"
+        return "NO-GO", reasons
     elif score >= 50:
-        decision = "MARGINAL"
+        return "MARGINAL", reasons
     else:
-        decision = "GO"
-
-    return decision, score, reasons
+        return "GO", reasons
 
 
 # -------------------------------------------------
@@ -161,27 +160,32 @@ def vfr_decision(data):
 # -------------------------------------------------
 if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
-    text = gamet_text.upper()
-    parsed = parse_gamet(text)
-    decision, score, reasons = vfr_decision(parsed)
+    zone_data = parse_gamet_geographical(gamet_text)
 
-    # ---------------- RESULTADO ----------------
-    st.subheader("📋 Resultado Global")
+    results = {}
 
-    if decision == "NO-GO":
-        st.error(f"❌ {decision}")
-    elif decision == "MARGINAL":
-        st.warning(f"⚠️ {decision} | Score: {score}")
-    else:
-        st.success(f"✅ {decision} | Score: {score}")
+    for zone in ZONES.keys():
+        decision, reasons = decision_for_zone(zone_data[zone])
+        results[zone] = (decision, reasons)
 
-    for r in reasons:
-        st.write(f"• {r}")
+    st.subheader("📋 Resultado por Zona")
 
-    st.divider()
+    for zone, (decision, reasons) in results.items():
+
+        if decision == "NO-GO":
+            st.error(f"{zone}: ❌ NO-GO")
+        elif decision == "MARGINAL":
+            st.warning(f"{zone}: ⚠️ MARGINAL")
+        else:
+            st.success(f"{zone}: ✅ GO")
+
+        for r in reasons:
+            st.write(f"• {r}")
+
+        st.divider()
 
     # ---------------- MAPA ----------------
-    st.subheader("🗺️ Mapa VFR – Portugal Continental")
+    st.subheader("🗺️ Mapa VFR – Decisão Geográfica")
 
     fig, ax = plt.subplots(figsize=(6, 10))
 
@@ -197,51 +201,15 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         "SUL": (-4.5, 4.0)
     }
 
-    for z, (y0, y1) in ZONE_Y.items():
+    for zone, (y0, y1) in ZONE_Y.items():
+        decision = results[zone][0]
         ax.axhspan(y0, y1, color=color_map[decision], alpha=0.18)
-
-    cities = {
-        "Bragança": (0.8, 13.5),
-        "Viana do Castelo": (0.2, 12.6),
-        "Braga": (0.4, 11.8),
-        "Vila Real": (0.6, 11.0),
-        "Porto": (0.3, 10.5),
-        "Viseu": (0.6, 8.6),
-        "Aveiro": (0.3, 8.0),
-        "Guarda": (0.8, 7.4),
-        "Coimbra": (0.5, 6.6),
-        "Leiria": (0.3, 5.6),
-        "Castelo Branco": (0.8, 5.9),
-        "Santarém": (0.4, 3.0),
-        "Portalegre": (0.8, 3.0),
-        "Lisboa": (0.3, 2.0),
-        "Setúbal": (0.3, 1.2),
-        "Évora": (0.6, 0.2),
-        "Beja": (0.7, -1.0),
-        "Faro": (0.7, -2.2),
-    }
-
-    for name, (x, y) in cities.items():
-        ax.plot(x, y, "ko", markersize=3)
-        ax.text(x + 0.015, y, name, va="center", fontsize=8)
-
-    ax.legend(
-        handles=[
-            Patch(facecolor="green", alpha=0.25, label="GO"),
-            Patch(facecolor="orange", alpha=0.25, label="MARGINAL"),
-            Patch(facecolor="red", alpha=0.25, label="NO-GO"),
-            Line2D([0], [0], marker="o", color="black",
-                   linestyle="None", markersize=4, label="Cidade")
-        ],
-        loc="lower left",
-        fontsize=8
-    )
 
     ax.set_xlim(0, 1)
     ax.set_ylim(-4.5, 14.0)
     ax.set_xticks([])
     ax.set_yticks([])
-    ax.set_title("Decisão VFR Profissional")
+    ax.set_title("Decisão VFR por Zona")
 
     st.pyplot(fig)
 
