@@ -85,7 +85,7 @@ def extract_min_cloud_base(text):
     return min(bases) if bases else None
 
 # -------------------------------------------------
-# CLOUD BASE EXTENDED (qualquer BKN/OVC no texto)
+# CLOUD BASE EXTENDED (qualquer BKN/OVC)
 # -------------------------------------------------
 def extract_cloud_base_extended(text):
     bases = []
@@ -111,7 +111,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     cloud_extended = extract_cloud_base_extended(text)
 
     # -------------------------------------------------
-    # REGRA VISIBILIDADE
+    # REGRA ABSOLUTA VIS
     # -------------------------------------------------
     if global_vis is not None and global_vis < 3000:
 
@@ -124,7 +124,13 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
             if cloud_strict:
                 reasons.append(f"Base das nuvens (CLD): {cloud_strict} ft")
 
-            zones[z] = ("NO-GO", reasons, ["VIS < 3000 m"])
+            reasons.append("Fonte: GAMET")
+
+            zones[z] = (
+                "NO-GO",
+                reasons,
+                ["VIS < 3000 m"]
+            )
 
     # -------------------------------------------------
     # SEM VIS LIMITANTE
@@ -134,6 +140,13 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
             reasons = []
             limiting = []
 
+            # VIS informativa (mesmo >=3000)
+            if global_vis is not None:
+                reasons.append(
+                    f"Visibilidade mínima: {global_vis} m" +
+                    (f" ({vis_context})" if vis_context else "")
+                )
+
             if cloud_strict:
                 reasons.append(f"Base das nuvens (CLD): {cloud_strict} ft")
 
@@ -141,13 +154,18 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
                     limiting.append("Base das nuvens < 500 ft")
 
             if limiting:
+                reasons.append("Fonte: GAMET")
                 zones[z] = ("NO-GO", reasons, limiting)
             else:
-                zones[z] = (
-                    "VFR POSSÍVEL",
-                    reasons if reasons else ["Sem limitações VFR identificadas"],
-                    []
-                )
+                if not reasons:
+                    reasons = [
+                        "Sem limitações VFR identificadas",
+                        "Fonte: GAMET"
+                    ]
+                else:
+                    reasons.append("Fonte: GAMET")
+
+                zones[z] = ("VFR POSSÍVEL", reasons, [])
 
     # -------------------------------------------------
     # RESULTADOS
@@ -167,7 +185,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
             st.write(f" • Critério limitante: {limiting[0]}")
 
     # -------------------------------------------------
-    # AVISO VISUAL (Extended inferior ao Strict)
+    # AVISO EXTENDED
     # -------------------------------------------------
     if cloud_extended is not None:
         if cloud_strict is None or cloud_extended < cloud_strict:
@@ -176,7 +194,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
             )
 
     # -------------------------------------------------
-    # MAPA ESQUEMÁTICO
+    # MAPA
     # -------------------------------------------------
     st.subheader("🗺️ Mapa VFR – Portugal Continental (esquemático)")
 
@@ -238,3 +256,4 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     st.pyplot(fig)
 
     st.caption("Ferramenta de apoio à decisão. Não substitui o julgamento do piloto.")
+
