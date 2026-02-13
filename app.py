@@ -1,8 +1,8 @@
 import streamlit as st
 import re
 import matplotlib.pyplot as plt
-from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
+from matplotlib.lines import Line2D
 
 # -------------------------------------------------
 # CONFIG
@@ -12,11 +12,11 @@ st.title("✈️ LPPC GAMET – Briefing VFR Geográfico (GA Realista)")
 
 gamet_text = st.text_area(
     "Cole aqui o texto completo do GAMET (LPPC)",
-    height=300
+    height=250
 )
 
 # -------------------------------------------------
-# ZONAS
+# DEFINIÇÃO DAS ZONAS
 # -------------------------------------------------
 ZONES = {
     "NORTE": {"min_lat": 39.5, "max_lat": 42.5},
@@ -64,25 +64,26 @@ def parse_gamet(text):
 
         affected_zones = zones_from_lat_condition(line)
 
-        ranges = re.findall(r"(\d{4})-(\d{4})M", line)
-        for low, _ in ranges:
+        # VIS
+        for low, _ in re.findall(r"(\d{4})-(\d{4})M", line):
             for z in affected_zones:
                 zone_data[z].append(("VIS", int(low)))
 
-        singles = re.findall(r"\b(\d{4})M\b", line)
-        for val in singles:
+        for val in re.findall(r"\b(\d{4})M\b", line):
             for z in affected_zones:
                 zone_data[z].append(("VIS", int(val)))
 
-        bases = re.findall(r"(BKN|OVC)\s?(\d{3})", line)
-        for _, base in bases:
+        # BASE
+        for _, base in re.findall(r"(BKN|OVC)\s?(\d{3})", line):
             for z in affected_zones:
                 zone_data[z].append(("BASE", int(base) * 100))
 
+        # TS
         if "TS" in line:
             for z in affected_zones:
                 zone_data[z].append(("TS", 1))
 
+        # TURB
         if "TURB" in line:
             if "SEV" in line:
                 for z in affected_zones:
@@ -98,11 +99,11 @@ def parse_gamet(text):
 # -------------------------------------------------
 def decision_for_zone(events):
 
-    vis_values = [v for t, v in events if t == "VIS"]
-    base_values = [v for t, v in events if t == "BASE"]
+    vis_vals = [v for t, v in events if t == "VIS"]
+    base_vals = [v for t, v in events if t == "BASE"]
 
-    vis = min(vis_values) if vis_values else None
-    base = min(base_values) if base_values else None
+    vis = min(vis_vals) if vis_vals else None
+    base = min(base_vals) if base_vals else None
 
     ts = any(t == "TS" for t, _ in events)
     turb_sev = any(t == "TURB" and v == "SEV" for t, v in events)
@@ -147,7 +148,6 @@ def decision_for_zone(events):
 
     return decision, reasons, vis, base, ts, turb_sev, turb_mod
 
-
 # -------------------------------------------------
 # EXECUÇÃO
 # -------------------------------------------------
@@ -156,27 +156,66 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     zone_data = parse_gamet(gamet_text)
     results = {z: decision_for_zone(zone_data[z]) for z in ZONES}
 
-    # -------------------------------------------------
     # RESUMO EXECUTIVO
-    # -------------------------------------------------
     st.subheader("📌 Resumo Executivo")
-    summary_cols = st.columns(3)
+    cols = st.columns(3)
 
     for i, zone in enumerate(ZONES):
         decision = results[zone][0]
-
         if decision == "NO-GO":
-            summary_cols[i].error(f"{zone}\nNO-GO")
+            cols[i].error(f"{zone}\nNO-GO")
         elif decision == "MARGINAL":
-            summary_cols[i].warning(f"{zone}\nMARGINAL")
+            cols[i].warning(f"{zone}\nMARGINAL")
         else:
-            summary_cols[i].success(f"{zone}\nGO")
+            cols[i].success(f"{zone}\nGO")
 
     st.divider()
 
-    # -------------------------------------------------
-    # MAPA COM CIDADES
-    # -------------------------------------------------
+    # PAINEL DETALHADO
+    st.subheader("📋 Briefing Detalhado")
+    detail_cols = st.columns(3)
+
+    for i, zone in enumerate(ZONES):
+
+        decision, reasons, vis, base, ts, turb_sev, turb_mod = results[zone]
+
+        with detail_cols[i]:
+
+            st.markdown(f"### {zone}")
+
+            if decision == "NO-GO":
+                st.error("🔴 HARD LIMIT" if any("Visibilidade" in r or "Base" in r for r in reasons) else "❌ NO-GO")
+            elif decision == "MARGINAL":
+                st.warning("⚠️ MARGINAL")
+            else:
+                st.success("✅ GO")
+
+            st.markdown("**Condições:**")
+
+            st.write(f"👁️ {vis} m" if vis else "👁️ —")
+
+            if base is not None:
+                st.write("☁️ SFC" if base == 0 else f"☁️ {base} ft")
+            else:
+                st.write("☁️ Base significativa não reportada")
+
+            st.write(f"⛈️ {'Sim' if ts else 'Não'}")
+
+            if turb_sev:
+                st.write("🌪️ Severa")
+            elif turb_mod:
+                st.write("🌬️ Moderada")
+            else:
+                st.write("🌬️ Não significativa")
+
+            if reasons:
+                st.markdown("**Limitantes:**")
+                for r in reasons:
+                    st.write(f"• {r}")
+
+    st.divider()
+
+    # MAPA
     st.subheader("🗺️ Mapa VFR")
 
     fig, ax = plt.subplots(figsize=(6, 10))
@@ -190,51 +229,34 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     for zone, (y0, y1) in ZONE_Y.items():
         decision = results[zone][0]
-        ax.axhspan(y0, y1, color=color_map[decision], alpha=0.18)
+        ax.axhspan(y0, y1, color=color_map[decision], alpha=0.2)
 
-    # CIDADES RESTAURADAS
     cities = {
         "Bragança": (0.8, 13.5),
-        "Viana do Castelo": (0.2, 12.6),
-        "Braga": (0.4, 11.8),
-        "Vila Real": (0.6, 11.0),
         "Porto": (0.3, 10.5),
         "Viseu": (0.6, 8.6),
-        "Aveiro": (0.3, 8.0),
-        "Guarda": (0.8, 7.4),
         "Coimbra": (0.5, 6.6),
-        "Leiria": (0.3, 5.6),
-        "Castelo Branco": (0.8, 5.9),
-        "Santarém": (0.4, 3.0),
-        "Portalegre": (0.8, 3.0),
         "Lisboa": (0.3, 2.0),
-        "Setúbal": (0.3, 1.2),
         "Évora": (0.6, 0.2),
-        "Beja": (0.7, -1.0),
         "Faro": (0.7, -2.2),
     }
 
     for name, (x, y) in cities.items():
-        ax.plot(x, y, "ko", markersize=3)
-        ax.text(x + 0.015, y, name, va="center", fontsize=8)
-
-    ax.legend(
-        handles=[
-            Patch(facecolor="green", alpha=0.25, label="GO"),
-            Patch(facecolor="orange", alpha=0.25, label="MARGINAL"),
-            Patch(facecolor="red", alpha=0.25, label="NO-GO"),
-            Line2D([0], [0], marker="o", color="black",
-                   linestyle="None", markersize=4, label="Cidade")
-        ],
-        loc="lower left",
-        fontsize=8
-    )
+        ax.plot(x, y, "ko", markersize=4)
+        ax.text(x + 0.02, y, name, va="center", fontsize=9)
 
     ax.set_xlim(0, 1)
-    ax.set_ylim(-4.5, 14.0)
+    ax.set_ylim(-4.5, 14)
     ax.set_xticks([])
     ax.set_yticks([])
     ax.set_title("Decisão VFR por Zona")
+
+    ax.legend(handles=[
+        Patch(facecolor="green", alpha=0.2, label="GO"),
+        Patch(facecolor="orange", alpha=0.2, label="MARGINAL"),
+        Patch(facecolor="red", alpha=0.2, label="NO-GO"),
+        Line2D([0], [0], marker='o', color='black', linestyle='None', label='Cidade')
+    ])
 
     st.pyplot(fig)
 
