@@ -19,8 +19,8 @@ with col2:
         """
         <span title="
         VIS < 3000 m ⇒ NO-GO global
-        BKN/OVC < 500 ft ⇒ NO-GO
-        Fenómenos não-VFR não bloqueiam
+        BKN/OVC < 500 ft ⇒ NO-GO (modo strict)
+        Parsing adicional é apenas informativo
         Decisão sempre conservadora
         Não substitui o julgamento do piloto
         ">
@@ -48,7 +48,7 @@ ZONE_BANDS = {
 }
 
 # -------------------------------------------------
-# FUNÇÕES DE PARSING
+# PARSING VISIBILIDADE
 # -------------------------------------------------
 def extract_min_visibility(text):
     values = []
@@ -63,27 +63,18 @@ def extract_min_visibility(text):
         if "LCA" in line:
             context.append("LCA")
 
-        for m in re.findall(r"(\d{4})-(\d{4})M", line):
-            values.append(int(m[0]))
-
-        for m in re.findall(r"VIS\s*(\d{4})M", line):
-            values.append(int(m))
-
-        for m in re.findall(r"LOC\s*(\d{4})M", line):
-            values.append(int(m))
+        matches = re.findall(r"(\d{4})-(\d{4})M", line)
+        for low, _ in matches:
+            values.append(int(low))
 
     ctx = ", ".join(sorted(set(context))) if context else None
     return (min(values), ctx) if values else (None, None)
 
-
+# -------------------------------------------------
+# PARSING CLOUD BASE (STRICT – apenas linhas CLD)
+# -------------------------------------------------
 def extract_min_cloud_base(text):
-    """
-    Extrai base mínima de nuvens a partir de linhas CLD.
-    Procura intervalos como 002-008 ou 012-025.
-    Retorna base em pés (ft) ou None.
-    """
     cloud_lines = [line for line in text.splitlines() if "CLD" in line]
-
     bases = []
 
     for line in cloud_lines:
@@ -91,10 +82,19 @@ def extract_min_cloud_base(text):
         for low, _ in matches:
             bases.append(int(low) * 100)
 
-    if bases:
-        return min(bases)
+    return min(bases) if bases else None
 
-    return None
+# -------------------------------------------------
+# PARSING CLOUD BASE (EXTENDED – todo o texto)
+# -------------------------------------------------
+def extract_cloud_base_extended(text):
+    bases = []
+
+    matches = re.findall(r"(BKN|OVC)[^0-9]*(\d{3})-(\d{3})", text)
+    for _, low, _ in matches:
+        bases.append(int(low) * 100)
+
+    return min(bases) if bases else None
 
 # -------------------------------------------------
 # EXECUÇÃO
@@ -105,22 +105,22 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     zones = {}
 
     global_vis, vis_context = extract_min_visibility(text)
-    cloud_base = extract_min_cloud_base(text)
+    cloud_strict = extract_min_cloud_base(text)
+    cloud_extended = extract_cloud_base_extended(text)
 
     # -------------------------------------------------
-    # REGRA ABSOLUTA: VIS < 3000 ⇒ NO-GO GLOBAL
+    # REGRA ABSOLUTA VIS
     # -------------------------------------------------
     if global_vis is not None and global_vis < 3000:
 
         for z in ZONE_BANDS:
             reasons = [
                 f"Visibilidade mínima: {global_vis} m" +
-                (f" ({vis_context})" if vis_context else ""),
-                "Fonte: GAMET"
+                (f" ({vis_context})" if vis_context else "")
             ]
 
-            if cloud_base:
-                reasons.insert(1, f"Base das nuvens: {cloud_base} ft")
+            if cloud_strict:
+                reasons.append(f"Base das nuvens (CLD): {cloud_strict} ft")
 
             zones[z] = (
                 "NO-GO",
@@ -136,11 +136,10 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
             reasons = []
             limiting = []
 
-            if cloud_base:
-                reasons.append(f"Base das nuvens: {cloud_base} ft")
-                reasons.append("Fonte: GAMET")
+            if cloud_strict:
+                reasons.append(f"Base das nuvens (CLD): {cloud_strict} ft")
 
-                if cloud_base < 500:
+                if cloud_strict < 500:
                     limiting.append("Base das nuvens < 500 ft")
 
             if limiting:
@@ -148,15 +147,12 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
             else:
                 zones[z] = (
                     "VFR POSSÍVEL",
-                    reasons if reasons else [
-                        "Sem limitações VFR identificadas",
-                        "Fonte: GAMET"
-                    ],
+                    reasons if reasons else ["Sem limitações VFR identificadas"],
                     []
                 )
 
     # -------------------------------------------------
-    # RESULTADOS TEXTO
+    # RESULTADOS
     # -------------------------------------------------
     st.subheader("📋 Resultado VFR por zona")
 
@@ -173,7 +169,18 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
             st.write(f" • Critério limitante: {limiting[0]}")
 
     # -------------------------------------------------
-    # MAPA
+    # AVISO VISUAL (EXTENDED)
+    # -------------------------------------------------
+    if cloud_extended and (
+        (cloud_strict and cloud_extended < cloud_strict) or
+        (not cloud_strict)
+    ):
+        st.warning(
+            f"⚠️ Base adicional detetada fora das linhas CLD: {cloud_extended} ft."
+        )
+
+    # -------------------------------------------------
+    # MAPA ESQUEMÁTICO
     # -------------------------------------------------
     st.subheader("🗺️ Mapa VFR – Portugal Continental (esquemático)")
 
@@ -235,3 +242,4 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     st.pyplot(fig)
 
     st.caption("Ferramenta de apoio à decisão. Não substitui o julgamento do piloto.")
+
