@@ -8,7 +8,7 @@ from matplotlib.patches import Patch
 # CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="centered")
-st.title("✈️ LPPC GAMET – Análise VFR Geográfica (GA Realista)")
+st.title("✈️ LPPC GAMET – Briefing VFR Geográfico (GA Realista)")
 
 gamet_text = st.text_area(
     "Cole aqui o texto completo do GAMET (LPPC)",
@@ -25,7 +25,7 @@ ZONES = {
 }
 
 # -------------------------------------------------
-# DETETAR ZONAS AFETADAS POR EXPRESSÃO GEOGRÁFICA
+# DETETAR ZONAS POR EXPRESSÃO GEOGRÁFICA
 # -------------------------------------------------
 def zones_from_lat_condition(line):
 
@@ -50,7 +50,6 @@ def zones_from_lat_condition(line):
             affected.append(zone)
 
     return affected
-
 
 # -------------------------------------------------
 # PARSER GEOGRÁFICO
@@ -100,9 +99,8 @@ def parse_gamet_geographical(text):
 
     return zone_data
 
-
 # -------------------------------------------------
-# MOTOR DE DECISÃO – FILOSOFIA REALISTA GA
+# MOTOR GA REALISTA
 # -------------------------------------------------
 def decision_for_zone(events):
 
@@ -116,14 +114,14 @@ def decision_for_zone(events):
     turb_sev = any(t == "TURB" and v == "SEV" for t, v in events)
     turb_mod = any(t == "TURB" and v == "MOD" for t, v in events)
 
-    # ---------------- HARD LIMITS ----------------
+    # HARD LIMITS
     if vis is not None and vis < 3000:
         return "NO-GO", ["Visibilidade < 3000m"], vis, base, ts, turb_sev, turb_mod
 
     if base is not None and base < 500:
         return "NO-GO", ["Base < 500ft"], vis, base, ts, turb_sev, turb_mod
 
-    # ---------------- SOFT SCORING ----------------
+    # SOFT SCORING
     score = 0
     reasons = []
 
@@ -155,60 +153,72 @@ def decision_for_zone(events):
 
     return decision, reasons, vis, base, ts, turb_sev, turb_mod
 
-
 # -------------------------------------------------
 # EXECUÇÃO
 # -------------------------------------------------
 if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     zone_data = parse_gamet_geographical(gamet_text)
+    results = {z: decision_for_zone(zone_data[z]) for z in ZONES}
 
-    results = {}
-
-    for zone in ZONES:
-        results[zone] = decision_for_zone(zone_data[zone])
-
-    st.subheader("📋 Resultado por Zona")
+    st.subheader("📋 Briefing Meteorológico por Zona")
 
     for zone in ZONES:
 
         decision, reasons, vis, base, ts, turb_sev, turb_mod = results[zone]
 
-        if decision == "NO-GO":
-            st.error(f"{zone}: ❌ NO-GO")
-        elif decision == "MARGINAL":
-            st.warning(f"{zone}: ⚠️ MARGINAL")
-        else:
-            st.success(f"{zone}: ✅ GO")
+        with st.container():
 
-        # -------- Informação Meteorológica --------
-        if vis is not None:
-            st.write(f"👁️ Vis mínima: {vis} m")
-        if base is not None:
-            st.write(f"☁️ Base mínima: {base} ft")
-        if ts:
-            st.write("⛈️ Trovoadas presentes")
-        if turb_sev:
-            st.write("🌪️ Turbulência severa")
-        elif turb_mod:
-            st.write("🌬️ Turbulência moderada")
+            st.markdown(f"### 🗺️ {zone}")
 
-        # -------- Fatores de decisão --------
-        for r in reasons:
-            st.write(f"• {r}")
+            # DECISÃO DESTACADA
+            if decision == "NO-GO":
+                if any("Visibilidade < 3000m" in r or "Base < 500ft" in r for r in reasons):
+                    st.error("🔴 HARD LIMIT ATIVO – NO-GO")
+                else:
+                    st.error("❌ NO-GO")
+            elif decision == "MARGINAL":
+                st.warning("⚠️ MARGINAL")
+            else:
+                st.success("✅ GO")
 
-        st.divider()
+            st.markdown("**Condições Detetadas:**")
+
+            if vis is not None:
+                st.write(f"👁️ Visibilidade mínima: {vis} m")
+            else:
+                st.write("👁️ Visibilidade: —")
+
+            if base is not None:
+                if base == 0:
+                    st.write("☁️ Base mínima: SFC (0 ft)")
+                else:
+                    st.write(f"☁️ Base mínima: {base} ft")
+            else:
+                st.write("☁️ Base: —")
+
+            st.write(f"⛈️ Trovoadas: {'Sim' if ts else 'Não detetadas'}")
+
+            if turb_sev:
+                st.write("🌪️ Turbulência: Severa")
+            elif turb_mod:
+                st.write("🌬️ Turbulência: Moderada")
+            else:
+                st.write("🌬️ Turbulência: Não significativa")
+
+            if reasons:
+                st.markdown("**Fatores Limitantes:**")
+                for r in reasons:
+                    st.write(f"• {r}")
+
+            st.divider()
 
     # ---------------- MAPA ----------------
     st.subheader("🗺️ Mapa VFR – Decisão Geográfica")
 
     fig, ax = plt.subplots(figsize=(6, 10))
 
-    color_map = {
-        "GO": "green",
-        "MARGINAL": "orange",
-        "NO-GO": "red"
-    }
+    color_map = {"GO": "green", "MARGINAL": "orange", "NO-GO": "red"}
 
     ZONE_Y = {
         "NORTE": (9.0, 14.0),
@@ -266,6 +276,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     st.pyplot(fig)
 
     st.caption("Ferramenta de apoio à decisão. Não substitui julgamento do piloto.")
+
 
 
 
