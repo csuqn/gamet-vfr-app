@@ -20,9 +20,9 @@ with col2:
         <span title="
         VIS < 3000 m ⇒ NO-GO global
         BKN/OVC < 500 ft ⇒ NO-GO (modo strict)
-        Parsing adicional é apenas informativo
-        Decisão sempre conservadora
-        Não substitui o julgamento do piloto
+        Parsing extended é apenas informativo
+        Decisão conservadora
+        Não substitui julgamento do piloto
         ">
         ℹ️
         </span>
@@ -71,28 +71,30 @@ def extract_min_visibility(text):
     return (min(values), ctx) if values else (None, None)
 
 # -------------------------------------------------
-# PARSING CLOUD BASE (STRICT – apenas linhas CLD)
+# CLOUD BASE STRICT (linhas CLD apenas)
 # -------------------------------------------------
 def extract_min_cloud_base(text):
-    cloud_lines = [line for line in text.splitlines() if "CLD" in line]
     bases = []
 
-    for line in cloud_lines:
-        matches = re.findall(r"(\d{3})-(\d{3})", line)
-        for low, _ in matches:
-            bases.append(int(low) * 100)
+    for line in text.splitlines():
+        if "CLD" in line:
+            matches = re.findall(r"(\d{3})-(\d{3})", line)
+            for low, _ in matches:
+                bases.append(int(low) * 100)
 
     return min(bases) if bases else None
 
 # -------------------------------------------------
-# PARSING CLOUD BASE (EXTENDED – todo o texto)
+# CLOUD BASE EXTENDED (qualquer BKN/OVC no texto)
 # -------------------------------------------------
 def extract_cloud_base_extended(text):
     bases = []
 
-    matches = re.findall(r"(BKN|OVC)[^0-9]*(\d{3})-(\d{3})", text)
-    for _, low, _ in matches:
-        bases.append(int(low) * 100)
+    for line in text.splitlines():
+        if "BKN" in line or "OVC" in line:
+            matches = re.findall(r"(\d{3})-(\d{3})", line)
+            for low, _ in matches:
+                bases.append(int(low) * 100)
 
     return min(bases) if bases else None
 
@@ -109,7 +111,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     cloud_extended = extract_cloud_base_extended(text)
 
     # -------------------------------------------------
-    # REGRA ABSOLUTA VIS
+    # REGRA VISIBILIDADE
     # -------------------------------------------------
     if global_vis is not None and global_vis < 3000:
 
@@ -122,11 +124,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
             if cloud_strict:
                 reasons.append(f"Base das nuvens (CLD): {cloud_strict} ft")
 
-            zones[z] = (
-                "NO-GO",
-                reasons,
-                ["VIS < 3000 m"]
-            )
+            zones[z] = ("NO-GO", reasons, ["VIS < 3000 m"])
 
     # -------------------------------------------------
     # SEM VIS LIMITANTE
@@ -169,15 +167,13 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
             st.write(f" • Critério limitante: {limiting[0]}")
 
     # -------------------------------------------------
-    # AVISO VISUAL (EXTENDED)
+    # AVISO VISUAL (Extended inferior ao Strict)
     # -------------------------------------------------
-    if cloud_extended and (
-        (cloud_strict and cloud_extended < cloud_strict) or
-        (not cloud_strict)
-    ):
-        st.warning(
-            f"⚠️ Base adicional detetada fora das linhas CLD: {cloud_extended} ft."
-        )
+    if cloud_extended is not None:
+        if cloud_strict is None or cloud_extended < cloud_strict:
+            st.warning(
+                f"⚠️ Base adicional detetada fora das linhas CLD: {cloud_extended} ft."
+            )
 
     # -------------------------------------------------
     # MAPA ESQUEMÁTICO
@@ -242,4 +238,3 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     st.pyplot(fig)
 
     st.caption("Ferramenta de apoio à decisão. Não substitui o julgamento do piloto.")
-
