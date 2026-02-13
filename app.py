@@ -16,7 +16,7 @@ gamet_text = st.text_area(
 )
 
 # -------------------------------------------------
-# DEFINIÇÃO DAS ZONAS
+# DEFINIÇÃO DAS ZONAS (latitudes simplificadas)
 # -------------------------------------------------
 ZONES = {
     "NORTE": {"min_lat": 39.5, "max_lat": 90},
@@ -25,11 +25,11 @@ ZONES = {
 }
 
 # -------------------------------------------------
-# FUNÇÃO AUXILIAR – DETETAR ZONA POR LATITUDE
+# DETETAR ZONA POR EXPRESSÃO TIPO "N OF N3945"
 # -------------------------------------------------
-def zones_from_lat_condition(condition):
+def zones_from_lat_condition(line):
 
-    match = re.search(r"([NS])\s?OF\s?N(\d{2})(\d{2})", condition)
+    match = re.search(r"([NS])\s?OF\s?N(\d{2})(\d{2})", line)
 
     if not match:
         return list(ZONES.keys())  # aplica globalmente
@@ -37,21 +37,17 @@ def zones_from_lat_condition(condition):
     direction = match.group(1)
     lat_deg = int(match.group(2))
     lat_min = int(match.group(3))
-
     latitude = lat_deg + lat_min / 60
 
     affected = []
 
     for zone, limits in ZONES.items():
-        if direction == "N" and limits["max_lat"] >= latitude:
-            if limits["min_lat"] >= latitude:
-                affected.append(zone)
-        elif direction == "S" and limits["min_lat"] <= latitude:
-            if limits["max_lat"] <= latitude:
-                affected.append(zone)
+        if direction == "N" and limits["min_lat"] >= latitude:
+            affected.append(zone)
+        elif direction == "S" and limits["max_lat"] <= latitude:
+            affected.append(zone)
 
     return affected if affected else list(ZONES.keys())
-
 
 # -------------------------------------------------
 # PARSER GEOGRÁFICO
@@ -61,19 +57,15 @@ def parse_gamet_geographical(text):
     text = text.upper()
     lines = text.splitlines()
 
-    zone_data = {
-        "NORTE": [],
-        "CENTRO": [],
-        "SUL": []
-    }
+    zone_data = {z: [] for z in ZONES}
 
     for line in lines:
 
         affected_zones = zones_from_lat_condition(line)
 
         # VIS
-        vis_matches = re.findall(r"(\d{4})-(\d{4})M", line)
-        for low, _ in vis_matches:
+        ranges = re.findall(r"(\d{4})-(\d{4})M", line)
+        for low, _ in ranges:
             for z in affected_zones:
                 zone_data[z].append(("VIS", int(low)))
 
@@ -83,11 +75,10 @@ def parse_gamet_geographical(text):
                 zone_data[z].append(("VIS", int(val)))
 
         # CLOUD BASE
-        if "BKN" in line or "OVC" in line:
-            bases = re.findall(r"(BKN|OVC)\s?(\d{3})", line)
-            for _, base in bases:
-                for z in affected_zones:
-                    zone_data[z].append(("BASE", int(base) * 100))
+        bases = re.findall(r"(BKN|OVC)\s?(\d{3})", line)
+        for _, base in bases:
+            for z in affected_zones:
+                zone_data[z].append(("BASE", int(base) * 100))
 
         # TS
         if "TS" in line:
@@ -105,17 +96,16 @@ def parse_gamet_geographical(text):
 
     return zone_data
 
-
 # -------------------------------------------------
 # MOTOR POR ZONA
 # -------------------------------------------------
-def decision_for_zone(zone_events):
+def decision_for_zone(events):
 
-    vis = min([v for t, v in zone_events if t == "VIS"], default=None)
-    base = min([v for t, v in zone_events if t == "BASE"], default=None)
-    ts = any(t == "TS" for t, _ in zone_events)
-    turb_sev = any(t == "TURB" and v == "SEV" for t, v in zone_events)
-    turb_mod = any(t == "TURB" and v == "MOD" for t, v in zone_events)
+    vis = min([v for t, v in events if t == "VIS"], default=None)
+    base = min([v for t, v in events if t == "BASE"], default=None)
+    ts = any(t == "TS" for t, _ in events)
+    turb_sev = any(t == "TURB" and v == "SEV" for t, v in events)
+    turb_mod = any(t == "TURB" and v == "MOD" for t, v in events)
 
     # HARD LIMITS
     if vis is not None and vis < 3000:
@@ -124,7 +114,7 @@ def decision_for_zone(zone_events):
     if base is not None and base < 500:
         return "NO-GO", ["Base < 500ft"]
 
-    # SOFT
+    # SOFT SCORING
     score = 0
     reasons = []
 
@@ -154,17 +144,15 @@ def decision_for_zone(zone_events):
     else:
         return "GO", reasons
 
-
 # -------------------------------------------------
 # EXECUÇÃO
 # -------------------------------------------------
 if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     zone_data = parse_gamet_geographical(gamet_text)
-
     results = {}
 
-    for zone in ZONES.keys():
+    for zone in ZONES:
         decision, reasons = decision_for_zone(zone_data[zone])
         results[zone] = (decision, reasons)
 
@@ -201,9 +189,48 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         "SUL": (-4.5, 4.0)
     }
 
+    # Pintar zonas
     for zone, (y0, y1) in ZONE_Y.items():
         decision = results[zone][0]
         ax.axhspan(y0, y1, color=color_map[decision], alpha=0.18)
+
+    # CIDADES
+    cities = {
+        "Bragança": (0.8, 13.5),
+        "Viana do Castelo": (0.2, 12.6),
+        "Braga": (0.4, 11.8),
+        "Vila Real": (0.6, 11.0),
+        "Porto": (0.3, 10.5),
+        "Viseu": (0.6, 8.6),
+        "Aveiro": (0.3, 8.0),
+        "Guarda": (0.8, 7.4),
+        "Coimbra": (0.5, 6.6),
+        "Leiria": (0.3, 5.6),
+        "Castelo Branco": (0.8, 5.9),
+        "Santarém": (0.4, 3.0),
+        "Portalegre": (0.8, 3.0),
+        "Lisboa": (0.3, 2.0),
+        "Setúbal": (0.3, 1.2),
+        "Évora": (0.6, 0.2),
+        "Beja": (0.7, -1.0),
+        "Faro": (0.7, -2.2),
+    }
+
+    for name, (x, y) in cities.items():
+        ax.plot(x, y, "ko", markersize=3)
+        ax.text(x + 0.015, y, name, va="center", fontsize=8)
+
+    ax.legend(
+        handles=[
+            Patch(facecolor="green", alpha=0.25, label="GO"),
+            Patch(facecolor="orange", alpha=0.25, label="MARGINAL"),
+            Patch(facecolor="red", alpha=0.25, label="NO-GO"),
+            Line2D([0], [0], marker="o", color="black",
+                   linestyle="None", markersize=4, label="Cidade")
+        ],
+        loc="lower left",
+        fontsize=8
+    )
 
     ax.set_xlim(0, 1)
     ax.set_ylim(-4.5, 14.0)
