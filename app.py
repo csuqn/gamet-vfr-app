@@ -8,7 +8,6 @@ from matplotlib.patches import Patch
 # CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="centered")
-
 st.title("✈️ LPPC GAMET – Análise VFR (Motor Ponderado)")
 
 gamet_text = st.text_area(
@@ -59,11 +58,13 @@ def parse_gamet(text):
 
     for line in lines:
 
+        # STRICT (linhas CLD)
         if "CLD" in line:
             matches = re.findall(r"(\d{3})", line)
             for m in matches:
                 strict_bases.append(int(m) * 100)
 
+        # EXTENDED (qualquer BKN/OVC)
         if "BKN" in line or "OVC" in line:
             matches = re.findall(r"(BKN|OVC)\s?(\d{3})", line)
             for _, base in matches:
@@ -106,7 +107,7 @@ def vfr_decision(data):
     score = 0
     reasons = []
 
-    # VIS
+    # VISIBILIDADE
     vis = data["visibility"]["min"]
     if vis is not None:
         if vis < 3000:
@@ -116,7 +117,7 @@ def vfr_decision(data):
             score += 40
             reasons.append("VIS 3000–5000m")
 
-    # CLOUD BASE
+    # BASE DE NUVENS
     base = data["clouds"]["extended_min_base"]
     if base is not None:
         if base < 500:
@@ -126,12 +127,12 @@ def vfr_decision(data):
             score += 50
             reasons.append("Base < 1500ft")
 
-    # TS
+    # TROVOADAS
     if data["hazards"]["ts"]:
         score += 80
         reasons.append("Trovoadas presentes")
 
-    # TURB
+    # TURBULÊNCIA
     turb = data["hazards"]["turbulence"]
     if turb == "SEV":
         score += 70
@@ -198,14 +199,43 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         "SUL": (-4.5, 4.0)
     }
 
+    # Pintar zonas com decisão global
     for z, (y0, y1) in ZONE_Y.items():
-        ax.axhspan(y0, y1, color=color_map[decision], alpha=0.25)
+        ax.axhspan(y0, y1, color=color_map[decision], alpha=0.18)
+
+    # CIDADES
+    cities = {
+        "Bragança": (0.8, 13.5),
+        "Viana do Castelo": (0.2, 12.6),
+        "Braga": (0.4, 11.8),
+        "Vila Real": (0.6, 11.0),
+        "Porto": (0.3, 10.5),
+        "Viseu": (0.6, 8.6),
+        "Aveiro": (0.3, 8.0),
+        "Guarda": (0.8, 7.4),
+        "Coimbra": (0.5, 6.6),
+        "Leiria": (0.3, 5.6),
+        "Castelo Branco": (0.8, 5.9),
+        "Santarém": (0.4, 3.0),
+        "Portalegre": (0.8, 3.0),
+        "Lisboa": (0.3, 2.0),
+        "Setúbal": (0.3, 1.2),
+        "Évora": (0.6, 0.2),
+        "Beja": (0.7, -1.0),
+        "Faro": (0.7, -2.2),
+    }
+
+    for name, (x, y) in cities.items():
+        ax.plot(x, y, "ko", markersize=3)
+        ax.text(x + 0.015, y, name, va="center", fontsize=8)
 
     ax.legend(
         handles=[
             Patch(facecolor="green", alpha=0.25, label="GO"),
             Patch(facecolor="orange", alpha=0.25, label="MARGINAL"),
-            Patch(facecolor="red", alpha=0.25, label="NO-GO")
+            Patch(facecolor="red", alpha=0.25, label="NO-GO"),
+            Line2D([0], [0], marker="o", color="black",
+                   linestyle="None", markersize=4, label="Cidade")
         ],
         loc="lower left",
         fontsize=8
@@ -220,3 +250,4 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     st.pyplot(fig)
 
     st.caption("Ferramenta de apoio à decisão. Não substitui julgamento do piloto.")
+
