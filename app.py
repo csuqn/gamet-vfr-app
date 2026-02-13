@@ -8,7 +8,7 @@ from matplotlib.patches import Patch
 # CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="centered")
-st.title("✈️ LPPC GAMET – Análise VFR Geográfica")
+st.title("✈️ LPPC GAMET – Análise VFR Geográfica (GA Realista)")
 
 gamet_text = st.text_area(
     "Cole aqui o texto completo do GAMET (LPPC)",
@@ -25,30 +25,27 @@ ZONES = {
 }
 
 # -------------------------------------------------
-# FUNÇÃO CORRIGIDA – DETETAR ZONAS AFETADAS
+# DETETAR ZONAS AFETADAS POR EXPRESSÃO GEOGRÁFICA
 # -------------------------------------------------
 def zones_from_lat_condition(line):
 
     match = re.search(r"([NS])\s+OF\s+N(\d{2})(\d{2})", line)
 
     if not match:
-        return list(ZONES.keys())  # sem condição → aplica a todas
+        return list(ZONES.keys())
 
     direction = match.group(1)
     lat_deg = int(match.group(2))
     lat_min = int(match.group(3))
-
     latitude = lat_deg + lat_min / 60
 
     affected = []
 
     for zone, limits in ZONES.items():
-
         zone_mid = (limits["min_lat"] + limits["max_lat"]) / 2
 
         if direction == "N" and zone_mid > latitude:
             affected.append(zone)
-
         elif direction == "S" and zone_mid < latitude:
             affected.append(zone)
 
@@ -68,19 +65,19 @@ def parse_gamet_geographical(text):
 
         affected_zones = zones_from_lat_condition(line)
 
-        # VIS RANGES 0400-5000M
+        # VIS RANGES
         ranges = re.findall(r"(\d{4})-(\d{4})M", line)
         for low, _ in ranges:
             for z in affected_zones:
                 zone_data[z].append(("VIS", int(low)))
 
-        # VIS SINGLE 3000M
+        # VIS SINGLE
         singles = re.findall(r"\b(\d{4})M\b", line)
         for val in singles:
             for z in affected_zones:
                 zone_data[z].append(("VIS", int(val)))
 
-        # CLOUD BASE BKN/OVC
+        # CLOUD BASE
         bases = re.findall(r"(BKN|OVC)\s?(\d{3})", line)
         for _, base in bases:
             for z in affected_zones:
@@ -103,7 +100,7 @@ def parse_gamet_geographical(text):
     return zone_data
 
 # -------------------------------------------------
-# MOTOR POR ZONA
+# MOTOR DE DECISÃO – FILOSOFIA REALISTA GA
 # -------------------------------------------------
 def decision_for_zone(events):
 
@@ -129,27 +126,28 @@ def decision_for_zone(events):
     reasons = []
 
     if vis is not None and 3000 <= vis < 5000:
-        score += 40
+        score += 30
         reasons.append("Vis 3000–5000m")
 
     if base is not None and 500 <= base < 1500:
-        score += 50
+        score += 40
         reasons.append("Base 500–1500ft")
 
     if ts:
-        score += 60
-        reasons.append("Trovoadas")
+        score += 50
+        reasons.append("Trovoadas isoladas")
 
     if turb_sev:
-        score += 60
+        score += 45
         reasons.append("Turb severa")
     elif turb_mod:
-        score += 35
+        score += 25
         reasons.append("Turb moderada")
 
-    if score >= 100:
+    # ---------------- CLASSIFICAÇÃO ----------------
+    if score >= 140:
         return "NO-GO", reasons
-    elif score >= 50:
+    elif score >= 70:
         return "MARGINAL", reasons
     else:
         return "GO", reasons
@@ -250,4 +248,5 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     st.pyplot(fig)
 
     st.caption("Ferramenta de apoio à decisão. Não substitui julgamento do piloto.")
+
 
