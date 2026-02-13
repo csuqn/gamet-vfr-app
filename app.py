@@ -19,35 +19,40 @@ gamet_text = st.text_area(
 # DEFINIÇÃO DAS ZONAS (latitudes simplificadas)
 # -------------------------------------------------
 ZONES = {
-    "NORTE": {"min_lat": 39.5, "max_lat": 90},
+    "NORTE": {"min_lat": 39.5, "max_lat": 42.5},
     "CENTRO": {"min_lat": 38.5, "max_lat": 39.5},
-    "SUL": {"min_lat": -90, "max_lat": 38.5}
+    "SUL": {"min_lat": 36.5, "max_lat": 38.5}
 }
 
 # -------------------------------------------------
-# DETETAR ZONA POR EXPRESSÃO TIPO "N OF N3945"
+# FUNÇÃO CORRIGIDA – DETETAR ZONAS AFETADAS
 # -------------------------------------------------
 def zones_from_lat_condition(line):
 
-    match = re.search(r"([NS])\s?OF\s?N(\d{2})(\d{2})", line)
+    match = re.search(r"([NS])\s+OF\s+N(\d{2})(\d{2})", line)
 
     if not match:
-        return list(ZONES.keys())  # aplica globalmente
+        return list(ZONES.keys())  # sem condição → aplica a todas
 
     direction = match.group(1)
     lat_deg = int(match.group(2))
     lat_min = int(match.group(3))
+
     latitude = lat_deg + lat_min / 60
 
     affected = []
 
     for zone, limits in ZONES.items():
-        if direction == "N" and limits["min_lat"] >= latitude:
-            affected.append(zone)
-        elif direction == "S" and limits["max_lat"] <= latitude:
+
+        zone_mid = (limits["min_lat"] + limits["max_lat"]) / 2
+
+        if direction == "N" and zone_mid > latitude:
             affected.append(zone)
 
-    return affected if affected else list(ZONES.keys())
+        elif direction == "S" and zone_mid < latitude:
+            affected.append(zone)
+
+    return affected
 
 # -------------------------------------------------
 # PARSER GEOGRÁFICO
@@ -63,18 +68,19 @@ def parse_gamet_geographical(text):
 
         affected_zones = zones_from_lat_condition(line)
 
-        # VIS
+        # VIS RANGES 0400-5000M
         ranges = re.findall(r"(\d{4})-(\d{4})M", line)
         for low, _ in ranges:
             for z in affected_zones:
                 zone_data[z].append(("VIS", int(low)))
 
+        # VIS SINGLE 3000M
         singles = re.findall(r"\b(\d{4})M\b", line)
         for val in singles:
             for z in affected_zones:
                 zone_data[z].append(("VIS", int(val)))
 
-        # CLOUD BASE
+        # CLOUD BASE BKN/OVC
         bases = re.findall(r"(BKN|OVC)\s?(\d{3})", line)
         for _, base in bases:
             for z in affected_zones:
@@ -101,28 +107,32 @@ def parse_gamet_geographical(text):
 # -------------------------------------------------
 def decision_for_zone(events):
 
-    vis = min([v for t, v in events if t == "VIS"], default=None)
-    base = min([v for t, v in events if t == "BASE"], default=None)
+    vis_values = [v for t, v in events if t == "VIS"]
+    base_values = [v for t, v in events if t == "BASE"]
+
+    vis = min(vis_values) if vis_values else None
+    base = min(base_values) if base_values else None
+
     ts = any(t == "TS" for t, _ in events)
     turb_sev = any(t == "TURB" and v == "SEV" for t, v in events)
     turb_mod = any(t == "TURB" and v == "MOD" for t, v in events)
 
-    # HARD LIMITS
+    # ---------------- HARD LIMITS ----------------
     if vis is not None and vis < 3000:
         return "NO-GO", ["Visibilidade < 3000m"]
 
     if base is not None and base < 500:
         return "NO-GO", ["Base < 500ft"]
 
-    # SOFT SCORING
+    # ---------------- SOFT SCORING ----------------
     score = 0
     reasons = []
 
-    if vis is not None and vis < 5000:
+    if vis is not None and 3000 <= vis < 5000:
         score += 40
         reasons.append("Vis 3000–5000m")
 
-    if base is not None and base < 1500:
+    if base is not None and 500 <= base < 1500:
         score += 50
         reasons.append("Base 500–1500ft")
 
@@ -189,7 +199,6 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         "SUL": (-4.5, 4.0)
     }
 
-    # Pintar zonas
     for zone, (y0, y1) in ZONE_Y.items():
         decision = results[zone][0]
         ax.axhspan(y0, y1, color=color_map[decision], alpha=0.18)
@@ -241,3 +250,4 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     st.pyplot(fig)
 
     st.caption("Ferramenta de apoio à decisão. Não substitui julgamento do piloto.")
+
