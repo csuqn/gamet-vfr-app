@@ -5,98 +5,157 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 
 # -------------------------------------------------
-# CONFIGURAÇÃO
+# CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="centered")
 
-col1, col2 = st.columns([0.95, 0.05])
+st.title("✈️ LPPC GAMET – Análise VFR (Motor Ponderado)")
 
-with col1:
-    st.title("✈️ LPPC GAMET – Análise VFR")
-
-with col2:
-    st.markdown(
-        """
-        <span title="
-        VIS < 3000 m ⇒ NO-GO global
-        BKN/OVC < 500 ft ⇒ NO-GO (modo strict)
-        Parsing extended é apenas informativo
-        Decisão conservadora
-        Não substitui julgamento do piloto
-        ">
-        ℹ️
-        </span>
-        """,
-        unsafe_allow_html=True
-    )
-
-# -------------------------------------------------
-# INPUT
-# -------------------------------------------------
 gamet_text = st.text_area(
     "Cole aqui o texto completo do GAMET (LPPC)",
-    height=330
+    height=350
 )
 
 # -------------------------------------------------
-# ZONAS
+# FASE 2 – PARSER SÉRIO
 # -------------------------------------------------
-ZONE_BANDS = {
-    "NORTE": (39.5, 42.5),
-    "CENTRO": (38.5, 39.5),
-    "SUL": (36.5, 38.5)
-}
+def parse_gamet(text):
 
-# -------------------------------------------------
-# PARSING VISIBILIDADE
-# -------------------------------------------------
-def extract_min_visibility(text):
-    values = []
-    context = []
+    data = {
+        "visibility": {"min": None, "context": []},
+        "clouds": {"min_base": None, "extended_min_base": None},
+        "hazards": {"ts": False, "turbulence": None},
+        "freezing_level": {"min": None}
+    }
 
-    for line in text.splitlines():
+    lines = text.splitlines()
+
+    # ---------------- VISIBILITY ----------------
+    vis_values = []
+
+    for line in lines:
         if "VIS" not in line:
             continue
 
+        ranges = re.findall(r"(\d{4})-(\d{4})M", line)
+        for low, _ in ranges:
+            vis_values.append(int(low))
+
+        singles = re.findall(r"\b(\d{4})M\b", line)
+        for val in singles:
+            vis_values.append(int(val))
+
         if "SFC" in line:
-            context.append("SFC")
+            data["visibility"]["context"].append("SFC")
         if "LCA" in line:
-            context.append("LCA")
+            data["visibility"]["context"].append("LCA")
 
-        matches = re.findall(r"(\d{4})-(\d{4})M", line)
-        for low, _ in matches:
-            values.append(int(low))
+    if vis_values:
+        data["visibility"]["min"] = min(vis_values)
 
-    ctx = ", ".join(sorted(set(context))) if context else None
-    return (min(values), ctx) if values else (None, None)
+    # ---------------- CLOUDS ----------------
+    strict_bases = []
+    extended_bases = []
 
-# -------------------------------------------------
-# CLOUD BASE STRICT (linhas CLD apenas)
-# -------------------------------------------------
-def extract_min_cloud_base(text):
-    bases = []
+    for line in lines:
 
-    for line in text.splitlines():
         if "CLD" in line:
-            matches = re.findall(r"(\d{3})-(\d{3})", line)
-            for low, _ in matches:
-                bases.append(int(low) * 100)
+            matches = re.findall(r"(\d{3})", line)
+            for m in matches:
+                strict_bases.append(int(m) * 100)
 
-    return min(bases) if bases else None
-
-# -------------------------------------------------
-# CLOUD BASE EXTENDED (qualquer BKN/OVC)
-# -------------------------------------------------
-def extract_cloud_base_extended(text):
-    bases = []
-
-    for line in text.splitlines():
         if "BKN" in line or "OVC" in line:
-            matches = re.findall(r"(\d{3})-(\d{3})", line)
-            for low, _ in matches:
-                bases.append(int(low) * 100)
+            matches = re.findall(r"(BKN|OVC)\s?(\d{3})", line)
+            for _, base in matches:
+                extended_bases.append(int(base) * 100)
 
-    return min(bases) if bases else None
+            ranges = re.findall(r"(\d{3})-(\d{3})", line)
+            for low, _ in ranges:
+                extended_bases.append(int(low) * 100)
+
+    if strict_bases:
+        data["clouds"]["min_base"] = min(strict_bases)
+
+    if extended_bases:
+        data["clouds"]["extended_min_base"] = min(extended_bases)
+
+    # ---------------- HAZARDS ----------------
+    if "TS" in text:
+        data["hazards"]["ts"] = True
+
+    for line in lines:
+        if "TURB" in line:
+            if "SEV" in line:
+                data["hazards"]["turbulence"] = "SEV"
+            elif "MOD" in line:
+                data["hazards"]["turbulence"] = "MOD"
+
+    # ---------------- FREEZING LEVEL ----------------
+    fzl = re.findall(r"FZLVL:\s*(\d+)FT", text)
+    if fzl:
+        data["freezing_level"]["min"] = min([int(x) for x in fzl])
+
+    return data
+
+
+# -------------------------------------------------
+# FASE 3 – MOTOR DE DECISÃO
+# -------------------------------------------------
+def vfr_decision(data):
+
+    score = 0
+    reasons = []
+
+    # VIS
+    vis = data["visibility"]["min"]
+    if vis is not None:
+        if vis < 3000:
+            score += 100
+            reasons.append("VIS < 3000m")
+        elif vis < 5000:
+            score += 40
+            reasons.append("VIS 3000–5000m")
+
+    # CLOUD BASE
+    base = data["clouds"]["extended_min_base"]
+    if base is not None:
+        if base < 500:
+            score += 100
+            reasons.append("Base < 500ft")
+        elif base < 1500:
+            score += 50
+            reasons.append("Base < 1500ft")
+
+    # TS
+    if data["hazards"]["ts"]:
+        score += 80
+        reasons.append("Trovoadas presentes")
+
+    # TURB
+    turb = data["hazards"]["turbulence"]
+    if turb == "SEV":
+        score += 70
+        reasons.append("Turbulência severa")
+    elif turb == "MOD":
+        score += 40
+        reasons.append("Turbulência moderada")
+
+    # FREEZING LEVEL
+    fzl = data["freezing_level"]["min"]
+    if fzl is not None and fzl < 4000:
+        score += 30
+        reasons.append("Freezing level < 4000ft")
+
+    # CLASSIFICAÇÃO
+    if score >= 100:
+        decision = "NO-GO"
+    elif score >= 50:
+        decision = "MARGINAL"
+    else:
+        decision = "GO"
+
+    return decision, score, reasons
+
 
 # -------------------------------------------------
 # EXECUÇÃO
@@ -104,101 +163,34 @@ def extract_cloud_base_extended(text):
 if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     text = gamet_text.upper()
-    zones = {}
+    parsed = parse_gamet(text)
+    decision, score, reasons = vfr_decision(parsed)
 
-    global_vis, vis_context = extract_min_visibility(text)
-    cloud_strict = extract_min_cloud_base(text)
-    cloud_extended = extract_cloud_base_extended(text)
+    # ---------------- RESULTADO ----------------
+    st.subheader("📋 Resultado Global")
 
-    # -------------------------------------------------
-    # REGRA ABSOLUTA VIS
-    # -------------------------------------------------
-    if global_vis is not None and global_vis < 3000:
-
-        for z in ZONE_BANDS:
-            reasons = [
-                f"Visibilidade mínima: {global_vis} m" +
-                (f" ({vis_context})" if vis_context else "")
-            ]
-
-            if cloud_strict:
-                reasons.append(f"Base das nuvens (CLD): {cloud_strict} ft")
-
-            reasons.append("Fonte: GAMET")
-
-            zones[z] = (
-                "NO-GO",
-                reasons,
-                ["VIS < 3000 m"]
-            )
-
-    # -------------------------------------------------
-    # SEM VIS LIMITANTE
-    # -------------------------------------------------
+    if decision == "NO-GO":
+        st.error(f"❌ NO-GO  | Score: {score}")
+    elif decision == "MARGINAL":
+        st.warning(f"⚠️ MARGINAL  | Score: {score}")
     else:
-        for z in ZONE_BANDS:
-            reasons = []
-            limiting = []
+        st.success(f"✅ GO  | Score: {score}")
 
-            # VIS informativa (mesmo >=3000)
-            if global_vis is not None:
-                reasons.append(
-                    f"Visibilidade mínima: {global_vis} m" +
-                    (f" ({vis_context})" if vis_context else "")
-                )
+    for r in reasons:
+        st.write(f"• {r}")
 
-            if cloud_strict:
-                reasons.append(f"Base das nuvens (CLD): {cloud_strict} ft")
+    st.divider()
 
-                if cloud_strict < 500:
-                    limiting.append("Base das nuvens < 500 ft")
-
-            if limiting:
-                reasons.append("Fonte: GAMET")
-                zones[z] = ("NO-GO", reasons, limiting)
-            else:
-                if not reasons:
-                    reasons = [
-                        "Sem limitações VFR identificadas",
-                        "Fonte: GAMET"
-                    ]
-                else:
-                    reasons.append("Fonte: GAMET")
-
-                zones[z] = ("VFR POSSÍVEL", reasons, [])
-
-    # -------------------------------------------------
-    # RESULTADOS
-    # -------------------------------------------------
-    st.subheader("📋 Resultado VFR por zona")
-
-    for z, (status, reasons, limiting) in zones.items():
-        if status == "NO-GO":
-            st.error(f"{z}: NO-GO")
-        else:
-            st.success(f"{z}: VFR POSSÍVEL")
-
-        for r in reasons:
-            st.write(f" • {r}")
-
-        if limiting:
-            st.write(f" • Critério limitante: {limiting[0]}")
-
-    # -------------------------------------------------
-    # AVISO EXTENDED
-    # -------------------------------------------------
-    if cloud_extended is not None:
-        if cloud_strict is None or cloud_extended < cloud_strict:
-            st.warning(
-                f"⚠️ Base adicional detetada fora das linhas CLD: {cloud_extended} ft."
-            )
-
-    # -------------------------------------------------
-    # MAPA
-    # -------------------------------------------------
-    st.subheader("🗺️ Mapa VFR – Portugal Continental (esquemático)")
+    # ---------------- MAPA ----------------
+    st.subheader("🗺️ Mapa VFR – Portugal Continental")
 
     fig, ax = plt.subplots(figsize=(6, 10))
+
+    color_map = {
+        "GO": "green",
+        "MARGINAL": "orange",
+        "NO-GO": "red"
+    }
 
     ZONE_Y = {
         "NORTE": (9.0, 14.0),
@@ -207,41 +199,13 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     }
 
     for z, (y0, y1) in ZONE_Y.items():
-        status = zones[z][0]
-        color = "green" if status == "VFR POSSÍVEL" else "red"
-        ax.axhspan(y0, y1, color=color, alpha=0.25)
-
-    cities = {
-        "Bragança": (0.8, 13.5),
-        "Viana do Castelo": (0.2, 12.6),
-        "Braga": (0.4, 11.8),
-        "Vila Real": (0.6, 11.0),
-        "Porto": (0.3, 10.5),
-        "Viseu": (0.6, 8.6),
-        "Aveiro": (0.3, 8.0),
-        "Guarda": (0.8, 7.4),
-        "Coimbra": (0.5, 6.6),
-        "Leiria": (0.3, 5.6),
-        "Castelo Branco": (0.8, 5.9),
-        "Santarém": (0.4, 3.0),
-        "Portalegre": (0.8, 3.0),
-        "Lisboa": (0.3, 2.0),
-        "Setúbal": (0.3, 1.2),
-        "Évora": (0.6, 0.2),
-        "Beja": (0.7, -1.0),
-        "Faro": (0.7, -2.2),
-    }
-
-    for name, (x, y) in cities.items():
-        ax.plot(x, y, "ko", markersize=3)
-        ax.text(x + 0.015, y, name, va="center", fontsize=8)
+        ax.axhspan(y0, y1, color=color_map[decision], alpha=0.25)
 
     ax.legend(
         handles=[
-            Patch(facecolor="red", alpha=0.25, label="🟥 NO-GO"),
-            Patch(facecolor="green", alpha=0.25, label="🟩 VFR POSSÍVEL"),
-            Line2D([0], [0], linestyle="--", color="black",
-                   label="Limite aproximado GAMET"),
+            Patch(facecolor="green", alpha=0.25, label="GO"),
+            Patch(facecolor="orange", alpha=0.25, label="MARGINAL"),
+            Patch(facecolor="red", alpha=0.25, label="NO-GO")
         ],
         loc="lower left",
         fontsize=8
@@ -251,9 +215,10 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     ax.set_ylim(-4.5, 14.0)
     ax.set_xticks([])
     ax.set_yticks([])
-    ax.set_title("Mapa esquemático de decisão VFR")
+    ax.set_title("Decisão VFR Ponderada")
 
     st.pyplot(fig)
 
-    st.caption("Ferramenta de apoio à decisão. Não substitui o julgamento do piloto.")
+    st.caption("Ferramenta de apoio à decisão. Não substitui julgamento do piloto.")
+
 
