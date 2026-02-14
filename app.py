@@ -9,7 +9,7 @@ from shapely.geometry import box
 # CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v4.5")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v4.6")
 
 # -------------------------------------------------
 # INPUT
@@ -140,7 +140,7 @@ def parse_gamet(text):
                     for val in re.findall(r"\b(\d{4})M\b", block):
                         zone_data[zone_name].append(("VIS", int(val)))
 
-                # BASE (corrigido)
+                # BASE
                 for _, base_min, _ in re.findall(r"(BKN|OVC)\s+(\d{3})-(\d{3})", block):
                     zone_data[zone_name].append(("BASE", int(base_min) * 100))
 
@@ -198,17 +198,16 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     zone_data = parse_gamet(gamet_text)
     results = {z: decision_for_zone(zone_data[z]) for z in ZONES}
 
-    # Briefing
     st.subheader("📋 Briefing Detalhado")
 
-    st.markdown("""
-**Legenda:**
-
-👁️ Visibilidade mínima  
-☁️ Base de nuvens (ft AGL)  
-⛈️ Trovoadas (TS)  
-🌬️ Turbulência moderada  
-🌪️ Turbulência severa  
+    # Legenda escondida
+    with st.expander("ℹ️ Legenda"):
+        st.markdown("""
+👁️ **Visibilidade mínima**  
+☁️ **Base de nuvens (ft AGL)**  
+⛈️ **Trovoadas (TS)**  
+🌬️ **Turbulência moderada**  
+🌪️ **Turbulência severa**
 """)
 
     cols = st.columns(3)
