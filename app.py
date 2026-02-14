@@ -8,7 +8,7 @@ from matplotlib.lines import Line2D
 # CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Briefing VFR Geográfico (GA Realista)")
+st.title("✈️ LPPC GAMET – Briefing VFR Geográfico (FASE 4)")
 
 gamet_text = st.text_area(
     "Cole aqui o texto completo do GAMET (LPPC)",
@@ -16,43 +16,94 @@ gamet_text = st.text_area(
 )
 
 # -------------------------------------------------
-# DEFINIÇÃO DAS ZONAS
+# DEFINIÇÃO DAS ZONAS (com latitude e longitude)
 # -------------------------------------------------
 ZONES = {
-    "NORTE": {"min_lat": 39.5, "max_lat": 42.5},
-    "CENTRO": {"min_lat": 38.5, "max_lat": 39.5},
-    "SUL": {"min_lat": 36.5, "max_lat": 38.5}
+    "NORTE": {
+        "lat_min": 39.5, "lat_max": 42.5,
+        "lon_min": -9.5, "lon_max": -6.0
+    },
+    "CENTRO": {
+        "lat_min": 38.5, "lat_max": 39.5,
+        "lon_min": -9.5, "lon_max": -6.0
+    },
+    "SUL": {
+        "lat_min": 36.5, "lat_max": 38.5,
+        "lon_min": -9.5, "lon_max": -6.0
+    }
 }
 
 # -------------------------------------------------
-# FUNÇÃO GEOGRÁFICA
+# PARSER GEOGRÁFICO AVANÇADO
 # -------------------------------------------------
-def zones_from_lat_condition(line):
+def zones_from_condition(line):
 
-    match = re.search(r"([NS])\s+OF\s+N(\d{2})(\d{2})", line)
+    line = line.upper()
+    affected = set(ZONES.keys())
 
-    if not match:
-        return list(ZONES.keys())
+    # N OF
+    match = re.search(r"N OF N(\d{2})(\d{2})", line)
+    if match:
+        lat = int(match.group(1)) + int(match.group(2)) / 60
+        new = set()
+        for z, lim in ZONES.items():
+            lat_mid = (lim["lat_min"] + lim["lat_max"]) / 2
+            if lat_mid > lat:
+                new.add(z)
+        affected &= new
 
-    direction = match.group(1)
-    lat_deg = int(match.group(2))
-    lat_min = int(match.group(3))
-    latitude = lat_deg + lat_min / 60
+    # S OF
+    match = re.search(r"S OF N(\d{2})(\d{2})", line)
+    if match:
+        lat = int(match.group(1)) + int(match.group(2)) / 60
+        new = set()
+        for z, lim in ZONES.items():
+            lat_mid = (lim["lat_min"] + lim["lat_max"]) / 2
+            if lat_mid < lat:
+                new.add(z)
+        affected &= new
 
-    affected = []
+    # E OF
+    match = re.search(r"E OF W(\d{2})(\d{2})", line)
+    if match:
+        lon = -(int(match.group(1)) + int(match.group(2)) / 60)
+        new = set()
+        for z, lim in ZONES.items():
+            lon_mid = (lim["lon_min"] + lim["lon_max"]) / 2
+            if lon_mid > lon:
+                new.add(z)
+        affected &= new
 
-    for zone, limits in ZONES.items():
-        zone_mid = (limits["min_lat"] + limits["max_lat"]) / 2
+    # W OF
+    match = re.search(r"W OF W(\d{2})(\d{2})", line)
+    if match:
+        lon = -(int(match.group(1)) + int(match.group(2)) / 60)
+        new = set()
+        for z, lim in ZONES.items():
+            lon_mid = (lim["lon_min"] + lim["lon_max"]) / 2
+            if lon_mid < lon:
+                new.add(z)
+        affected &= new
 
-        if direction == "N" and zone_mid > latitude:
-            affected.append(zone)
-        elif direction == "S" and zone_mid < latitude:
-            affected.append(zone)
+    # BTW latitude band
+    match = re.search(r"BTW N(\d{2})(\d{2}) AND N(\d{2})(\d{2})", line)
+    if match:
+        lat1 = int(match.group(1)) + int(match.group(2)) / 60
+        lat2 = int(match.group(3)) + int(match.group(4)) / 60
+        lower = min(lat1, lat2)
+        upper = max(lat1, lat2)
 
-    return affected
+        new = set()
+        for z, lim in ZONES.items():
+            lat_mid = (lim["lat_min"] + lim["lat_max"]) / 2
+            if lower <= lat_mid <= upper:
+                new.add(z)
+        affected &= new
+
+    return list(affected)
 
 # -------------------------------------------------
-# PARSER
+# PARSER METEOROLÓGICO
 # -------------------------------------------------
 def parse_gamet(text):
 
@@ -62,7 +113,7 @@ def parse_gamet(text):
 
     for line in lines:
 
-        affected_zones = zones_from_lat_condition(line)
+        affected_zones = zones_from_condition(line)
 
         # VIS
         for low, _ in re.findall(r"(\d{4})-(\d{4})M", line):
@@ -148,6 +199,7 @@ def decision_for_zone(events):
 
     return decision, reasons, vis, base, ts, turb_sev, turb_mod
 
+
 # -------------------------------------------------
 # EXECUÇÃO
 # -------------------------------------------------
@@ -171,50 +223,6 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     st.divider()
 
-    # PAINEL DETALHADO
-    st.subheader("📋 Briefing Detalhado")
-    detail_cols = st.columns(3)
-
-    for i, zone in enumerate(ZONES):
-
-        decision, reasons, vis, base, ts, turb_sev, turb_mod = results[zone]
-
-        with detail_cols[i]:
-
-            st.markdown(f"### {zone}")
-
-            if decision == "NO-GO":
-                st.error("🔴 HARD LIMIT" if any("Visibilidade" in r or "Base" in r for r in reasons) else "❌ NO-GO")
-            elif decision == "MARGINAL":
-                st.warning("⚠️ MARGINAL")
-            else:
-                st.success("✅ GO")
-
-            st.markdown("**Condições:**")
-
-            st.write(f"👁️ {vis} m" if vis else "👁️ —")
-
-            if base is not None:
-                st.write("☁️ SFC" if base == 0 else f"☁️ {base} ft")
-            else:
-                st.write("☁️ Base significativa não reportada")
-
-            st.write(f"⛈️ {'Sim' if ts else 'Não'}")
-
-            if turb_sev:
-                st.write("🌪️ Severa")
-            elif turb_mod:
-                st.write("🌬️ Moderada")
-            else:
-                st.write("🌬️ Não significativa")
-
-            if reasons:
-                st.markdown("**Limitantes:**")
-                for r in reasons:
-                    st.write(f"• {r}")
-
-    st.divider()
-
     # MAPA
     st.subheader("🗺️ Mapa VFR")
 
@@ -231,13 +239,25 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         decision = results[zone][0]
         ax.axhspan(y0, y1, color=color_map[decision], alpha=0.2)
 
+    # TODAS AS CIDADES RESTAURADAS
     cities = {
         "Bragança": (0.8, 13.5),
+        "Viana do Castelo": (0.2, 12.6),
+        "Braga": (0.4, 11.8),
+        "Vila Real": (0.6, 11.0),
         "Porto": (0.3, 10.5),
         "Viseu": (0.6, 8.6),
+        "Aveiro": (0.3, 8.0),
+        "Guarda": (0.8, 7.4),
         "Coimbra": (0.5, 6.6),
+        "Leiria": (0.3, 5.6),
+        "Castelo Branco": (0.8, 5.9),
+        "Santarém": (0.4, 3.0),
+        "Portalegre": (0.8, 3.0),
         "Lisboa": (0.3, 2.0),
+        "Setúbal": (0.3, 1.2),
         "Évora": (0.6, 0.2),
+        "Beja": (0.7, -1.0),
         "Faro": (0.7, -2.2),
     }
 
@@ -261,6 +281,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     st.pyplot(fig)
 
     st.caption("Ferramenta de apoio à decisão. Não substitui julgamento do piloto.")
+
 
 
 
