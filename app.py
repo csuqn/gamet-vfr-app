@@ -21,7 +21,7 @@ with st.expander("ℹ️ Legenda dos Símbolos", expanded=False):
     **🌪️ Turbulência Severa** – Turbulência significativa  
     **🌬️ Turbulência Moderada** – Turbulência percetível  
 
-    ⚠️ Ferramenta de apoio à decisão. Não substitui o julgamento do piloto.
+    ⚠️ Ferramenta de apoio à decisão. Não substitui julgamento do piloto.
     """)
 
 # -------------------------------------------------
@@ -63,10 +63,6 @@ def normalize_text(text):
 def zones_from_condition(line):
 
     line = line.upper()
-
-    # LAN / COT aplicam globalmente no nosso modelo
-    if "LAN" in line or "COT" in line:
-        return list(ZONES.keys())
 
     # Se não houver geografia explícita → global
     if not re.search(r"(N OF|S OF|E OF|W OF|BTW)", line):
@@ -192,7 +188,6 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     zone_data = parse_gamet(gamet_text)
     results = {z: decision_for_zone(zone_data[z]) for z in ZONES}
 
-    # RESUMO
     st.subheader("📌 Resumo Executivo")
     cols = st.columns(3)
 
@@ -207,7 +202,6 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     st.divider()
 
-    # BRIEFING
     st.subheader("📋 Briefing Detalhado")
     detail_cols = st.columns(3)
 
@@ -241,7 +235,6 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     st.divider()
 
-    # MAPA
     st.subheader("🗺️ Mapa VFR")
 
     fig, ax = plt.subplots(figsize=(6, 8.5))
@@ -285,5 +278,6 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     with col_map:
         st.pyplot(fig)
 
-    st.caption("Ferramenta de apoio à decisão. Não substitui o julgamento do piloto.")
+    st.caption("Ferramenta de apoio à decisão. Não substitui julgamento do piloto.")
+
 
