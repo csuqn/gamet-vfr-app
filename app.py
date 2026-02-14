@@ -15,22 +15,12 @@ st.title("✈️ LPPC GAMET – Briefing VFR Geográfico")
 # -------------------------------------------------
 with st.expander("ℹ️ Legenda dos Símbolos", expanded=False):
     st.markdown("""
-    **👁️ Visibilidade**  
-    Distância horizontal mínima reportada (em metros).
+    **👁️ Visibilidade** – Distância mínima horizontal (m)  
+    **☁️ Base das Nuvens** – Base BKN/OVC mais baixa (ft AGL)  
+    **⛈️ Trovoadas (TS)** – Trovoadas isoladas/embebidas  
+    **🌪️ Turbulência Severa** – Turbulência significativa  
+    **🌬️ Turbulência Moderada** – Turbulência percetível  
 
-    **☁️ Base das Nuvens**  
-    Altura da base BKN/OVC mais baixa (em pés AGL).
-
-    **⛈️ Trovoadas (TS)**  
-    Presença de trovoadas isoladas ou embebidas.
-
-    **🌪️ Turbulência Severa**  
-    Turbulência significativa potencialmente desconfortável.
-
-    **🌬️ Turbulência Moderada**  
-    Turbulência percetível, geralmente operacionalmente aceitável.
-
-    ---
     ⚠️ Ferramenta de apoio à decisão. Não substitui julgamento do piloto.
     """)
 
@@ -59,57 +49,55 @@ def zone_mid(zone):
     )
 
 # -------------------------------------------------
-# NORMALIZAÇÃO DE TEXTO (anti-OCR)
+# NORMALIZAÇÃO OCR LEVE
 # -------------------------------------------------
 def normalize_text(text):
     text = text.upper()
     text = text.replace("0F", "OF")
     text = text.replace("O F", "OF")
-    text = re.sub(r"\s+", " ", text)
     return text
 
 # -------------------------------------------------
-# PARSER GEOGRÁFICO ROBUSTO
+# PARSER GEOGRÁFICO
 # -------------------------------------------------
 def zones_from_condition(line):
 
     line = line.upper()
 
-    # Se não houver geografia explícita → aplica global
+    # LAN / COT aplicam globalmente no nosso modelo
+    if "LAN" in line or "COT" in line:
+        return list(ZONES.keys())
+
+    # Se não houver geografia explícita → global
     if not re.search(r"(N OF|S OF|E OF|W OF|BTW)", line):
         return list(ZONES.keys())
 
     affected = set(ZONES.keys())
 
-    # N OF
     for match in re.findall(r"N OF N(\d{2})(\d{2})", line):
         lat = int(match[0]) + int(match[1]) / 60
         tmp = {z for z in ZONES if zone_mid(z)[0] > lat}
         if tmp:
             affected &= tmp
 
-    # S OF
     for match in re.findall(r"S OF N(\d{2})(\d{2})", line):
         lat = int(match[0]) + int(match[1]) / 60
         tmp = {z for z in ZONES if zone_mid(z)[0] < lat}
         if tmp:
             affected &= tmp
 
-    # E OF
     for match in re.findall(r"E OF W(\d{2})(\d{2})", line):
         lon = -(int(match[0]) + int(match[1]) / 60)
         tmp = {z for z in ZONES if zone_mid(z)[1] > lon}
         if tmp:
             affected &= tmp
 
-    # W OF
     for match in re.findall(r"W OF W(\d{2})(\d{2})", line):
         lon = -(int(match[0]) + int(match[1]) / 60)
         tmp = {z for z in ZONES if zone_mid(z)[1] < lon}
         if tmp:
             affected &= tmp
 
-    # BTW
     for match in re.findall(r"BTW N(\d{2})(\d{2}) AND N(\d{2})(\d{2})", line):
         lat1 = int(match[0]) + int(match[1]) / 60
         lat2 = int(match[2]) + int(match[3]) / 60
@@ -126,22 +114,12 @@ def zones_from_condition(line):
 def parse_gamet(text):
 
     text = normalize_text(text)
-    lines = text.split(" ")
+    lines = text.splitlines()
     zone_data = {z: [] for z in ZONES}
 
-    # reconstruir linhas meteorológicas
-    raw_lines = text.split(" SECN ")
-    full_lines = text.split(" ")
-
-    for line in text.split("  "):
-        line = line.strip()
-        if not line:
-            continue
+    for line in lines:
 
         zones = zones_from_condition(line)
-
-        if not zones:
-            continue
 
         # VIS
         for low, _ in re.findall(r"(\d{4})-(\d{4})M", line):
@@ -308,4 +286,5 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         st.pyplot(fig)
 
     st.caption("Ferramenta de apoio à decisão. Não substitui julgamento do piloto.")
+
 
