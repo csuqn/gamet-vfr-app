@@ -278,3 +278,4 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     st.caption("Motor cartográfico com interseção geométrica real.")
 
+
