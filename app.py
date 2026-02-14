@@ -19,7 +19,7 @@ gamet_text = st.text_area(
 )
 
 # -------------------------------------------------
-# ZONAS
+# ZONAS (simplificação por bandas)
 # -------------------------------------------------
 ZONES = {
     "NORTE": {"lat_min": 39.5, "lat_max": 42.5, "lon_min": -9.5, "lon_max": -6.0},
@@ -37,7 +37,7 @@ def zone_mid(zone):
 # -------------------------------------------------
 # NORMALIZAÇÃO
 # -------------------------------------------------
- normalize_text(text):
+def normalize_text(text):
     text = text.upper()
     text = text.replace("0F", "OF")
     text = text.replace("O F", "OF")
@@ -45,18 +45,15 @@ def zone_mid(zone):
     return text
 
 # -------------------------------------------------
-# SEGMENTAÇÃO POR FENÓMENOS
+# SPLIT POR FENÓMENO (ROBUSTO)
 # -------------------------------------------------
- split_into_sections(text):
+def split_into_sections(text):
 
     pattern = r"(SFC VIS:|VIS:|SIGWX:|SIG CLD:|CLD:|TURB:|ICE:|MT OBSC:)"
-
     parts = re.split(pattern, text)
 
     sections = []
 
-    # re.split cria:
-    # [preamble, marker1, content1, marker2, content2, ...]
     for i in range(1, len(parts), 2):
         marker = parts[i]
         content = parts[i + 1] if i + 1 < len(parts) else ""
@@ -69,9 +66,7 @@ def zone_mid(zone):
 # -------------------------------------------------
 def split_subblocks(section):
 
-    # Separar apenas por marcadores geográficos reais
     geo_pattern = r"(N OF|S OF|E OF|W OF|BTW)"
-
     matches = list(re.finditer(geo_pattern, section))
 
     if not matches:
@@ -87,7 +82,7 @@ def split_subblocks(section):
     return subblocks
 
 # -------------------------------------------------
-# PARSER GEOGRÁFICO
+# PARSER GEOGRÁFICO (COM PROTEÇÃO)
 # -------------------------------------------------
 def zones_from_condition(text_block):
 
@@ -120,12 +115,10 @@ def zones_from_condition(text_block):
         if tmp:
             affected &= tmp
 
-    # 🔥 CORREÇÃO CRÍTICA
     if not affected:
         return list(ZONES.keys())
 
     return list(affected)
-
 
 # -------------------------------------------------
 # PARSER METEOROLÓGICO
@@ -137,16 +130,13 @@ def parse_gamet(text):
     zone_data = {z: [] for z in ZONES}
 
     for section in sections:
-
         subblocks = split_subblocks(section)
 
         for block in subblocks:
 
             zones = zones_from_condition(block)
 
-            # -----------------
             # VIS (ignora ABV)
-            # -----------------
             if "ABV" not in block:
 
                 for low, _ in re.findall(r"(\d{4})-(\d{4})M", block):
@@ -157,23 +147,17 @@ def parse_gamet(text):
                     for z in zones:
                         zone_data[z].append(("VIS", int(val)))
 
-            # -----------------
-            # BASE (intervalo completo)
-            # -----------------
+            # BASE (intervalo)
             for _, base in re.findall(r"(BKN|OVC)\s?(\d{3})-", block):
                 for z in zones:
                     zone_data[z].append(("BASE", int(base) * 100))
 
-            # -----------------
-            # TS (robusto)
-            # -----------------
+            # TS
             if re.search(r"\bTS\b", block):
                 for z in zones:
                     zone_data[z].append(("TS", 1))
 
-            # -----------------
             # TURB
-            # -----------------
             if "TURB" in block:
                 if "SEV" in block:
                     for z in zones:
@@ -297,4 +281,3 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         st.pyplot(fig)
 
     st.caption("Ferramenta de apoio à decisão. Não substitui julgamento do piloto.")
-
