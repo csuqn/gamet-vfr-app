@@ -236,7 +236,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     # MAPA (mais pequeno e centrado)
     st.subheader("🗺️ Mapa VFR")
 
-    fig, ax = plt.subplots(figsize=(5, 7))
+    fig, ax = plt.subplots(figsize=(5.5, 8))
 
     color_map = {"GO": "green", "MARGINAL": "orange", "NO-GO": "red"}
     zone_y = {"NORTE": (9,14), "CENTRO": (4,9), "SUL": (-4.5,4)}
