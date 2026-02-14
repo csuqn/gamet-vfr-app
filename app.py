@@ -21,7 +21,7 @@ with st.expander("ℹ️ Legenda dos Símbolos", expanded=False):
     **🌪️ Turbulência Severa** – Turbulência significativa  
     **🌬️ Turbulência Moderada** – Turbulência percetível  
 
-    ⚠️ Ferramenta de apoio à decisão. Não substitui julgamento do piloto.
+    ⚠️ Ferramenta de apoio à decisão. Não substitui o julgamento do piloto.
     """)
 
 # -------------------------------------------------
@@ -285,6 +285,6 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     with col_map:
         st.pyplot(fig)
 
-    st.caption("Ferramenta de apoio à decisão. Não substitui julgamento do piloto.")
+    st.caption("Ferramenta de apoio à decisão. Não substitui o julgamento do piloto.")
 
 
