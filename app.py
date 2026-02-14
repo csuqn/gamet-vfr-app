@@ -145,22 +145,36 @@ def parse_gamet(text):
 
             zones = zones_from_condition(block)
 
-            for low, _ in re.findall(r"(\d{4})-(\d{4})M", block):
-                for z in zones:
-                    zone_data[z].append(("VIS", int(low)))
+            # -----------------
+            # VIS (IGNORA ABV)
+            # -----------------
+            if "ABV" not in block:
 
-            for val in re.findall(r"\b(\d{4})M\b", block):
-                for z in zones:
-                    zone_data[z].append(("VIS", int(val)))
+                for low, _ in re.findall(r"(\d{4})-(\d{4})M", block):
+                    for z in zones:
+                        zone_data[z].append(("VIS", int(low)))
 
+                for val in re.findall(r"\b(\d{4})M\b", block):
+                    for z in zones:
+                        zone_data[z].append(("VIS", int(val)))
+
+            # -----------------
+            # BASE
+            # -----------------
             for _, base in re.findall(r"(BKN|OVC)\s?(\d{3})", block):
                 for z in zones:
                     zone_data[z].append(("BASE", int(base) * 100))
 
+            # -----------------
+            # TS
+            # -----------------
             if "TS" in block:
                 for z in zones:
                     zone_data[z].append(("TS", 1))
 
+            # -----------------
+            # TURB
+            # -----------------
             if "TURB" in block:
                 if "SEV" in block:
                     for z in zones:
@@ -212,9 +226,6 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     zone_data = parse_gamet(gamet_text)
     results = {z: decision_for_zone(zone_data[z]) for z in ZONES}
 
-    # -------------------------------
-    # BRIEFING
-    # -------------------------------
     st.subheader("📋 Briefing Detalhado")
     cols = st.columns(3)
 
@@ -242,9 +253,6 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
             else:
                 st.write("🌬️ Não significativa")
 
-    # -------------------------------
-    # MAPA
-    # -------------------------------
     st.divider()
     st.subheader("🗺️ Mapa VFR")
 
