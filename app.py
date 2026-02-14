@@ -9,7 +9,7 @@ import pandas as pd
 # CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Briefing VFR Geográfico (FASE 4)")
+st.title("✈️ LPPC GAMET – Briefing VFR Geográfico (FASE 4 Estável)")
 
 gamet_text = st.text_area(
     "Cole aqui o texto completo do GAMET (LPPC)",
@@ -17,7 +17,7 @@ gamet_text = st.text_area(
 )
 
 # -------------------------------------------------
-# ZONAS
+# DEFINIÇÃO DAS ZONAS
 # -------------------------------------------------
 ZONES = {
     "NORTE": {"lat_min": 39.5, "lat_max": 42.5, "lon_min": -9.5, "lon_max": -6.0},
@@ -27,37 +27,49 @@ ZONES = {
 
 def zone_mid(zone):
     z = ZONES[zone]
-    return ( (z["lat_min"] + z["lat_max"]) / 2,
-             (z["lon_min"] + z["lon_max"]) / 2 )
+    return (
+        (z["lat_min"] + z["lat_max"]) / 2,
+        (z["lon_min"] + z["lon_max"]) / 2
+    )
 
 # -------------------------------------------------
-# PARSER GEOGRÁFICO AVANÇADO
+# PARSER GEOGRÁFICO AVANÇADO (SEM FALLBACK PERIGOSO)
 # -------------------------------------------------
 def zones_from_condition(line):
 
     line = line.upper()
+
+    # Se não existir qualquer condição geográfica explícita → aplica a todas
+    if not re.search(r"(N OF|S OF|E OF|W OF|BTW)", line):
+        return list(ZONES.keys())
+
     affected = set(ZONES.keys())
 
+    # N OF
     for match in re.findall(r"N OF N(\d{2})(\d{2})", line):
         lat = int(match[0]) + int(match[1]) / 60
         tmp = {z for z in ZONES if zone_mid(z)[0] > lat}
         affected &= tmp
 
+    # S OF
     for match in re.findall(r"S OF N(\d{2})(\d{2})", line):
         lat = int(match[0]) + int(match[1]) / 60
         tmp = {z for z in ZONES if zone_mid(z)[0] < lat}
         affected &= tmp
 
+    # E OF
     for match in re.findall(r"E OF W(\d{2})(\d{2})", line):
         lon = -(int(match[0]) + int(match[1]) / 60)
         tmp = {z for z in ZONES if zone_mid(z)[1] > lon}
         affected &= tmp
 
+    # W OF
     for match in re.findall(r"W OF W(\d{2})(\d{2})", line):
         lon = -(int(match[0]) + int(match[1]) / 60)
         tmp = {z for z in ZONES if zone_mid(z)[1] < lon}
         affected &= tmp
 
+    # BTW latitude band
     for match in re.findall(r"BTW N(\d{2})(\d{2}) AND N(\d{2})(\d{2})", line):
         lat1 = int(match[0]) + int(match[1]) / 60
         lat2 = int(match[2]) + int(match[3]) / 60
@@ -65,7 +77,8 @@ def zones_from_condition(line):
         tmp = {z for z in ZONES if lower <= zone_mid(z)[0] <= upper}
         affected &= tmp
 
-    return list(affected) if affected else list(ZONES.keys())
+    # Se após aplicar condições ficou vazio → não aplicar a nenhuma
+    return list(affected)
 
 # -------------------------------------------------
 # PARSER METEOROLÓGICO
@@ -79,6 +92,10 @@ def parse_gamet(text):
 
         zones = zones_from_condition(line)
 
+        if not zones:
+            continue  # evita espalhar erro
+
+        # VIS
         for low, _ in re.findall(r"(\d{4})-(\d{4})M", line):
             for z in zones:
                 zone_data[z].append(("VIS", int(low)))
@@ -87,14 +104,17 @@ def parse_gamet(text):
             for z in zones:
                 zone_data[z].append(("VIS", int(val)))
 
+        # BASE
         for _, base in re.findall(r"(BKN|OVC)\s?(\d{3})", line):
             for z in zones:
                 zone_data[z].append(("BASE", int(base) * 100))
 
+        # TS
         if "TS" in line:
             for z in zones:
                 zone_data[z].append(("TS", 1))
 
+        # TURB
         if "TURB" in line:
             level = "SEV" if "SEV" in line else "MOD" if "MOD" in line else None
             if level:
@@ -104,7 +124,7 @@ def parse_gamet(text):
     return zone_data
 
 # -------------------------------------------------
-# MOTOR DECISÃO
+# MOTOR DE DECISÃO
 # -------------------------------------------------
 def decision_for_zone(events):
 
@@ -114,8 +134,10 @@ def decision_for_zone(events):
     turb_sev = any(t == "TURB" and v == "SEV" for t, v in events)
     turb_mod = any(t == "TURB" and v == "MOD" for t, v in events)
 
+    # HARD LIMITS
     if vis is not None and vis < 3000:
         return "NO-GO", vis, base, ts, turb_sev, turb_mod
+
     if base is not None and base < 500:
         return "NO-GO", vis, base, ts, turb_sev, turb_mod
 
@@ -143,7 +165,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     zone_data = parse_gamet(gamet_text)
     results = {z: decision_for_zone(zone_data[z]) for z in ZONES}
 
-    # ---------------- RESUMO ----------------
+    # RESUMO
     st.subheader("📌 Resumo Executivo")
     cols = st.columns(3)
     for i, z in enumerate(ZONES):
@@ -157,7 +179,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     st.divider()
 
-    # ---------------- BRIEFING DETALHADO ----------------
+    # BRIEFING DETALHADO
     st.subheader("📋 Briefing Detalhado")
     detail_cols = st.columns(3)
 
@@ -175,6 +197,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
                 st.success("✅ GO")
 
             st.write(f"👁️ {vis} m" if vis else "👁️ —")
+
             if base is not None:
                 st.write("☁️ SFC" if base == 0 else f"☁️ {base} ft")
             else:
@@ -191,32 +214,30 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     st.divider()
 
-    # ---------------- TABELA RESUMO ----------------
+    # TABELA
     st.subheader("📊 Tabela Resumo")
 
-    table_data = []
-    for z in ZONES:
-        decision, vis, base, ts, turb_sev, turb_mod = results[z]
-        table_data.append({
+    df = pd.DataFrame([
+        {
             "Zona": z,
-            "Decisão": decision,
-            "Vis (m)": vis,
-            "Base (ft)": base,
-            "TS": ts,
-            "Turb Severa": turb_sev
-        })
+            "Decisão": results[z][0],
+            "Vis (m)": results[z][1],
+            "Base (ft)": results[z][2],
+            "TS": results[z][3],
+            "Turb Severa": results[z][4]
+        }
+        for z in ZONES
+    ])
 
-    df = pd.DataFrame(table_data)
     st.dataframe(df, use_container_width=True)
 
     st.divider()
 
-    # ---------------- MAPA ----------------
+    # MAPA
     st.subheader("🗺️ Mapa VFR")
 
     fig, ax = plt.subplots(figsize=(6, 10))
     color_map = {"GO": "green", "MARGINAL": "orange", "NO-GO": "red"}
-
     zone_y = {"NORTE": (9,14), "CENTRO": (4,9), "SUL": (-4.5,4)}
 
     for z, (y0, y1) in zone_y.items():
@@ -254,8 +275,6 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     st.pyplot(fig)
 
     st.caption("Ferramenta de apoio à decisão. Não substitui julgamento do piloto.")
-
-
 
 
 
