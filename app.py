@@ -59,41 +59,57 @@ def zone_mid(zone):
     )
 
 # -------------------------------------------------
-# PARSER GEOGRÁFICO (INTERSEÇÃO SEGURA)
+# NORMALIZAÇÃO DE TEXTO (anti-OCR)
+# -------------------------------------------------
+def normalize_text(text):
+    text = text.upper()
+    text = text.replace("0F", "OF")
+    text = text.replace("O F", "OF")
+    text = re.sub(r"\s+", " ", text)
+    return text
+
+# -------------------------------------------------
+# PARSER GEOGRÁFICO ROBUSTO
 # -------------------------------------------------
 def zones_from_condition(line):
 
     line = line.upper()
 
+    # Se não houver geografia explícita → aplica global
     if not re.search(r"(N OF|S OF|E OF|W OF|BTW)", line):
         return list(ZONES.keys())
 
     affected = set(ZONES.keys())
 
+    # N OF
     for match in re.findall(r"N OF N(\d{2})(\d{2})", line):
         lat = int(match[0]) + int(match[1]) / 60
         tmp = {z for z in ZONES if zone_mid(z)[0] > lat}
         if tmp:
             affected &= tmp
 
+    # S OF
     for match in re.findall(r"S OF N(\d{2})(\d{2})", line):
         lat = int(match[0]) + int(match[1]) / 60
         tmp = {z for z in ZONES if zone_mid(z)[0] < lat}
         if tmp:
             affected &= tmp
 
+    # E OF
     for match in re.findall(r"E OF W(\d{2})(\d{2})", line):
         lon = -(int(match[0]) + int(match[1]) / 60)
         tmp = {z for z in ZONES if zone_mid(z)[1] > lon}
         if tmp:
             affected &= tmp
 
+    # W OF
     for match in re.findall(r"W OF W(\d{2})(\d{2})", line):
         lon = -(int(match[0]) + int(match[1]) / 60)
         tmp = {z for z in ZONES if zone_mid(z)[1] < lon}
         if tmp:
             affected &= tmp
 
+    # BTW
     for match in re.findall(r"BTW N(\d{2})(\d{2}) AND N(\d{2})(\d{2})", line):
         lat1 = int(match[0]) + int(match[1]) / 60
         lat2 = int(match[2]) + int(match[3]) / 60
@@ -109,15 +125,25 @@ def zones_from_condition(line):
 # -------------------------------------------------
 def parse_gamet(text):
 
-    lines = text.upper().splitlines()
+    text = normalize_text(text)
+    lines = text.split(" ")
     zone_data = {z: [] for z in ZONES}
 
-    for line in lines:
+    # reconstruir linhas meteorológicas
+    raw_lines = text.split(" SECN ")
+    full_lines = text.split(" ")
+
+    for line in text.split("  "):
+        line = line.strip()
+        if not line:
+            continue
 
         zones = zones_from_condition(line)
+
         if not zones:
             continue
 
+        # VIS
         for low, _ in re.findall(r"(\d{4})-(\d{4})M", line):
             for z in zones:
                 zone_data[z].append(("VIS", int(low)))
@@ -126,19 +152,24 @@ def parse_gamet(text):
             for z in zones:
                 zone_data[z].append(("VIS", int(val)))
 
+        # BASE
         for _, base in re.findall(r"(BKN|OVC)\s?(\d{3})", line):
             for z in zones:
                 zone_data[z].append(("BASE", int(base) * 100))
 
+        # TS
         if "TS" in line:
             for z in zones:
                 zone_data[z].append(("TS", 1))
 
+        # TURB
         if "TURB" in line:
-            level = "SEV" if "SEV" in line else "MOD" if "MOD" in line else None
-            if level:
+            if "SEV" in line:
                 for z in zones:
-                    zone_data[z].append(("TURB", level))
+                    zone_data[z].append(("TURB", "SEV"))
+            elif "MOD" in line:
+                for z in zones:
+                    zone_data[z].append(("TURB", "MOD"))
 
     return zone_data
 
@@ -183,7 +214,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     zone_data = parse_gamet(gamet_text)
     results = {z: decision_for_zone(zone_data[z]) for z in ZONES}
 
-    # RESUMO EXECUTIVO
+    # RESUMO
     st.subheader("📌 Resumo Executivo")
     cols = st.columns(3)
 
@@ -198,7 +229,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     st.divider()
 
-    # BRIEFING DETALHADO
+    # BRIEFING
     st.subheader("📋 Briefing Detalhado")
     detail_cols = st.columns(3)
 
@@ -216,7 +247,6 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
                 st.success("✅ GO")
 
             st.write(f"👁️ {vis} m" if vis else "👁️ —")
-
             if base is not None:
                 st.write("☁️ SFC" if base == 0 else f"☁️ {base} ft")
             else:
@@ -233,7 +263,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     st.divider()
 
-    # MAPA (mais pequeno e centrado)
+    # MAPA
     st.subheader("🗺️ Mapa VFR")
 
     fig, ax = plt.subplots(figsize=(6, 8.5))
