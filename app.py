@@ -11,20 +11,6 @@ st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
 st.title("✈️ LPPC GAMET – Briefing VFR Geográfico")
 
 # -------------------------------------------------
-# LEGENDA
-# -------------------------------------------------
-with st.expander("ℹ️ Legenda dos Símbolos", expanded=False):
-    st.markdown("""
-    **👁️ Visibilidade** – Distância mínima horizontal (m)  
-    **☁️ Base das Nuvens** – Base BKN/OVC mais baixa (ft AGL)  
-    **⛈️ Trovoadas (TS)** – Trovoadas isoladas/embebidas  
-    **🌪️ Turbulência Severa** – Turbulência significativa  
-    **🌬️ Turbulência Moderada** – Turbulência percetível  
-
-    ⚠️ Ferramenta de apoio à decisão. Não substitui julgamento do piloto.
-    """)
-
-# -------------------------------------------------
 # INPUT
 # -------------------------------------------------
 gamet_text = st.text_area(
@@ -49,7 +35,7 @@ def zone_mid(zone):
     )
 
 # -------------------------------------------------
-# NORMALIZAÇÃO OCR
+# NORMALIZAÇÃO
 # -------------------------------------------------
 def normalize_text(text):
     text = text.upper()
@@ -74,9 +60,10 @@ def split_into_sections(text):
         "MT OBSC:"
     ]
 
-    sections = []
     pattern = "|".join(map(re.escape, markers))
     matches = list(re.finditer(pattern, text))
+
+    sections = []
 
     for i, match in enumerate(matches):
         start = match.start()
@@ -84,6 +71,26 @@ def split_into_sections(text):
         sections.append(text[start:end].strip())
 
     return sections
+
+# -------------------------------------------------
+# SUB-SEGMENTAÇÃO GEOGRÁFICA
+# -------------------------------------------------
+def split_subblocks(section):
+
+    geo_pattern = r"(N OF|S OF|E OF|W OF|BTW|\d{2}/\d{2})"
+    matches = list(re.finditer(geo_pattern, section))
+
+    if not matches:
+        return [section]
+
+    subblocks = []
+
+    for i, match in enumerate(matches):
+        start = match.start()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(section)
+        subblocks.append(section[start:end].strip())
+
+    return subblocks
 
 # -------------------------------------------------
 # PARSER GEOGRÁFICO
@@ -119,14 +126,6 @@ def zones_from_condition(text_block):
         if tmp:
             affected &= tmp
 
-    for match in re.findall(r"BTW N(\d{2})(\d{2}) AND N(\d{2})(\d{2})", text_block):
-        lat1 = int(match[0]) + int(match[1]) / 60
-        lat2 = int(match[2]) + int(match[3]) / 60
-        lower, upper = min(lat1, lat2), max(lat1, lat2)
-        tmp = {z for z in ZONES if lower <= zone_mid(z)[0] <= upper}
-        if tmp:
-            affected &= tmp
-
     return list(affected)
 
 # -------------------------------------------------
@@ -136,45 +135,44 @@ def parse_gamet(text):
 
     text = normalize_text(text)
     sections = split_into_sections(text)
-
     zone_data = {z: [] for z in ZONES}
 
-    for block in sections:
+    for section in sections:
 
-        zones = zones_from_condition(block)
+        subblocks = split_subblocks(section)
 
-        # VIS
-        for low, _ in re.findall(r"(\d{4})-(\d{4})M", block):
-            for z in zones:
-                zone_data[z].append(("VIS", int(low)))
+        for block in subblocks:
 
-        for val in re.findall(r"\b(\d{4})M\b", block):
-            for z in zones:
-                zone_data[z].append(("VIS", int(val)))
+            zones = zones_from_condition(block)
 
-        # BASE
-        for _, base in re.findall(r"(BKN|OVC)\s?(\d{3})", block):
-            for z in zones:
-                zone_data[z].append(("BASE", int(base) * 100))
-
-        # TS
-        if "TS" in block:
-            for z in zones:
-                zone_data[z].append(("TS", 1))
-
-        # TURB
-        if "TURB" in block:
-            if "SEV" in block:
+            for low, _ in re.findall(r"(\d{4})-(\d{4})M", block):
                 for z in zones:
-                    zone_data[z].append(("TURB", "SEV"))
-            elif "MOD" in block:
+                    zone_data[z].append(("VIS", int(low)))
+
+            for val in re.findall(r"\b(\d{4})M\b", block):
                 for z in zones:
-                    zone_data[z].append(("TURB", "MOD"))
+                    zone_data[z].append(("VIS", int(val)))
+
+            for _, base in re.findall(r"(BKN|OVC)\s?(\d{3})", block):
+                for z in zones:
+                    zone_data[z].append(("BASE", int(base) * 100))
+
+            if "TS" in block:
+                for z in zones:
+                    zone_data[z].append(("TS", 1))
+
+            if "TURB" in block:
+                if "SEV" in block:
+                    for z in zones:
+                        zone_data[z].append(("TURB", "SEV"))
+                elif "MOD" in block:
+                    for z in zones:
+                        zone_data[z].append(("TURB", "MOD"))
 
     return zone_data
 
 # -------------------------------------------------
-# MOTOR DECISÃO (inalterado)
+# MOTOR DECISÃO
 # -------------------------------------------------
 def decision_for_zone(events):
 
@@ -214,27 +212,16 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     zone_data = parse_gamet(gamet_text)
     results = {z: decision_for_zone(zone_data[z]) for z in ZONES}
 
-    st.subheader("📌 Resumo Executivo")
-    cols = st.columns(3)
-
-    for i, z in enumerate(ZONES):
-        decision = results[z][0]
-        if decision == "NO-GO":
-            cols[i].error(f"{z}\nNO-GO")
-        elif decision == "MARGINAL":
-            cols[i].warning(f"{z}\nMARGINAL")
-        else:
-            cols[i].success(f"{z}\nGO")
-
-    st.divider()
-
+    # -------------------------------
+    # BRIEFING
+    # -------------------------------
     st.subheader("📋 Briefing Detalhado")
-    detail_cols = st.columns(3)
+    cols = st.columns(3)
 
     for i, z in enumerate(ZONES):
         decision, vis, base, ts, turb_sev, turb_mod = results[z]
 
-        with detail_cols[i]:
+        with cols[i]:
             st.markdown(f"### {z}")
 
             if decision == "NO-GO":
@@ -245,11 +232,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
                 st.success("✅ GO")
 
             st.write(f"👁️ {vis} m" if vis else "👁️ —")
-            if base is not None:
-                st.write("☁️ SFC" if base == 0 else f"☁️ {base} ft")
-            else:
-                st.write("☁️ Base significativa não reportada")
-
+            st.write(f"☁️ {base} ft" if base else "☁️ —")
             st.write(f"⛈️ {'Sim' if ts else 'Não'}")
 
             if turb_sev:
@@ -259,8 +242,10 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
             else:
                 st.write("🌬️ Não significativa")
 
+    # -------------------------------
+    # MAPA
+    # -------------------------------
     st.divider()
-
     st.subheader("🗺️ Mapa VFR")
 
     fig, ax = plt.subplots(figsize=(6, 8.5))
@@ -300,9 +285,10 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         Line2D([0],[0],marker='o',color='black',linestyle='None',label='Cidade')
     ])
 
-    col_left, col_map, col_right = st.columns([1,2,1])
-    with col_map:
+    col1, col2, col3 = st.columns([1,2,1])
+    with col2:
         st.pyplot(fig)
 
     st.caption("Ferramenta de apoio à decisão. Não substitui julgamento do piloto.")
+
 
