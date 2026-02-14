@@ -11,7 +11,7 @@ st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
 st.title("✈️ LPPC GAMET – Briefing VFR Geográfico")
 
 # -------------------------------------------------
-# LEGENDA MINIMALISTA
+# LEGENDA
 # -------------------------------------------------
 with st.expander("ℹ️ Legenda dos Símbolos", expanded=False):
     st.markdown("""
@@ -59,7 +59,7 @@ def zone_mid(zone):
     )
 
 # -------------------------------------------------
-# PARSER GEOGRÁFICO AVANÇADO (INTERSEÇÃO SEGURA)
+# PARSER GEOGRÁFICO (INTERSEÇÃO SEGURA)
 # -------------------------------------------------
 def zones_from_condition(line):
 
@@ -115,7 +115,6 @@ def parse_gamet(text):
     for line in lines:
 
         zones = zones_from_condition(line)
-
         if not zones:
             continue
 
@@ -187,6 +186,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     # RESUMO EXECUTIVO
     st.subheader("📌 Resumo Executivo")
     cols = st.columns(3)
+
     for i, z in enumerate(ZONES):
         decision = results[z][0]
         if decision == "NO-GO":
@@ -233,10 +233,11 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     st.divider()
 
-    # MAPA
+    # MAPA (mais pequeno e centrado)
     st.subheader("🗺️ Mapa VFR")
 
-    fig, ax = plt.subplots(figsize=(6, 10))
+    fig, ax = plt.subplots(figsize=(5, 7))
+
     color_map = {"GO": "green", "MARGINAL": "orange", "NO-GO": "red"}
     zone_y = {"NORTE": (9,14), "CENTRO": (4,9), "SUL": (-4.5,4)}
 
@@ -272,6 +273,9 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         Line2D([0],[0],marker='o',color='black',linestyle='None',label='Cidade')
     ])
 
-    st.pyplot(fig)
+    col_left, col_map, col_right = st.columns([1,2,1])
+    with col_map:
+        st.pyplot(fig)
 
     st.caption("Ferramenta de apoio à decisão. Não substitui julgamento do piloto.")
+
