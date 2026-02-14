@@ -9,7 +9,7 @@ from shapely.geometry import box
 # CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v4.2")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v4.3")
 
 # -------------------------------------------------
 # INPUT
@@ -106,6 +106,10 @@ def build_condition_polygon(text_block):
         poly = box(LON_MIN, LAT_MIN, lon, LAT_MAX)
         condition_poly = condition_poly.intersection(poly)
 
+    # 🔥 CORREÇÃO CRÍTICA
+    if condition_poly.is_empty:
+        condition_poly = FIR_POLYGON
+
     return condition_poly
 
 # -------------------------------------------------
@@ -195,9 +199,6 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     zone_data = parse_gamet(gamet_text)
     results = {z: decision_for_zone(zone_data[z]) for z in ZONES}
 
-    # -------------------------------
-    # BRIEFING
-    # -------------------------------
     st.subheader("📋 Briefing Detalhado")
     cols = st.columns(3)
 
@@ -225,62 +226,4 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
             else:
                 st.write("🌬️ Não significativa")
 
-    # -------------------------------
-    # MAPA COM CIDADES
-    # -------------------------------
-    st.divider()
-    st.subheader("🗺️ Mapa VFR")
-
-    fig, ax = plt.subplots(figsize=(6, 8.5))
-
-    color_map = {"GO": "green", "MARGINAL": "orange", "NO-GO": "red"}
-    zone_y = {"NORTE": (9,14), "CENTRO": (4,9), "SUL": (-4.5,4)}
-
-    for z, (y0, y1) in zone_y.items():
-        ax.axhspan(y0, y1, color=color_map[results[z][0]], alpha=0.25)
-
-    cities = {
-        "Bragança": (0.8,13.5),
-        "Viana do Castelo": (0.2,12.6),
-        "Braga": (0.4,11.8),
-        "Vila Real": (0.6,11.0),
-        "Porto": (0.3,10.5),
-        "Viseu": (0.6,8.6),
-        "Aveiro": (0.3,8.0),
-        "Guarda": (0.8,7.4),
-        "Coimbra": (0.5,6.6),
-        "Leiria": (0.3,5.6),
-        "Castelo Branco": (0.8,5.9),
-        "Santarém": (0.4,3.0),
-        "Portalegre": (0.8,3.0),
-        "Lisboa": (0.3,2.0),
-        "Setúbal": (0.3,1.2),
-        "Évora": (0.6,0.2),
-        "Beja": (0.7,-1.0),
-        "Faro": (0.7,-2.2),
-    }
-
-    for name, (x, y) in cities.items():
-        ax.plot(x, y, "ko", markersize=4)
-        ax.text(x + 0.02, y, name, fontsize=8, va="center")
-
-    ax.set_xlim(0,1)
-    ax.set_ylim(-4.5,14)
-    ax.set_xticks([])
-    ax.set_yticks([])
-    ax.set_title("Decisão VFR por Zona")
-
-    ax.legend(handles=[
-        Patch(facecolor="green",alpha=0.25,label="GO"),
-        Patch(facecolor="orange",alpha=0.25,label="MARGINAL"),
-        Patch(facecolor="red",alpha=0.25,label="NO-GO"),
-        Line2D([0],[0],marker='o',color='black',linestyle='None',label='Cidade')
-    ])
-
-    col1, col2, col3 = st.columns([1,2,1])
-    with col2:
-        st.pyplot(fig)
-
     st.caption("Motor cartográfico com interseção geométrica real.")
-
-
