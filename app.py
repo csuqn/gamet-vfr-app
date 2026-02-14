@@ -184,7 +184,7 @@ def decision_for_zone(events):
     if base and 500 <= base < 1500: score += 40
     if ts: score += 50
     if turb_sev: score += 45
-    elif turb_mod: score += 25
+    elif turb_mod: score += 35
 
     if score >= 140:
         decision = "NO-GO"
