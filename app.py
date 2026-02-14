@@ -37,7 +37,7 @@ def zone_mid(zone):
 # -------------------------------------------------
 # NORMALIZAÇÃO
 # -------------------------------------------------
-def normalize_text(text):
+ normalize_text(text):
     text = text.upper()
     text = text.replace("0F", "OF")
     text = text.replace("O F", "OF")
@@ -47,7 +47,7 @@ def normalize_text(text):
 # -------------------------------------------------
 # SEGMENTAÇÃO POR FENÓMENOS
 # -------------------------------------------------
-def split_into_sections(text):
+ split_into_sections(text):
 
     pattern = r"(SFC VIS:|VIS:|SIGWX:|SIG CLD:|CLD:|TURB:|ICE:|MT OBSC:)"
 
@@ -119,6 +119,10 @@ def zones_from_condition(text_block):
         tmp = {z for z in ZONES if zone_mid(z)[1] < lon}
         if tmp:
             affected &= tmp
+
+    # 🔥 CORREÇÃO CRÍTICA
+    if not affected:
+        return list(ZONES.keys())
 
     return list(affected)
 
