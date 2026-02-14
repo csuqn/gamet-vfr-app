@@ -146,7 +146,7 @@ def parse_gamet(text):
             zones = zones_from_condition(block)
 
             # -----------------
-            # VIS (IGNORA ABV)
+            # VIS (ignora ABV)
             # -----------------
             if "ABV" not in block:
 
@@ -159,16 +159,16 @@ def parse_gamet(text):
                         zone_data[z].append(("VIS", int(val)))
 
             # -----------------
-            # BASE
+            # BASE (intervalo completo)
             # -----------------
-            for _, base in re.findall(r"(BKN|OVC)\s?(\d{3})", block):
+            for _, base in re.findall(r"(BKN|OVC)\s?(\d{3})-", block):
                 for z in zones:
                     zone_data[z].append(("BASE", int(base) * 100))
 
             # -----------------
-            # TS
+            # TS (robusto)
             # -----------------
-            if "TS" in block:
+            if re.search(r"\bTS\b", block):
                 for z in zones:
                     zone_data[z].append(("TS", 1))
 
@@ -298,5 +298,4 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         st.pyplot(fig)
 
     st.caption("Ferramenta de apoio à decisão. Não substitui julgamento do piloto.")
-
 
