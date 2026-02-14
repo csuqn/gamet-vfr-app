@@ -1,3 +1,4 @@
+
 import streamlit as st
 import re
 import matplotlib.pyplot as plt
@@ -9,7 +10,7 @@ import pandas as pd
 # CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Briefing VFR Geográfico (FASE 4 Estável)")
+st.title("✈️ LPPC GAMET – Briefing VFR Geográfico (FASE 4.1 Estável)")
 
 gamet_text = st.text_area(
     "Cole aqui o texto completo do GAMET (LPPC)",
@@ -17,7 +18,7 @@ gamet_text = st.text_area(
 )
 
 # -------------------------------------------------
-# DEFINIÇÃO DAS ZONAS
+# ZONAS
 # -------------------------------------------------
 ZONES = {
     "NORTE": {"lat_min": 39.5, "lat_max": 42.5, "lon_min": -9.5, "lon_max": -6.0},
@@ -33,13 +34,13 @@ def zone_mid(zone):
     )
 
 # -------------------------------------------------
-# PARSER GEOGRÁFICO AVANÇADO (SEM FALLBACK PERIGOSO)
+# PARSER GEOGRÁFICO AVANÇADO (INTERSEÇÃO SEGURA)
 # -------------------------------------------------
 def zones_from_condition(line):
 
     line = line.upper()
 
-    # Se não existir qualquer condição geográfica explícita → aplica a todas
+    # Se não existir condição geográfica explícita → aplica a todas
     if not re.search(r"(N OF|S OF|E OF|W OF|BTW)", line):
         return list(ZONES.keys())
 
@@ -49,25 +50,29 @@ def zones_from_condition(line):
     for match in re.findall(r"N OF N(\d{2})(\d{2})", line):
         lat = int(match[0]) + int(match[1]) / 60
         tmp = {z for z in ZONES if zone_mid(z)[0] > lat}
-        affected &= tmp
+        if tmp:
+            affected &= tmp
 
     # S OF
     for match in re.findall(r"S OF N(\d{2})(\d{2})", line):
         lat = int(match[0]) + int(match[1]) / 60
         tmp = {z for z in ZONES if zone_mid(z)[0] < lat}
-        affected &= tmp
+        if tmp:
+            affected &= tmp
 
     # E OF
     for match in re.findall(r"E OF W(\d{2})(\d{2})", line):
         lon = -(int(match[0]) + int(match[1]) / 60)
         tmp = {z for z in ZONES if zone_mid(z)[1] > lon}
-        affected &= tmp
+        if tmp:
+            affected &= tmp
 
     # W OF
     for match in re.findall(r"W OF W(\d{2})(\d{2})", line):
         lon = -(int(match[0]) + int(match[1]) / 60)
         tmp = {z for z in ZONES if zone_mid(z)[1] < lon}
-        affected &= tmp
+        if tmp:
+            affected &= tmp
 
     # BTW latitude band
     for match in re.findall(r"BTW N(\d{2})(\d{2}) AND N(\d{2})(\d{2})", line):
@@ -75,9 +80,9 @@ def zones_from_condition(line):
         lat2 = int(match[2]) + int(match[3]) / 60
         lower, upper = min(lat1, lat2), max(lat1, lat2)
         tmp = {z for z in ZONES if lower <= zone_mid(z)[0] <= upper}
-        affected &= tmp
+        if tmp:
+            affected &= tmp
 
-    # Se após aplicar condições ficou vazio → não aplicar a nenhuma
     return list(affected)
 
 # -------------------------------------------------
@@ -93,7 +98,7 @@ def parse_gamet(text):
         zones = zones_from_condition(line)
 
         if not zones:
-            continue  # evita espalhar erro
+            continue
 
         # VIS
         for low, _ in re.findall(r"(\d{4})-(\d{4})M", line):
@@ -124,7 +129,7 @@ def parse_gamet(text):
     return zone_data
 
 # -------------------------------------------------
-# MOTOR DE DECISÃO
+# MOTOR DECISÃO
 # -------------------------------------------------
 def decision_for_zone(events):
 
@@ -179,7 +184,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     st.divider()
 
-    # BRIEFING DETALHADO
+    # BRIEFING
     st.subheader("📋 Briefing Detalhado")
     detail_cols = st.columns(3)
 
@@ -216,7 +221,6 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     # TABELA
     st.subheader("📊 Tabela Resumo")
-
     df = pd.DataFrame([
         {
             "Zona": z,
@@ -228,7 +232,6 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         }
         for z in ZONES
     ])
-
     st.dataframe(df, use_container_width=True)
 
     st.divider()
@@ -275,6 +278,4 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     st.pyplot(fig)
 
     st.caption("Ferramenta de apoio à decisão. Não substitui julgamento do piloto.")
-
-
 
