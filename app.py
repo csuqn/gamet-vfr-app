@@ -49,52 +49,77 @@ def zone_mid(zone):
     )
 
 # -------------------------------------------------
-# NORMALIZAÇÃO OCR LEVE
+# NORMALIZAÇÃO OCR
 # -------------------------------------------------
 def normalize_text(text):
     text = text.upper()
     text = text.replace("0F", "OF")
     text = text.replace("O F", "OF")
+    text = re.sub(r"\s+", " ", text)
     return text
+
+# -------------------------------------------------
+# SEGMENTAÇÃO POR FENÓMENOS
+# -------------------------------------------------
+def split_into_sections(text):
+
+    markers = [
+        "SFC VIS:",
+        "VIS:",
+        "SIGWX:",
+        "SIG CLD:",
+        "CLD:",
+        "TURB:",
+        "ICE:",
+        "MT OBSC:"
+    ]
+
+    sections = []
+    pattern = "|".join(map(re.escape, markers))
+    matches = list(re.finditer(pattern, text))
+
+    for i, match in enumerate(matches):
+        start = match.start()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        sections.append(text[start:end].strip())
+
+    return sections
 
 # -------------------------------------------------
 # PARSER GEOGRÁFICO
 # -------------------------------------------------
-def zones_from_condition(line):
+def zones_from_condition(text_block):
 
-    line = line.upper()
-
-    # Se não houver geografia explícita → global
-    if not re.search(r"(N OF|S OF|E OF|W OF|BTW)", line):
+    if not re.search(r"(N OF|S OF|E OF|W OF|BTW)", text_block):
         return list(ZONES.keys())
 
     affected = set(ZONES.keys())
 
-    for match in re.findall(r"N OF N(\d{2})(\d{2})", line):
+    for match in re.findall(r"N OF N(\d{2})(\d{2})", text_block):
         lat = int(match[0]) + int(match[1]) / 60
         tmp = {z for z in ZONES if zone_mid(z)[0] > lat}
         if tmp:
             affected &= tmp
 
-    for match in re.findall(r"S OF N(\d{2})(\d{2})", line):
+    for match in re.findall(r"S OF N(\d{2})(\d{2})", text_block):
         lat = int(match[0]) + int(match[1]) / 60
         tmp = {z for z in ZONES if zone_mid(z)[0] < lat}
         if tmp:
             affected &= tmp
 
-    for match in re.findall(r"E OF W(\d{2})(\d{2})", line):
+    for match in re.findall(r"E OF W(\d{2})(\d{2})", text_block):
         lon = -(int(match[0]) + int(match[1]) / 60)
         tmp = {z for z in ZONES if zone_mid(z)[1] > lon}
         if tmp:
             affected &= tmp
 
-    for match in re.findall(r"W OF W(\d{2})(\d{2})", line):
+    for match in re.findall(r"W OF W(\d{2})(\d{2})", text_block):
         lon = -(int(match[0]) + int(match[1]) / 60)
         tmp = {z for z in ZONES if zone_mid(z)[1] < lon}
         if tmp:
             affected &= tmp
 
-    for match in re.findall(r"BTW N(\d{2})(\d{2}) AND N(\d{2})(\d{2})", line):
+    for match in re.findall(r"BTW N(\d{2})(\d{2}) AND N(\d{2})(\d{2})", text_block):
         lat1 = int(match[0]) + int(match[1]) / 60
         lat2 = int(match[2]) + int(match[3]) / 60
         lower, upper = min(lat1, lat2), max(lat1, lat2)
@@ -110,45 +135,46 @@ def zones_from_condition(line):
 def parse_gamet(text):
 
     text = normalize_text(text)
-    lines = text.splitlines()
+    sections = split_into_sections(text)
+
     zone_data = {z: [] for z in ZONES}
 
-    for line in lines:
+    for block in sections:
 
-        zones = zones_from_condition(line)
+        zones = zones_from_condition(block)
 
         # VIS
-        for low, _ in re.findall(r"(\d{4})-(\d{4})M", line):
+        for low, _ in re.findall(r"(\d{4})-(\d{4})M", block):
             for z in zones:
                 zone_data[z].append(("VIS", int(low)))
 
-        for val in re.findall(r"\b(\d{4})M\b", line):
+        for val in re.findall(r"\b(\d{4})M\b", block):
             for z in zones:
                 zone_data[z].append(("VIS", int(val)))
 
         # BASE
-        for _, base in re.findall(r"(BKN|OVC)\s?(\d{3})", line):
+        for _, base in re.findall(r"(BKN|OVC)\s?(\d{3})", block):
             for z in zones:
                 zone_data[z].append(("BASE", int(base) * 100))
 
         # TS
-        if "TS" in line:
+        if "TS" in block:
             for z in zones:
                 zone_data[z].append(("TS", 1))
 
         # TURB
-        if "TURB" in line:
-            if "SEV" in line:
+        if "TURB" in block:
+            if "SEV" in block:
                 for z in zones:
                     zone_data[z].append(("TURB", "SEV"))
-            elif "MOD" in line:
+            elif "MOD" in block:
                 for z in zones:
                     zone_data[z].append(("TURB", "MOD"))
 
     return zone_data
 
 # -------------------------------------------------
-# MOTOR DECISÃO
+# MOTOR DECISÃO (inalterado)
 # -------------------------------------------------
 def decision_for_zone(events):
 
