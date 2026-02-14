@@ -9,7 +9,7 @@ from shapely.geometry import box
 # CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v4.6")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v4.7")
 
 # -------------------------------------------------
 # INPUT
@@ -27,7 +27,7 @@ LON_MIN, LON_MAX = -9.5, -6.0
 FIR_POLYGON = box(LON_MIN, LAT_MIN, LON_MAX, LAT_MAX)
 
 # -------------------------------------------------
-# ZONAS COMO POLÍGONOS
+# ZONAS
 # -------------------------------------------------
 ZONES = {
     "NORTE": box(LON_MIN, 39.5, LON_MAX, 42.5),
@@ -61,7 +61,7 @@ def split_into_sections(text):
     return sections
 
 # -------------------------------------------------
-# SPLIT INTERNO POR GEOGRAFIA
+# SPLIT GEOGRÁFICO
 # -------------------------------------------------
 def split_subblocks(section):
     geo_pattern = r"(N OF|S OF|E OF|W OF|BTW)"
@@ -80,7 +80,7 @@ def split_subblocks(section):
     return subblocks
 
 # -------------------------------------------------
-# CONVERTER EXPRESSÃO → POLÍGONO
+# POLÍGONO CONDIÇÃO
 # -------------------------------------------------
 def build_condition_polygon(text_block):
 
@@ -121,6 +121,10 @@ def parse_gamet(text):
     zone_data = {z: [] for z in ZONES}
 
     for section in sections:
+
+        is_turb_section = section.startswith("TURB:")
+        is_cld_section = section.startswith("CLD:") or section.startswith("SIG CLD:")
+
         subblocks = split_subblocks(section)
 
         for block in subblocks:
@@ -132,7 +136,7 @@ def parse_gamet(text):
                 if not zone_poly.intersects(condition_poly):
                     continue
 
-                # VIS
+                # ---------------- VIS ----------------
                 if "ABV" not in block:
                     for low, _ in re.findall(r"(\d{4})-(\d{4})M", block):
                         zone_data[zone_name].append(("VIS", int(low)))
@@ -140,16 +144,17 @@ def parse_gamet(text):
                     for val in re.findall(r"\b(\d{4})M\b", block):
                         zone_data[zone_name].append(("VIS", int(val)))
 
-                # BASE
-                for _, base_min, _ in re.findall(r"(BKN|OVC)\s+(\d{3})-(\d{3})", block):
-                    zone_data[zone_name].append(("BASE", int(base_min) * 100))
+                # ---------------- BASE (robusto) ----------------
+                if is_cld_section:
+                    for base_min, _ in re.findall(r"(\d{3})-(\d{3})/?.*?HFT", block):
+                        zone_data[zone_name].append(("BASE", int(base_min) * 100))
 
-                # TS
+                # ---------------- TS ----------------
                 if re.search(r"\bTS\b", block):
                     zone_data[zone_name].append(("TS", 1))
 
-                # TURB
-                if "TURB" in block:
+                # ---------------- TURB ----------------
+                if is_turb_section:
                     if "SEV" in block:
                         zone_data[zone_name].append(("TURB", "SEV"))
                     elif "MOD" in block:
@@ -200,7 +205,6 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     st.subheader("📋 Briefing Detalhado")
 
-    # Legenda escondida
     with st.expander("ℹ️ Legenda"):
         st.markdown("""
 👁️ **Visibilidade mínima**  
