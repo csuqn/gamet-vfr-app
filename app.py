@@ -126,6 +126,7 @@ def zones_from_condition(text_block):
 
     return list(affected)
 
+
 # -------------------------------------------------
 # PARSER METEOROLÓGICO
 # -------------------------------------------------
