@@ -49,26 +49,18 @@ def normalize_text(text):
 # -------------------------------------------------
 def split_into_sections(text):
 
-    markers = [
-        "SFC VIS:",
-        "VIS:",
-        "SIGWX:",
-        "SIG CLD:",
-        "CLD:",
-        "TURB:",
-        "ICE:",
-        "MT OBSC:"
-    ]
+    pattern = r"(SFC VIS:|VIS:|SIGWX:|SIG CLD:|CLD:|TURB:|ICE:|MT OBSC:)"
 
-    pattern = "|".join(map(re.escape, markers))
-    matches = list(re.finditer(pattern, text))
+    parts = re.split(pattern, text)
 
     sections = []
 
-    for i, match in enumerate(matches):
-        start = match.start()
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-        sections.append(text[start:end].strip())
+    # re.split cria:
+    # [preamble, marker1, content1, marker2, content2, ...]
+    for i in range(1, len(parts), 2):
+        marker = parts[i]
+        content = parts[i + 1] if i + 1 < len(parts) else ""
+        sections.append((marker + content).strip())
 
     return sections
 
