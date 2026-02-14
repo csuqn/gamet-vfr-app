@@ -9,7 +9,7 @@ from shapely.geometry import box
 # CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v4.1")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v4.2")
 
 # -------------------------------------------------
 # INPUT
@@ -20,15 +20,14 @@ gamet_text = st.text_area(
 )
 
 # -------------------------------------------------
-# BOUNDING BOX FIR CONTINENTAL (aprox)
+# FIR BOUNDING BOX
 # -------------------------------------------------
 LAT_MIN, LAT_MAX = 36.5, 42.5
 LON_MIN, LON_MAX = -9.5, -6.0
-
 FIR_POLYGON = box(LON_MIN, LAT_MIN, LON_MAX, LAT_MAX)
 
 # -------------------------------------------------
-# ZONAS COMO POLÍGONOS REAIS
+# ZONAS COMO POLÍGONOS
 # -------------------------------------------------
 ZONES = {
     "NORTE": box(LON_MIN, 39.5, LON_MAX, 42.5),
@@ -62,31 +61,46 @@ def split_into_sections(text):
     return sections
 
 # -------------------------------------------------
-# CONVERTER CONDIÇÃO GEOGRÁFICA → POLÍGONO
+# SPLIT INTERNO POR GEOGRAFIA
+# -------------------------------------------------
+def split_subblocks(section):
+    geo_pattern = r"(N OF|S OF|E OF|W OF|BTW)"
+    matches = list(re.finditer(geo_pattern, section))
+
+    if not matches:
+        return [section]
+
+    subblocks = []
+
+    for i, match in enumerate(matches):
+        start = match.start()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(section)
+        subblocks.append(section[start:end].strip())
+
+    return subblocks
+
+# -------------------------------------------------
+# CONVERTER EXPRESSÃO → POLÍGONO
 # -------------------------------------------------
 def build_condition_polygon(text_block):
 
     condition_poly = FIR_POLYGON
 
-    # N OF
     for match in re.findall(r"N OF N(\d{2})(\d{2})", text_block):
         lat = int(match[0]) + int(match[1]) / 60
         poly = box(LON_MIN, lat, LON_MAX, LAT_MAX)
         condition_poly = condition_poly.intersection(poly)
 
-    # S OF
     for match in re.findall(r"S OF N(\d{2})(\d{2})", text_block):
         lat = int(match[0]) + int(match[1]) / 60
         poly = box(LON_MIN, LAT_MIN, LON_MAX, lat)
         condition_poly = condition_poly.intersection(poly)
 
-    # E OF
     for match in re.findall(r"E OF W(\d{2})(\d{2})", text_block):
         lon = -(int(match[0]) + int(match[1]) / 60)
         poly = box(lon, LAT_MIN, LON_MAX, LAT_MAX)
         condition_poly = condition_poly.intersection(poly)
 
-    # W OF
     for match in re.findall(r"W OF W(\d{2})(\d{2})", text_block):
         lon = -(int(match[0]) + int(match[1]) / 60)
         poly = box(LON_MIN, LAT_MIN, lon, LAT_MAX)
@@ -104,36 +118,39 @@ def parse_gamet(text):
     zone_data = {z: [] for z in ZONES}
 
     for section in sections:
+        subblocks = split_subblocks(section)
 
-        condition_poly = build_condition_polygon(section)
+        for block in subblocks:
 
-        for zone_name, zone_poly in ZONES.items():
+            condition_poly = build_condition_polygon(block)
 
-            if not zone_poly.intersects(condition_poly):
-                continue
+            for zone_name, zone_poly in ZONES.items():
 
-            # VIS (ignora ABV)
-            if "ABV" not in section:
-                for low, _ in re.findall(r"(\d{4})-(\d{4})M", section):
-                    zone_data[zone_name].append(("VIS", int(low)))
+                if not zone_poly.intersects(condition_poly):
+                    continue
 
-                for val in re.findall(r"\b(\d{4})M\b", section):
-                    zone_data[zone_name].append(("VIS", int(val)))
+                # VIS
+                if "ABV" not in block:
+                    for low, _ in re.findall(r"(\d{4})-(\d{4})M", block):
+                        zone_data[zone_name].append(("VIS", int(low)))
 
-            # BASE (intervalo inferior)
-            for _, base in re.findall(r"(BKN|OVC)\s?(\d{3})-", section):
-                zone_data[zone_name].append(("BASE", int(base) * 100))
+                    for val in re.findall(r"\b(\d{4})M\b", block):
+                        zone_data[zone_name].append(("VIS", int(val)))
 
-            # TS
-            if re.search(r"\bTS\b", section):
-                zone_data[zone_name].append(("TS", 1))
+                # BASE
+                for _, base in re.findall(r"(BKN|OVC)\s?(\d{3})-", block):
+                    zone_data[zone_name].append(("BASE", int(base) * 100))
 
-            # TURB
-            if "TURB" in section:
-                if "SEV" in section:
-                    zone_data[zone_name].append(("TURB", "SEV"))
-                elif "MOD" in section:
-                    zone_data[zone_name].append(("TURB", "MOD"))
+                # TS
+                if re.search(r"\bTS\b", block):
+                    zone_data[zone_name].append(("TS", 1))
+
+                # TURB
+                if "TURB" in block:
+                    if "SEV" in block:
+                        zone_data[zone_name].append(("TURB", "SEV"))
+                    elif "MOD" in block:
+                        zone_data[zone_name].append(("TURB", "MOD"))
 
     return zone_data
 
@@ -209,7 +226,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
                 st.write("🌬️ Não significativa")
 
     # -------------------------------
-    # MAPA
+    # MAPA COM CIDADES
     # -------------------------------
     st.divider()
     st.subheader("🗺️ Mapa VFR")
@@ -220,7 +237,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     zone_y = {"NORTE": (9,14), "CENTRO": (4,9), "SUL": (-4.5,4)}
 
     for z, (y0, y1) in zone_y.items():
-        ax.axhspan(y0, y1, color=color_map[results[z][0]], alpha=0.2)
+        ax.axhspan(y0, y1, color=color_map[results[z][0]], alpha=0.25)
 
     cities = {
         "Bragança": (0.8,13.5),
@@ -243,9 +260,9 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         "Faro": (0.7,-2.2),
     }
 
-    for name,(x,y) in cities.items():
-        ax.plot(x,y,"ko",markersize=4)
-        ax.text(x+0.02,y,name,fontsize=8,va="center")
+    for name, (x, y) in cities.items():
+        ax.plot(x, y, "ko", markersize=4)
+        ax.text(x + 0.02, y, name, fontsize=8, va="center")
 
     ax.set_xlim(0,1)
     ax.set_ylim(-4.5,14)
@@ -254,9 +271,9 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     ax.set_title("Decisão VFR por Zona")
 
     ax.legend(handles=[
-        Patch(facecolor="green",alpha=0.2,label="GO"),
-        Patch(facecolor="orange",alpha=0.2,label="MARGINAL"),
-        Patch(facecolor="red",alpha=0.2,label="NO-GO"),
+        Patch(facecolor="green",alpha=0.25,label="GO"),
+        Patch(facecolor="orange",alpha=0.25,label="MARGINAL"),
+        Patch(facecolor="red",alpha=0.25,label="NO-GO"),
         Line2D([0],[0],marker='o',color='black',linestyle='None',label='Cidade')
     ])
 
@@ -265,4 +282,5 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         st.pyplot(fig)
 
     st.caption("Motor cartográfico com interseção geométrica real.")
+
 
