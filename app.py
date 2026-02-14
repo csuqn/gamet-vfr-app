@@ -8,8 +8,35 @@ from matplotlib.lines import Line2D
 # CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Briefing VFR Geográfico (FASE 4.2)")
+st.title("✈️ LPPC GAMET – Briefing VFR Geográfico")
 
+# -------------------------------------------------
+# LEGENDA MINIMALISTA
+# -------------------------------------------------
+with st.expander("ℹ️ Legenda dos Símbolos", expanded=False):
+    st.markdown("""
+    **👁️ Visibilidade**  
+    Distância horizontal mínima reportada (em metros).
+
+    **☁️ Base das Nuvens**  
+    Altura da base BKN/OVC mais baixa (em pés AGL).
+
+    **⛈️ Trovoadas (TS)**  
+    Presença de trovoadas isoladas ou embebidas.
+
+    **🌪️ Turbulência Severa**  
+    Turbulência significativa potencialmente desconfortável.
+
+    **🌬️ Turbulência Moderada**  
+    Turbulência percetível, geralmente operacionalmente aceitável.
+
+    ---
+    ⚠️ Ferramenta de apoio à decisão. Não substitui julgamento do piloto.
+    """)
+
+# -------------------------------------------------
+# INPUT
+# -------------------------------------------------
 gamet_text = st.text_area(
     "Cole aqui o texto completo do GAMET (LPPC)",
     height=260
@@ -248,5 +275,3 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     st.pyplot(fig)
 
     st.caption("Ferramenta de apoio à decisão. Não substitui julgamento do piloto.")
-
-
