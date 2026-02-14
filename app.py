@@ -9,7 +9,7 @@ from shapely.geometry import box
 # CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v4.7")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v4.8")
 
 # -------------------------------------------------
 # INPUT
@@ -122,9 +122,6 @@ def parse_gamet(text):
 
     for section in sections:
 
-        is_turb_section = section.startswith("TURB:")
-        is_cld_section = section.startswith("CLD:") or section.startswith("SIG CLD:")
-
         subblocks = split_subblocks(section)
 
         for block in subblocks:
@@ -144,8 +141,8 @@ def parse_gamet(text):
                     for val in re.findall(r"\b(\d{4})M\b", block):
                         zone_data[zone_name].append(("VIS", int(val)))
 
-                # ---------------- BASE (robusto) ----------------
-                if is_cld_section:
+                # ---------------- BASE ----------------
+                if section.startswith("CLD:") or section.startswith("SIG CLD:"):
                     for base_min, _ in re.findall(r"(\d{3})-(\d{3})/?.*?HFT", block):
                         zone_data[zone_name].append(("BASE", int(base_min) * 100))
 
@@ -154,7 +151,7 @@ def parse_gamet(text):
                     zone_data[zone_name].append(("TS", 1))
 
                 # ---------------- TURB ----------------
-                if is_turb_section:
+                if "TURB:" in section:
                     if "SEV" in block:
                         zone_data[zone_name].append(("TURB", "SEV"))
                     elif "MOD" in block:
@@ -184,7 +181,7 @@ def decision_for_zone(events):
     if base and 500 <= base < 1500: score += 40
     if ts: score += 50
     if turb_sev: score += 45
-    elif turb_mod: score += 35
+    elif turb_mod: score += 35   # Ajustado
 
     if score >= 140:
         decision = "NO-GO"
