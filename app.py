@@ -3,12 +3,13 @@ import re
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
+from shapely.geometry import box
 
 # -------------------------------------------------
 # CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Briefing VFR Geográfico")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v4.1")
 
 # -------------------------------------------------
 # INPUT
@@ -19,20 +20,21 @@ gamet_text = st.text_area(
 )
 
 # -------------------------------------------------
-# ZONAS (simplificação por bandas)
+# BOUNDING BOX FIR CONTINENTAL (aprox)
+# -------------------------------------------------
+LAT_MIN, LAT_MAX = 36.5, 42.5
+LON_MIN, LON_MAX = -9.5, -6.0
+
+FIR_POLYGON = box(LON_MIN, LAT_MIN, LON_MAX, LAT_MAX)
+
+# -------------------------------------------------
+# ZONAS COMO POLÍGONOS REAIS
 # -------------------------------------------------
 ZONES = {
-    "NORTE": {"lat_min": 39.5, "lat_max": 42.5, "lon_min": -9.5, "lon_max": -6.0},
-    "CENTRO": {"lat_min": 38.5, "lat_max": 39.5, "lon_min": -9.5, "lon_max": -6.0},
-    "SUL": {"lat_min": 36.5, "lat_max": 38.5, "lon_min": -9.5, "lon_max": -6.0},
+    "NORTE": box(LON_MIN, 39.5, LON_MAX, 42.5),
+    "CENTRO": box(LON_MIN, 38.5, LON_MAX, 39.5),
+    "SUL": box(LON_MIN, 36.5, LON_MAX, 38.5),
 }
-
-def zone_mid(zone):
-    z = ZONES[zone]
-    return (
-        (z["lat_min"] + z["lat_max"]) / 2,
-        (z["lon_min"] + z["lon_max"]) / 2
-    )
 
 # -------------------------------------------------
 # NORMALIZAÇÃO
@@ -45,13 +47,11 @@ def normalize_text(text):
     return text
 
 # -------------------------------------------------
-# SPLIT POR FENÓMENO (ROBUSTO)
+# SPLIT POR FENÓMENO
 # -------------------------------------------------
 def split_into_sections(text):
-
     pattern = r"(SFC VIS:|VIS:|SIGWX:|SIG CLD:|CLD:|TURB:|ICE:|MT OBSC:)"
     parts = re.split(pattern, text)
-
     sections = []
 
     for i in range(1, len(parts), 2):
@@ -62,63 +62,37 @@ def split_into_sections(text):
     return sections
 
 # -------------------------------------------------
-# SUB-SEGMENTAÇÃO GEOGRÁFICA
+# CONVERTER CONDIÇÃO GEOGRÁFICA → POLÍGONO
 # -------------------------------------------------
-def split_subblocks(section):
+def build_condition_polygon(text_block):
 
-    geo_pattern = r"(N OF|S OF|E OF|W OF|BTW)"
-    matches = list(re.finditer(geo_pattern, section))
+    condition_poly = FIR_POLYGON
 
-    if not matches:
-        return [section]
-
-    subblocks = []
-
-    for i, match in enumerate(matches):
-        start = match.start()
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(section)
-        subblocks.append(section[start:end].strip())
-
-    return subblocks
-
-# -------------------------------------------------
-# PARSER GEOGRÁFICO (COM PROTEÇÃO)
-# -------------------------------------------------
-def zones_from_condition(text_block):
-
-    if not re.search(r"(N OF|S OF|E OF|W OF|BTW)", text_block):
-        return list(ZONES.keys())
-
-    affected = set(ZONES.keys())
-
+    # N OF
     for match in re.findall(r"N OF N(\d{2})(\d{2})", text_block):
         lat = int(match[0]) + int(match[1]) / 60
-        tmp = {z for z in ZONES if zone_mid(z)[0] > lat}
-        if tmp:
-            affected &= tmp
+        poly = box(LON_MIN, lat, LON_MAX, LAT_MAX)
+        condition_poly = condition_poly.intersection(poly)
 
+    # S OF
     for match in re.findall(r"S OF N(\d{2})(\d{2})", text_block):
         lat = int(match[0]) + int(match[1]) / 60
-        tmp = {z for z in ZONES if zone_mid(z)[0] < lat}
-        if tmp:
-            affected &= tmp
+        poly = box(LON_MIN, LAT_MIN, LON_MAX, lat)
+        condition_poly = condition_poly.intersection(poly)
 
+    # E OF
     for match in re.findall(r"E OF W(\d{2})(\d{2})", text_block):
         lon = -(int(match[0]) + int(match[1]) / 60)
-        tmp = {z for z in ZONES if zone_mid(z)[1] > lon}
-        if tmp:
-            affected &= tmp
+        poly = box(lon, LAT_MIN, LON_MAX, LAT_MAX)
+        condition_poly = condition_poly.intersection(poly)
 
+    # W OF
     for match in re.findall(r"W OF W(\d{2})(\d{2})", text_block):
         lon = -(int(match[0]) + int(match[1]) / 60)
-        tmp = {z for z in ZONES if zone_mid(z)[1] < lon}
-        if tmp:
-            affected &= tmp
+        poly = box(LON_MIN, LAT_MIN, lon, LAT_MAX)
+        condition_poly = condition_poly.intersection(poly)
 
-    if not affected:
-        return list(ZONES.keys())
-
-    return list(affected)
+    return condition_poly
 
 # -------------------------------------------------
 # PARSER METEOROLÓGICO
@@ -130,41 +104,36 @@ def parse_gamet(text):
     zone_data = {z: [] for z in ZONES}
 
     for section in sections:
-        subblocks = split_subblocks(section)
 
-        for block in subblocks:
+        condition_poly = build_condition_polygon(section)
 
-            zones = zones_from_condition(block)
+        for zone_name, zone_poly in ZONES.items():
+
+            if not zone_poly.intersects(condition_poly):
+                continue
 
             # VIS (ignora ABV)
-            if "ABV" not in block:
+            if "ABV" not in section:
+                for low, _ in re.findall(r"(\d{4})-(\d{4})M", section):
+                    zone_data[zone_name].append(("VIS", int(low)))
 
-                for low, _ in re.findall(r"(\d{4})-(\d{4})M", block):
-                    for z in zones:
-                        zone_data[z].append(("VIS", int(low)))
+                for val in re.findall(r"\b(\d{4})M\b", section):
+                    zone_data[zone_name].append(("VIS", int(val)))
 
-                for val in re.findall(r"\b(\d{4})M\b", block):
-                    for z in zones:
-                        zone_data[z].append(("VIS", int(val)))
-
-            # BASE (intervalo)
-            for _, base in re.findall(r"(BKN|OVC)\s?(\d{3})-", block):
-                for z in zones:
-                    zone_data[z].append(("BASE", int(base) * 100))
+            # BASE (intervalo inferior)
+            for _, base in re.findall(r"(BKN|OVC)\s?(\d{3})-", section):
+                zone_data[zone_name].append(("BASE", int(base) * 100))
 
             # TS
-            if re.search(r"\bTS\b", block):
-                for z in zones:
-                    zone_data[z].append(("TS", 1))
+            if re.search(r"\bTS\b", section):
+                zone_data[zone_name].append(("TS", 1))
 
             # TURB
-            if "TURB" in block:
-                if "SEV" in block:
-                    for z in zones:
-                        zone_data[z].append(("TURB", "SEV"))
-                elif "MOD" in block:
-                    for z in zones:
-                        zone_data[z].append(("TURB", "MOD"))
+            if "TURB" in section:
+                if "SEV" in section:
+                    zone_data[zone_name].append(("TURB", "SEV"))
+                elif "MOD" in section:
+                    zone_data[zone_name].append(("TURB", "MOD"))
 
     return zone_data
 
@@ -209,6 +178,9 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     zone_data = parse_gamet(gamet_text)
     results = {z: decision_for_zone(zone_data[z]) for z in ZONES}
 
+    # -------------------------------
+    # BRIEFING
+    # -------------------------------
     st.subheader("📋 Briefing Detalhado")
     cols = st.columns(3)
 
@@ -236,6 +208,9 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
             else:
                 st.write("🌬️ Não significativa")
 
+    # -------------------------------
+    # MAPA
+    # -------------------------------
     st.divider()
     st.subheader("🗺️ Mapa VFR")
 
@@ -248,15 +223,24 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         ax.axhspan(y0, y1, color=color_map[results[z][0]], alpha=0.2)
 
     cities = {
-        "Bragança": (0.8,13.5),"Viana do Castelo": (0.2,12.6),
-        "Braga": (0.4,11.8),"Vila Real": (0.6,11.0),
-        "Porto": (0.3,10.5),"Viseu": (0.6,8.6),
-        "Aveiro": (0.3,8.0),"Guarda": (0.8,7.4),
-        "Coimbra": (0.5,6.6),"Leiria": (0.3,5.6),
-        "Castelo Branco": (0.8,5.9),"Santarém": (0.4,3.0),
-        "Portalegre": (0.8,3.0),"Lisboa": (0.3,2.0),
-        "Setúbal": (0.3,1.2),"Évora": (0.6,0.2),
-        "Beja": (0.7,-1.0),"Faro": (0.7,-2.2),
+        "Bragança": (0.8,13.5),
+        "Viana do Castelo": (0.2,12.6),
+        "Braga": (0.4,11.8),
+        "Vila Real": (0.6,11.0),
+        "Porto": (0.3,10.5),
+        "Viseu": (0.6,8.6),
+        "Aveiro": (0.3,8.0),
+        "Guarda": (0.8,7.4),
+        "Coimbra": (0.5,6.6),
+        "Leiria": (0.3,5.6),
+        "Castelo Branco": (0.8,5.9),
+        "Santarém": (0.4,3.0),
+        "Portalegre": (0.8,3.0),
+        "Lisboa": (0.3,2.0),
+        "Setúbal": (0.3,1.2),
+        "Évora": (0.6,0.2),
+        "Beja": (0.7,-1.0),
+        "Faro": (0.7,-2.2),
     }
 
     for name,(x,y) in cities.items():
@@ -280,4 +264,5 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     with col2:
         st.pyplot(fig)
 
-    st.caption("Ferramenta de apoio à decisão. Não substitui julgamento do piloto.")
+    st.caption("Motor cartográfico com interseção geométrica real.")
+
