@@ -1,16 +1,14 @@
-
 import streamlit as st
 import re
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
-import pandas as pd
 
 # -------------------------------------------------
 # CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Briefing VFR Geográfico (FASE 4.1 Estável)")
+st.title("✈️ LPPC GAMET – Briefing VFR Geográfico (FASE 4.2)")
 
 gamet_text = st.text_area(
     "Cole aqui o texto completo do GAMET (LPPC)",
@@ -40,41 +38,35 @@ def zones_from_condition(line):
 
     line = line.upper()
 
-    # Se não existir condição geográfica explícita → aplica a todas
     if not re.search(r"(N OF|S OF|E OF|W OF|BTW)", line):
         return list(ZONES.keys())
 
     affected = set(ZONES.keys())
 
-    # N OF
     for match in re.findall(r"N OF N(\d{2})(\d{2})", line):
         lat = int(match[0]) + int(match[1]) / 60
         tmp = {z for z in ZONES if zone_mid(z)[0] > lat}
         if tmp:
             affected &= tmp
 
-    # S OF
     for match in re.findall(r"S OF N(\d{2})(\d{2})", line):
         lat = int(match[0]) + int(match[1]) / 60
         tmp = {z for z in ZONES if zone_mid(z)[0] < lat}
         if tmp:
             affected &= tmp
 
-    # E OF
     for match in re.findall(r"E OF W(\d{2})(\d{2})", line):
         lon = -(int(match[0]) + int(match[1]) / 60)
         tmp = {z for z in ZONES if zone_mid(z)[1] > lon}
         if tmp:
             affected &= tmp
 
-    # W OF
     for match in re.findall(r"W OF W(\d{2})(\d{2})", line):
         lon = -(int(match[0]) + int(match[1]) / 60)
         tmp = {z for z in ZONES if zone_mid(z)[1] < lon}
         if tmp:
             affected &= tmp
 
-    # BTW latitude band
     for match in re.findall(r"BTW N(\d{2})(\d{2}) AND N(\d{2})(\d{2})", line):
         lat1 = int(match[0]) + int(match[1]) / 60
         lat2 = int(match[2]) + int(match[3]) / 60
@@ -100,7 +92,6 @@ def parse_gamet(text):
         if not zones:
             continue
 
-        # VIS
         for low, _ in re.findall(r"(\d{4})-(\d{4})M", line):
             for z in zones:
                 zone_data[z].append(("VIS", int(low)))
@@ -109,17 +100,14 @@ def parse_gamet(text):
             for z in zones:
                 zone_data[z].append(("VIS", int(val)))
 
-        # BASE
         for _, base in re.findall(r"(BKN|OVC)\s?(\d{3})", line):
             for z in zones:
                 zone_data[z].append(("BASE", int(base) * 100))
 
-        # TS
         if "TS" in line:
             for z in zones:
                 zone_data[z].append(("TS", 1))
 
-        # TURB
         if "TURB" in line:
             level = "SEV" if "SEV" in line else "MOD" if "MOD" in line else None
             if level:
@@ -139,7 +127,6 @@ def decision_for_zone(events):
     turb_sev = any(t == "TURB" and v == "SEV" for t, v in events)
     turb_mod = any(t == "TURB" and v == "MOD" for t, v in events)
 
-    # HARD LIMITS
     if vis is not None and vis < 3000:
         return "NO-GO", vis, base, ts, turb_sev, turb_mod
 
@@ -170,7 +157,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     zone_data = parse_gamet(gamet_text)
     results = {z: decision_for_zone(zone_data[z]) for z in ZONES}
 
-    # RESUMO
+    # RESUMO EXECUTIVO
     st.subheader("📌 Resumo Executivo")
     cols = st.columns(3)
     for i, z in enumerate(ZONES):
@@ -184,7 +171,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     st.divider()
 
-    # BRIEFING
+    # BRIEFING DETALHADO
     st.subheader("📋 Briefing Detalhado")
     detail_cols = st.columns(3)
 
@@ -216,23 +203,6 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
                 st.write("🌬️ Moderada")
             else:
                 st.write("🌬️ Não significativa")
-
-    st.divider()
-
-    # TABELA
-    st.subheader("📊 Tabela Resumo")
-    df = pd.DataFrame([
-        {
-            "Zona": z,
-            "Decisão": results[z][0],
-            "Vis (m)": results[z][1],
-            "Base (ft)": results[z][2],
-            "TS": results[z][3],
-            "Turb Severa": results[z][4]
-        }
-        for z in ZONES
-    ])
-    st.dataframe(df, use_container_width=True)
 
     st.divider()
 
@@ -278,4 +248,5 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     st.pyplot(fig)
 
     st.caption("Ferramenta de apoio à decisão. Não substitui julgamento do piloto.")
+
 
