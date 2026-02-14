@@ -77,7 +77,9 @@ def split_into_sections(text):
 # -------------------------------------------------
 def split_subblocks(section):
 
-    geo_pattern = r"(N OF|S OF|E OF|W OF|BTW|\d{2}/\d{2})"
+    # Separar apenas por marcadores geográficos reais
+    geo_pattern = r"(N OF|S OF|E OF|W OF|BTW)"
+
     matches = list(re.finditer(geo_pattern, section))
 
     if not matches:
