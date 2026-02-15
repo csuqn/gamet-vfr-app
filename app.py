@@ -9,7 +9,7 @@ from shapely.geometry import box
 # CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v4.11")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v4.12")
 
 # -------------------------------------------------
 # INPUT
@@ -61,134 +61,101 @@ def split_into_sections(text):
     return sections
 
 # -------------------------------------------------
-# SPLIT GEOGRÁFICO
-# -------------------------------------------------
-def split_subblocks(section):
-    geo_pattern = r"(N OF|S OF|E OF|W OF|BTW)"
-    matches = list(re.finditer(geo_pattern, section))
-
-    if not matches:
-        return [section]
-
-    subblocks = []
-
-    # Parte geral antes do primeiro condicionante
-    first_match_start = matches[0].start()
-    general_part = section[:first_match_start].strip()
-    if general_part:
-        subblocks.append(general_part)
-
-    # Partes condicionais
-    for i, match in enumerate(matches):
-        start = match.start()
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(section)
-        subblocks.append(section[start:end].strip())
-
-    return subblocks
-
-# -------------------------------------------------
 # POLÍGONO CONDIÇÃO
 # -------------------------------------------------
-def build_condition_polygon(text_block):
+def extract_condition_polygon(text):
 
     condition_poly = FIR_POLYGON
 
-    for match in re.findall(r"N OF N(\d{2})(\d{2})", text_block):
+    geo_found = False
+
+    for match in re.findall(r"N OF N(\d{2})(\d{2})", text):
+        geo_found = True
         lat = int(match[0]) + int(match[1]) / 60
         poly = box(LON_MIN, lat, LON_MAX, LAT_MAX)
         condition_poly = condition_poly.intersection(poly)
 
-    for match in re.findall(r"S OF N(\d{2})(\d{2})", text_block):
+    for match in re.findall(r"S OF N(\d{2})(\d{2})", text):
+        geo_found = True
         lat = int(match[0]) + int(match[1]) / 60
         poly = box(LON_MIN, LAT_MIN, LON_MAX, lat)
         condition_poly = condition_poly.intersection(poly)
 
-    for match in re.findall(r"E OF W(\d{2})(\d{2})", text_block):
+    for match in re.findall(r"E OF W(\d{2})(\d{2})", text):
+        geo_found = True
         lon = -(int(match[0]) + int(match[1]) / 60)
         poly = box(lon, LAT_MIN, LON_MAX, LAT_MAX)
         condition_poly = condition_poly.intersection(poly)
 
-    for match in re.findall(r"W OF W(\d{2})(\d{2})", text_block):
+    for match in re.findall(r"W OF W(\d{2})(\d{2})", text):
+        geo_found = True
         lon = -(int(match[0]) + int(match[1]) / 60)
         poly = box(LON_MIN, LAT_MIN, lon, LAT_MAX)
         condition_poly = condition_poly.intersection(poly)
 
-    if condition_poly.is_empty:
-        condition_poly = FIR_POLYGON
+    if not geo_found:
+        return FIR_POLYGON
 
     return condition_poly
 
 # -------------------------------------------------
-# PARSER
+# PARSER PRINCIPAL (estrutura robusta)
 # -------------------------------------------------
 def parse_gamet(text):
 
     text = normalize_text(text)
     sections = split_into_sections(text)
+
     zone_data = {z: [] for z in ZONES}
 
     for section in sections:
 
-        is_turb_section = section.startswith("TURB:")
-        is_cld_section = section.startswith("CLD:") or section.startswith("SIG CLD:")
+        section_poly = extract_condition_polygon(section)
 
-        subblocks = split_subblocks(section)
+        for zone_name, zone_poly in ZONES.items():
 
-        for block in subblocks:
+            if not zone_poly.intersects(section_poly):
+                continue
 
-            condition_poly = build_condition_polygon(block)
+            # ---------------- VIS ----------------
+            if "VIS" in section and "ABV" not in section:
 
-            for zone_name, zone_poly in ZONES.items():
+                ranges = re.findall(r"(\d{4})-(\d{4})M", section)
+                singles = re.findall(r"\b(\d{4})M\b", section)
 
-                if not zone_poly.intersects(condition_poly):
-                    continue
+                used = set()
 
-                # -------------------------------------------------
-                # VISIBILIDADE
-                # -------------------------------------------------
-                if "ABV" not in block:
-                    ranges = re.findall(r"(\d{4})-(\d{4})M", block)
-                    singles = re.findall(r"\b(\d{4})M\b", block)
+                for low, high in ranges:
+                    used.add(low)
+                    zone_data[zone_name].append(("VIS", int(low)))
 
-                    used_values = set()
+                for val in singles:
+                    if val not in used:
+                        zone_data[zone_name].append(("VIS", int(val)))
 
-                    for low, high in ranges:
-                        used_values.add(low)
-                        zone_data[zone_name].append(("VIS", int(low)))
+            # ---------------- CLD ----------------
+            if section.startswith("CLD:") or section.startswith("SIG CLD:"):
 
-                    for val in singles:
-                        if val not in used_values:
-                            zone_data[zone_name].append(("VIS", int(val)))
+                # AGL
+                for base_min, _ in re.findall(r"(\d{3})-(\d{3})/?.*?HFT AGL", section):
+                    zone_data[zone_name].append(("BASE", int(base_min) * 100))
 
-                # -------------------------------------------------
-                # BASES NUVENS
-                # -------------------------------------------------
-                if is_cld_section:
+                # AMSL → conversão simples para AGL
+                for base_min, _ in re.findall(r"(\d{3})-(\d{3})/?.*?HFT AMSL", section):
+                    agl_est = int(base_min) * 100 - 500
+                    if agl_est > 0:
+                        zone_data[zone_name].append(("BASE", agl_est))
 
-                    # AGL
-                    for base_min, _ in re.findall(r"(\d{3})-(\d{3})/?.*?HFT AGL", block):
-                        zone_data[zone_name].append(("BASE", int(base_min) * 100))
+            # ---------------- TS ----------------
+            if re.search(r"\bTS\b", section):
+                zone_data[zone_name].append(("TS", 1))
 
-                    # AMSL → conversão aproximada para AGL
-                    for base_min, _ in re.findall(r"(\d{3})-(\d{3})/?.*?HFT AMSL", block):
-                        agl_estimate = int(base_min) * 100 - 500
-                        if agl_estimate > 0:
-                            zone_data[zone_name].append(("BASE", agl_estimate))
-
-                # -------------------------------------------------
-                # TROVOADAS
-                # -------------------------------------------------
-                if re.search(r"\bTS\b", block):
-                    zone_data[zone_name].append(("TS", 1))
-
-                # -------------------------------------------------
-                # TURBULÊNCIA (corrigido)
-                # -------------------------------------------------
-                if is_turb_section:
-                    if "SEV" in block:
-                        zone_data[zone_name].append(("TURB", "SEV"))
-                    elif "MOD" in block:
-                        zone_data[zone_name].append(("TURB", "MOD"))
+            # ---------------- TURB ----------------
+            if section.startswith("TURB:"):
+                if "SEV" in section:
+                    zone_data[zone_name].append(("TURB", "SEV"))
+                elif "MOD" in section:
+                    zone_data[zone_name].append(("TURB", "MOD"))
 
     return zone_data
 
