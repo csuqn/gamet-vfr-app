@@ -9,7 +9,7 @@ from shapely.geometry import box
 # CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v4.13")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v4.14")
 
 # -------------------------------------------------
 # INPUT
@@ -61,7 +61,7 @@ def split_into_sections(text):
     return sections
 
 # -------------------------------------------------
-# EXTRACÇÃO DE CONDIÇÃO GEOGRÁFICA
+# CONDIÇÃO GEOGRÁFICA
 # -------------------------------------------------
 def extract_condition_polygon(text):
 
@@ -102,7 +102,7 @@ def extract_condition_polygon(text):
     return condition_poly
 
 # -------------------------------------------------
-# PARSER PRINCIPAL
+# PARSER
 # -------------------------------------------------
 def parse_gamet(text):
 
@@ -127,7 +127,7 @@ def parse_gamet(text):
 
                 used = set()
 
-                for low, high in ranges:
+                for low, _ in ranges:
                     used.add(low)
                     zone_data[zone_name].append(("VIS", int(low)))
 
@@ -143,7 +143,7 @@ def parse_gamet(text):
                     base_agl = int(match) * 100
                     zone_data[zone_name].append(("BASE", base_agl))
 
-                # BASE AMSL (convertido para AGL aproximado)
+                # BASE AMSL convertida para AGL
                 for match in re.findall(r"\b(\d{3})-\d{3}(?:/\d{3})?HFT AMSL", section):
                     base_amsl = int(match) * 100
                     agl_est = base_amsl - 500
@@ -174,6 +174,7 @@ def decision_for_zone(events):
     turb_sev = any(t == "TURB" and v == "SEV" for t, v in events)
     turb_mod = any(t == "TURB" and v == "MOD" for t, v in events)
 
+    # Hard limits
     if vis is not None and vis < 3000:
         return "NO-GO", vis, base, ts, turb_sev, turb_mod
 
@@ -181,14 +182,16 @@ def decision_for_zone(events):
         return "NO-GO", vis, base, ts, turb_sev, turb_mod
 
     score = 0
+
     if vis and 3000 <= vis < 5000:
         score += 30
-        
+
     if base and 500 <= base <= 1500:
-    score += 40
-    
+        score += 40
+
     if ts:
         score += 50
+
     if turb_sev:
         score += 45
     elif turb_mod:
@@ -245,30 +248,30 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     fig, ax = plt.subplots(figsize=(6, 8.5))
 
     color_map = {"GO": "green", "MARGINAL": "orange", "NO-GO": "red"}
-    zone_y = {"NORTE": (9,14), "CENTRO": (4,9), "SUL": (-4.5,4)}
+    zone_y = {"NORTE": (9, 14), "CENTRO": (4, 9), "SUL": (-4.5, 4)}
 
     for z, (y0, y1) in zone_y.items():
         ax.axhspan(y0, y1, color=color_map[results[z][0]], alpha=0.25)
 
     cities = {
-        "Bragança": (0.8,13.5),
-        "Viana do Castelo": (0.2,12.6),
-        "Braga": (0.4,11.8),
-        "Vila Real": (0.6,11.0),
-        "Porto": (0.3,10.5),
-        "Viseu": (0.6,8.6),
-        "Aveiro": (0.3,8.0),
-        "Guarda": (0.8,7.4),
-        "Coimbra": (0.5,6.6),
-        "Leiria": (0.3,5.6),
-        "Castelo Branco": (0.8,5.9),
-        "Santarém": (0.4,3.0),
-        "Portalegre": (0.8,3.0),
-        "Lisboa": (0.3,2.0),
-        "Setúbal": (0.3,1.2),
-        "Évora": (0.6,0.2),
-        "Beja": (0.7,-1.0),
-        "Faro": (0.7,-2.2),
+        "Bragança": (0.8, 13.5),
+        "Viana do Castelo": (0.2, 12.6),
+        "Braga": (0.4, 11.8),
+        "Vila Real": (0.6, 11.0),
+        "Porto": (0.3, 10.5),
+        "Viseu": (0.6, 8.6),
+        "Aveiro": (0.3, 8.0),
+        "Guarda": (0.8, 7.4),
+        "Coimbra": (0.5, 6.6),
+        "Leiria": (0.3, 5.6),
+        "Castelo Branco": (0.8, 5.9),
+        "Santarém": (0.4, 3.0),
+        "Portalegre": (0.8, 3.0),
+        "Lisboa": (0.3, 2.0),
+        "Setúbal": (0.3, 1.2),
+        "Évora": (0.6, 0.2),
+        "Beja": (0.7, -1.0),
+        "Faro": (0.7, -2.2),
     }
 
     for name, (x, y) in cities.items():
@@ -294,6 +297,5 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         st.pyplot(fig)
 
     st.caption("Motor cartográfico com intersecção geométrica real.")
-
 
 
