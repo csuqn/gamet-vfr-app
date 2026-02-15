@@ -9,7 +9,7 @@ from shapely.geometry import box
 # CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v4.14")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v4.15")
 
 # -------------------------------------------------
 # INPUT
@@ -33,6 +33,15 @@ ZONES = {
     "NORTE": box(LON_MIN, 39.5, LON_MAX, 42.5),
     "CENTRO": box(LON_MIN, 38.5, LON_MAX, 39.5),
     "SUL": box(LON_MIN, 36.5, LON_MAX, 38.5),
+}
+
+# -------------------------------------------------
+# ELEVAÇÃO MÉDIA POR ZONA (ft AMSL)
+# -------------------------------------------------
+ZONE_ELEVATION = {
+    "NORTE": 1500,
+    "CENTRO": 800,
+    "SUL": 300,
 }
 
 # -------------------------------------------------
@@ -120,7 +129,7 @@ def parse_gamet(text):
                 continue
 
             # ---------------- VIS ----------------
-            if "VIS" in section and "ABV" not in section:
+            if section.startswith("VIS:") or section.startswith("SFC VIS:"):
 
                 ranges = re.findall(r"(\d{4})-(\d{4})M", section)
                 singles = re.findall(r"\b(\d{4})M\b", section)
@@ -138,21 +147,25 @@ def parse_gamet(text):
             # ---------------- CLD ----------------
             if section.startswith("CLD:") or section.startswith("SIG CLD:"):
 
-                # BASE AGL
                 for match in re.findall(r"\b(\d{3})-\d{3}(?:/\d{3})?HFT AGL", section):
                     base_agl = int(match) * 100
                     zone_data[zone_name].append(("BASE", base_agl))
 
-                # BASE AMSL convertida para AGL
                 for match in re.findall(r"\b(\d{3})-\d{3}(?:/\d{3})?HFT AMSL", section):
                     base_amsl = int(match) * 100
-                    agl_est = base_amsl - 500
+                    agl_est = base_amsl - ZONE_ELEVATION[zone_name]
                     if agl_est > 0:
                         zone_data[zone_name].append(("BASE", agl_est))
 
             # ---------------- TS ----------------
-            if re.search(r"\bTS\b", section):
-                zone_data[zone_name].append(("TS", 1))
+            if re.search(r"\bISOL TS\b", section):
+                zone_data[zone_name].append(("TS", "ISOL"))
+            elif re.search(r"\bOCNL TS\b", section):
+                zone_data[zone_name].append(("TS", "OCNL"))
+            elif re.search(r"\bFRQ TS\b", section):
+                zone_data[zone_name].append(("TS", "FRQ"))
+            elif re.search(r"\bTS\b", section):
+                zone_data[zone_name].append(("TS", "GEN"))
 
             # ---------------- TURB ----------------
             if section.startswith("TURB:"):
@@ -170,41 +183,47 @@ def decision_for_zone(events):
 
     vis = min([v for t, v in events if t == "VIS"], default=None)
     base = min([v for t, v in events if t == "BASE"], default=None)
-    ts = any(t == "TS" for t, _ in events)
+
+    ts_flag = any(t == "TS" for t, _ in events)
     turb_sev = any(t == "TURB" and v == "SEV" for t, v in events)
     turb_mod = any(t == "TURB" and v == "MOD" for t, v in events)
 
-    # Hard limits
-    if vis is not None and vis < 3000:
-        return "NO-GO", vis, base, ts, turb_sev, turb_mod
+    if vis is not None:
+        if vis < 1500:
+            return "NO-GO", vis, base, ts_flag, turb_sev, turb_mod
+        elif vis < 3000:
+            return "MARGINAL", vis, base, ts_flag, turb_sev, turb_mod
 
-    if base is not None and base < 500:
-        return "NO-GO", vis, base, ts, turb_sev, turb_mod
+    if base is not None:
+        if base < 300:
+            return "NO-GO", vis, base, ts_flag, turb_sev, turb_mod
+        elif base < 500:
+            return "MARGINAL", vis, base, ts_flag, turb_sev, turb_mod
 
     score = 0
 
     if vis and 3000 <= vis < 5000:
-        score += 30
+        score += 20
 
     if base and 500 <= base <= 1500:
-        score += 40
+        score += 30
 
-    if ts:
-        score += 50
+    if ts_flag:
+        score += 40
 
     if turb_sev:
         score += 45
     elif turb_mod:
-        score += 35
+        score += 30
 
-    if score >= 140:
+    if score >= 120:
         decision = "NO-GO"
-    elif score >= 70:
+    elif score >= 60:
         decision = "MARGINAL"
     else:
         decision = "GO"
 
-    return decision, vis, base, ts, turb_sev, turb_mod
+    return decision, vis, base, ts_flag, turb_sev, turb_mod
 
 # -------------------------------------------------
 # EXECUÇÃO
@@ -231,7 +250,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
                 st.success("✅ GO")
 
             st.write(f"👁️ {vis} m" if vis else "👁️ —")
-            st.write(f"☁️ {base} ft" if base else "☁️ —")
+            st.write(f"☁️ {base} ft AGL" if base else "☁️ —")
             st.write(f"⛈️ {'Sim' if ts else 'Não'}")
 
             if turb_sev:
@@ -253,6 +272,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     for z, (y0, y1) in zone_y.items():
         ax.axhspan(y0, y1, color=color_map[results[z][0]], alpha=0.25)
 
+    # TODAS AS CIDADES RESTAURADAS
     cities = {
         "Bragança": (0.8, 13.5),
         "Viana do Castelo": (0.2, 12.6),
@@ -296,6 +316,6 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     with col2:
         st.pyplot(fig)
 
-    st.caption("Motor cartográfico com intersecção geométrica real.")
+    st.caption("Motor cartográfico v4.15 – Versão final com todas as cidades restauradas.")
 
 
