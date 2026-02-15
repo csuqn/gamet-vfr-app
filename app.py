@@ -9,7 +9,7 @@ from shapely.geometry import box
 # CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v4.8")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v4.10")
 
 # -------------------------------------------------
 # INPUT
@@ -122,6 +122,8 @@ def parse_gamet(text):
 
     for section in sections:
 
+        is_turb_section = section.startswith("TURB:")
+
         subblocks = split_subblocks(section)
 
         for block in subblocks:
@@ -133,7 +135,7 @@ def parse_gamet(text):
                 if not zone_poly.intersects(condition_poly):
                     continue
 
-                # ---------------- VIS ----------------
+                # VIS
                 if "ABV" not in block:
                     for low, _ in re.findall(r"(\d{4})-(\d{4})M", block):
                         zone_data[zone_name].append(("VIS", int(low)))
@@ -141,20 +143,20 @@ def parse_gamet(text):
                     for val in re.findall(r"\b(\d{4})M\b", block):
                         zone_data[zone_name].append(("VIS", int(val)))
 
-                # ---------------- BASE ----------------
+                # BASE
                 if section.startswith("CLD:") or section.startswith("SIG CLD:"):
                     for base_min, _ in re.findall(r"(\d{3})-(\d{3})/?.*?HFT", block):
                         zone_data[zone_name].append(("BASE", int(base_min) * 100))
 
-                # ---------------- TS ----------------
+                # TS
                 if re.search(r"\bTS\b", block):
                     zone_data[zone_name].append(("TS", 1))
 
-                # ---------------- TURB ----------------
-                if "TURB:" in section:
-                    if "SEV" in block:
+                # TURB
+                if is_turb_section:
+                    if "SEV" in section:
                         zone_data[zone_name].append(("TURB", "SEV"))
-                    elif "MOD" in block:
+                    elif "MOD" in section:
                         zone_data[zone_name].append(("TURB", "MOD"))
 
     return zone_data
@@ -181,7 +183,7 @@ def decision_for_zone(events):
     if base and 500 <= base < 1500: score += 40
     if ts: score += 50
     if turb_sev: score += 45
-    elif turb_mod: score += 35   # Ajustado
+    elif turb_mod: score += 35
 
     if score >= 140:
         decision = "NO-GO"
@@ -237,7 +239,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
             else:
                 st.write("🌬️ Não significativa")
 
-    # Mapa
+    # ---------------- MAPA ----------------
     st.divider()
     st.subheader("🗺️ Mapa VFR")
 
@@ -292,6 +294,5 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         st.pyplot(fig)
 
     st.caption("Motor cartográfico com interseção geométrica real.")
-
 
 
