@@ -9,7 +9,7 @@ from shapely.geometry import box
 # CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v4.16")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v4.18")
 
 # -------------------------------------------------
 # INPUT
@@ -27,7 +27,7 @@ LON_MIN, LON_MAX = -9.5, -6.0
 FIR_POLYGON = box(LON_MIN, LAT_MIN, LON_MAX, LAT_MAX)
 
 # -------------------------------------------------
-# ZONAS (divisão latitudinal real)
+# ZONAS
 # -------------------------------------------------
 ZONES = {
     "NORTE": box(LON_MIN, 39.5, LON_MAX, 42.5),
@@ -35,9 +35,6 @@ ZONES = {
     "SUL": box(LON_MIN, 36.5, LON_MAX, 38.5),
 }
 
-# -------------------------------------------------
-# ELEVAÇÃO MÉDIA POR ZONA (ft AMSL)
-# -------------------------------------------------
 ZONE_ELEVATION = {
     "NORTE": 1500,
     "CENTRO": 800,
@@ -55,7 +52,7 @@ def normalize_text(text):
     return text
 
 # -------------------------------------------------
-# SPLIT POR FENÓMENO
+# SPLIT
 # -------------------------------------------------
 def split_into_sections(text):
     pattern = r"(SFC VIS:|VIS:|SIGWX:|SIG CLD:|CLD:|TURB:|ICE:|MT OBSC:|MTW:)"
@@ -70,13 +67,14 @@ def split_into_sections(text):
     return sections
 
 # -------------------------------------------------
-# CONDIÇÃO GEOGRÁFICA
+# GEOGRAFIA
 # -------------------------------------------------
 def extract_condition_polygon(text):
 
     condition_poly = FIR_POLYGON
     geo_found = False
 
+    # N OF
     for match in re.findall(r"N OF N(\d{2})(\d{2})", text):
         geo_found = True
         lat = int(match[0]) + int(match[1]) / 60
@@ -84,6 +82,7 @@ def extract_condition_polygon(text):
             box(LON_MIN, lat, LON_MAX, LAT_MAX)
         )
 
+    # S OF
     for match in re.findall(r"S OF N(\d{2})(\d{2})", text):
         geo_found = True
         lat = int(match[0]) + int(match[1]) / 60
@@ -91,6 +90,7 @@ def extract_condition_polygon(text):
             box(LON_MIN, LAT_MIN, LON_MAX, lat)
         )
 
+    # E OF
     for match in re.findall(r"E OF W(\d{2})(\d{2})", text):
         geo_found = True
         lon = -(int(match[0]) + int(match[1]) / 60)
@@ -98,6 +98,7 @@ def extract_condition_polygon(text):
             box(lon, LAT_MIN, LON_MAX, LAT_MAX)
         )
 
+    # W OF
     for match in re.findall(r"W OF W(\d{2})(\d{2})", text):
         geo_found = True
         lon = -(int(match[0]) + int(match[1]) / 60)
@@ -130,7 +131,6 @@ def parse_gamet(text):
 
             # VIS
             if section.startswith("VIS:") or section.startswith("SFC VIS:"):
-
                 ranges = re.findall(r"(\d{4})-(\d{4})M", section)
                 singles = re.findall(r"\b(\d{4})M\b", section)
 
@@ -148,8 +148,7 @@ def parse_gamet(text):
             if section.startswith("CLD:") or section.startswith("SIG CLD:"):
 
                 for match in re.findall(r"\b(\d{3})-\d{3}(?:/\d{3})?HFT AGL", section):
-                    base_agl = int(match) * 100
-                    zone_data[zone_name].append(("BASE", base_agl))
+                    zone_data[zone_name].append(("BASE", int(match) * 100))
 
                 for match in re.findall(r"\b(\d{3})-\d{3}(?:/\d{3})?HFT AMSL", section):
                     base_amsl = int(match) * 100
@@ -158,8 +157,14 @@ def parse_gamet(text):
                         zone_data[zone_name].append(("BASE", agl_est))
 
             # TS
-            if re.search(r"\bTS\b", section):
-                zone_data[zone_name].append(("TS", 1))
+            if re.search(r"\bISOL TS\b", section):
+                zone_data[zone_name].append(("TS", "ISOL"))
+            elif re.search(r"\bOCNL TS\b", section):
+                zone_data[zone_name].append(("TS", "OCNL"))
+            elif re.search(r"\bFRQ TS\b", section):
+                zone_data[zone_name].append(("TS", "FRQ"))
+            elif re.search(r"\bTS\b", section):
+                zone_data[zone_name].append(("TS", "GEN"))
 
             # TURB
             if section.startswith("TURB:"):
@@ -178,21 +183,26 @@ def decision_for_zone(events):
     vis = min([v for t, v in events if t == "VIS"], default=None)
     base = min([v for t, v in events if t == "BASE"], default=None)
 
-    ts = any(t == "TS" for t, _ in events)
+    ts_isol = any(t == "TS" and v == "ISOL" for t, v in events)
+    ts_ocnl = any(t == "TS" and v == "OCNL" for t, v in events)
+    ts_frq  = any(t == "TS" and v == "FRQ" for t, v in events)
+    ts_gen  = any(t == "TS" and v == "GEN" for t, v in events)
+
     turb_sev = any(t == "TURB" and v == "SEV" for t, v in events)
     turb_mod = any(t == "TURB" and v == "MOD" for t, v in events)
 
+    # HARD LIMITS
     if vis is not None:
         if vis < 1500:
-            return "NO-GO", vis, base, ts, turb_sev, turb_mod
+            return "NO-GO", vis, base
         elif vis < 3000:
-            return "MARGINAL", vis, base, ts, turb_sev, turb_mod
+            return "MARGINAL", vis, base
 
     if base is not None:
         if base < 300:
-            return "NO-GO", vis, base, ts, turb_sev, turb_mod
+            return "NO-GO", vis, base
         elif base < 500:
-            return "MARGINAL", vis, base, ts, turb_sev, turb_mod
+            return "MARGINAL", vis, base
 
     score = 0
 
@@ -202,7 +212,13 @@ def decision_for_zone(events):
     if base and 500 <= base <= 1500:
         score += 30
 
-    if ts:
+    if ts_frq:
+        score += 60
+    elif ts_ocnl:
+        score += 45
+    elif ts_isol:
+        score += 30
+    elif ts_gen:
         score += 40
 
     if turb_sev:
@@ -211,52 +227,21 @@ def decision_for_zone(events):
         score += 30
 
     if score >= 120:
-        decision = "NO-GO"
+        return "NO-GO", vis, base
     elif score >= 60:
-        decision = "MARGINAL"
+        return "MARGINAL", vis, base
     else:
-        decision = "GO"
-
-    return decision, vis, base, ts, turb_sev, turb_mod
+        return "GO", vis, base
 
 # -------------------------------------------------
-# EXECUÇÃO
+# EXECUÇÃO + MAPA
 # -------------------------------------------------
 if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     zone_data = parse_gamet(gamet_text)
     results = {z: decision_for_zone(zone_data[z]) for z in ZONES}
 
-    st.subheader("📋 Briefing Detalhado")
-    cols = st.columns(3)
-
-    for i, z in enumerate(ZONES):
-        decision, vis, base, ts, turb_sev, turb_mod = results[z]
-
-        with cols[i]:
-            st.markdown(f"### {z}")
-
-            if decision == "NO-GO":
-                st.error("🔴 NO-GO")
-            elif decision == "MARGINAL":
-                st.warning("⚠️ MARGINAL")
-            else:
-                st.success("✅ GO")
-
-            st.write(f"👁️ {vis} m" if vis else "👁️ —")
-            st.write(f"☁️ {base} ft AGL" if base else "☁️ —")
-            st.write(f"⛈️ {'Sim' if ts else 'Não'}")
-
-            if turb_sev:
-                st.write("🌪️ Severa")
-            elif turb_mod:
-                st.write("🌬️ Moderada")
-            else:
-                st.write("🌬️ Não significativa")
-
-    # ---------------- MAPA REAL ----------------
-    st.divider()
-    st.subheader("🌍 Mapa VFR – WGS84 Real")
+    st.subheader("🌍 Mapa VFR – WGS84 Consolidado")
 
     fig, ax = plt.subplots(figsize=(6, 9))
     color_map = {"GO": "green", "MARGINAL": "orange", "NO-GO": "red"}
@@ -276,6 +261,15 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
             alpha=0.25
         )
 
+    # Linha costeira simplificada
+    coast_lon = [-8.9, -9.0, -9.1, -9.2, -9.15, -9.1, -9.0,
+                 -8.9, -8.8, -8.7, -8.6, -8.7, -8.8, -8.9, -9.0]
+    coast_lat = [41.9, 41.6, 41.2, 40.8, 40.2, 39.6, 39.0,
+                 38.4, 37.8, 37.2, 36.9, 37.3, 38.0, 39.5, 41.0]
+
+    ax.plot(coast_lon, coast_lat, color="black", linewidth=1.5)
+
+    # Cidades
     cities = {
         "Bragança": (41.806, -6.756),
         "Viana do Castelo": (41.693, -8.832),
@@ -305,21 +299,16 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     ax.set_ylim(LAT_MIN, LAT_MAX)
     ax.set_xlabel("Longitude (°W)")
     ax.set_ylabel("Latitude (°N)")
-    ax.set_title("Decisão VFR por Zona – WGS84")
     ax.grid(True, linestyle="--", alpha=0.4)
 
     ax.legend(handles=[
         Patch(facecolor="green", alpha=0.25, label="GO"),
         Patch(facecolor="orange", alpha=0.25, label="MARGINAL"),
         Patch(facecolor="red", alpha=0.25, label="NO-GO"),
-        Line2D([0], [0], marker='o', color='black',
-               linestyle='None', label='Cidade')
+        Line2D([0], [0], color='black', label='Linha Costeira')
     ])
 
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        st.pyplot(fig)
+    st.pyplot(fig)
 
-    st.caption("Motor cartográfico v4.16 – Coordenadas reais WGS84.")
-
+    st.caption("Motor cartográfico v4.18 – Versão consolidada final.")
 
