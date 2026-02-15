@@ -72,6 +72,13 @@ def split_subblocks(section):
 
     subblocks = []
 
+    # Parte geral antes do primeiro condicionante
+    first_match_start = matches[0].start()
+    general_part = section[:first_match_start].strip()
+    if general_part:
+        subblocks.append(general_part)
+
+    # Partes condicionais
     for i, match in enumerate(matches):
         start = match.start()
         end = matches[i + 1].start() if i + 1 < len(matches) else len(section)
