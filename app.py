@@ -9,7 +9,7 @@ from shapely.geometry import box
 # CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v4.15")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v4.16")
 
 # -------------------------------------------------
 # INPUT
@@ -20,14 +20,14 @@ gamet_text = st.text_area(
 )
 
 # -------------------------------------------------
-# FIR BOUNDING BOX
+# FIR BOUNDING BOX (WGS84)
 # -------------------------------------------------
 LAT_MIN, LAT_MAX = 36.5, 42.5
 LON_MIN, LON_MAX = -9.5, -6.0
 FIR_POLYGON = box(LON_MIN, LAT_MIN, LON_MAX, LAT_MAX)
 
 # -------------------------------------------------
-# ZONAS
+# ZONAS (divisão latitudinal real)
 # -------------------------------------------------
 ZONES = {
     "NORTE": box(LON_MIN, 39.5, LON_MAX, 42.5),
@@ -128,7 +128,7 @@ def parse_gamet(text):
             if not zone_poly.intersects(section_poly):
                 continue
 
-            # ---------------- VIS ----------------
+            # VIS
             if section.startswith("VIS:") or section.startswith("SFC VIS:"):
 
                 ranges = re.findall(r"(\d{4})-(\d{4})M", section)
@@ -144,7 +144,7 @@ def parse_gamet(text):
                     if val not in used:
                         zone_data[zone_name].append(("VIS", int(val)))
 
-            # ---------------- CLD ----------------
+            # CLD
             if section.startswith("CLD:") or section.startswith("SIG CLD:"):
 
                 for match in re.findall(r"\b(\d{3})-\d{3}(?:/\d{3})?HFT AGL", section):
@@ -157,17 +157,11 @@ def parse_gamet(text):
                     if agl_est > 0:
                         zone_data[zone_name].append(("BASE", agl_est))
 
-            # ---------------- TS ----------------
-            if re.search(r"\bISOL TS\b", section):
-                zone_data[zone_name].append(("TS", "ISOL"))
-            elif re.search(r"\bOCNL TS\b", section):
-                zone_data[zone_name].append(("TS", "OCNL"))
-            elif re.search(r"\bFRQ TS\b", section):
-                zone_data[zone_name].append(("TS", "FRQ"))
-            elif re.search(r"\bTS\b", section):
-                zone_data[zone_name].append(("TS", "GEN"))
+            # TS
+            if re.search(r"\bTS\b", section):
+                zone_data[zone_name].append(("TS", 1))
 
-            # ---------------- TURB ----------------
+            # TURB
             if section.startswith("TURB:"):
                 if "SEV" in section:
                     zone_data[zone_name].append(("TURB", "SEV"))
@@ -184,21 +178,21 @@ def decision_for_zone(events):
     vis = min([v for t, v in events if t == "VIS"], default=None)
     base = min([v for t, v in events if t == "BASE"], default=None)
 
-    ts_flag = any(t == "TS" for t, _ in events)
+    ts = any(t == "TS" for t, _ in events)
     turb_sev = any(t == "TURB" and v == "SEV" for t, v in events)
     turb_mod = any(t == "TURB" and v == "MOD" for t, v in events)
 
     if vis is not None:
         if vis < 1500:
-            return "NO-GO", vis, base, ts_flag, turb_sev, turb_mod
+            return "NO-GO", vis, base, ts, turb_sev, turb_mod
         elif vis < 3000:
-            return "MARGINAL", vis, base, ts_flag, turb_sev, turb_mod
+            return "MARGINAL", vis, base, ts, turb_sev, turb_mod
 
     if base is not None:
         if base < 300:
-            return "NO-GO", vis, base, ts_flag, turb_sev, turb_mod
+            return "NO-GO", vis, base, ts, turb_sev, turb_mod
         elif base < 500:
-            return "MARGINAL", vis, base, ts_flag, turb_sev, turb_mod
+            return "MARGINAL", vis, base, ts, turb_sev, turb_mod
 
     score = 0
 
@@ -208,7 +202,7 @@ def decision_for_zone(events):
     if base and 500 <= base <= 1500:
         score += 30
 
-    if ts_flag:
+    if ts:
         score += 40
 
     if turb_sev:
@@ -223,7 +217,7 @@ def decision_for_zone(events):
     else:
         decision = "GO"
 
-    return decision, vis, base, ts_flag, turb_sev, turb_mod
+    return decision, vis, base, ts, turb_sev, turb_mod
 
 # -------------------------------------------------
 # EXECUÇÃO
@@ -260,49 +254,59 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
             else:
                 st.write("🌬️ Não significativa")
 
-    # ---------------- MAPA ----------------
+    # ---------------- MAPA REAL ----------------
     st.divider()
-    st.subheader("🗺️ Mapa VFR")
+    st.subheader("🌍 Mapa VFR – WGS84 Real")
 
-    fig, ax = plt.subplots(figsize=(6, 8.5))
-
+    fig, ax = plt.subplots(figsize=(6, 9))
     color_map = {"GO": "green", "MARGINAL": "orange", "NO-GO": "red"}
-    zone_y = {"NORTE": (9, 14), "CENTRO": (4, 9), "SUL": (-4.5, 4)}
 
-    for z, (y0, y1) in zone_y.items():
-        ax.axhspan(y0, y1, color=color_map[results[z][0]], alpha=0.25)
-
-    # TODAS AS CIDADES RESTAURADAS
-    cities = {
-        "Bragança": (0.8, 13.5),
-        "Viana do Castelo": (0.2, 12.6),
-        "Braga": (0.4, 11.8),
-        "Vila Real": (0.6, 11.0),
-        "Porto": (0.3, 10.5),
-        "Viseu": (0.6, 8.6),
-        "Aveiro": (0.3, 8.0),
-        "Guarda": (0.8, 7.4),
-        "Coimbra": (0.5, 6.6),
-        "Leiria": (0.3, 5.6),
-        "Castelo Branco": (0.8, 5.9),
-        "Santarém": (0.4, 3.0),
-        "Portalegre": (0.8, 3.0),
-        "Lisboa": (0.3, 2.0),
-        "Setúbal": (0.3, 1.2),
-        "Évora": (0.6, 0.2),
-        "Beja": (0.7, -1.0),
-        "Faro": (0.7, -2.2),
+    zone_lat = {
+        "NORTE": (39.5, 42.5),
+        "CENTRO": (38.5, 39.5),
+        "SUL": (36.5, 38.5),
     }
 
-    for name, (x, y) in cities.items():
-        ax.plot(x, y, "ko", markersize=4)
-        ax.text(x + 0.02, y, name, fontsize=8, va="center")
+    for zone_name, (lat_min, lat_max) in zone_lat.items():
+        ax.fill_between(
+            [LON_MIN, LON_MAX],
+            lat_min,
+            lat_max,
+            color=color_map[results[zone_name][0]],
+            alpha=0.25
+        )
 
-    ax.set_xlim(0, 1)
-    ax.set_ylim(-4.5, 14)
-    ax.set_xticks([])
-    ax.set_yticks([])
-    ax.set_title("Decisão VFR por Zona")
+    cities = {
+        "Bragança": (41.806, -6.756),
+        "Viana do Castelo": (41.693, -8.832),
+        "Braga": (41.545, -8.426),
+        "Vila Real": (41.300, -7.744),
+        "Porto": (41.149, -8.610),
+        "Viseu": (40.661, -7.909),
+        "Aveiro": (40.640, -8.653),
+        "Guarda": (40.537, -7.267),
+        "Coimbra": (40.203, -8.410),
+        "Leiria": (39.744, -8.807),
+        "Castelo Branco": (39.823, -7.493),
+        "Santarém": (39.236, -8.686),
+        "Portalegre": (39.292, -7.428),
+        "Lisboa": (38.722, -9.139),
+        "Setúbal": (38.524, -8.888),
+        "Évora": (38.571, -7.913),
+        "Beja": (38.015, -7.863),
+        "Faro": (37.019, -7.930),
+    }
+
+    for name, (lat, lon) in cities.items():
+        ax.plot(lon, lat, "ko", markersize=4)
+        ax.text(lon + 0.05, lat, name, fontsize=8, va="center")
+
+    ax.set_xlim(LON_MIN, LON_MAX)
+    ax.set_ylim(LAT_MIN, LAT_MAX)
+    ax.set_xlabel("Longitude (°W)")
+    ax.set_ylabel("Latitude (°N)")
+    ax.set_title("Decisão VFR por Zona – WGS84")
+    ax.grid(True, linestyle="--", alpha=0.4)
 
     ax.legend(handles=[
         Patch(facecolor="green", alpha=0.25, label="GO"),
@@ -316,6 +320,6 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     with col2:
         st.pyplot(fig)
 
-    st.caption("Motor cartográfico v4.15 – Versão final com todas as cidades restauradas.")
+    st.caption("Motor cartográfico v4.16 – Coordenadas reais WGS84.")
 
 
