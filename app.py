@@ -9,7 +9,7 @@ from shapely.geometry import box
 # CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v4.19")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v4.20")
 
 # -------------------------------------------------
 # INPUT
@@ -74,7 +74,7 @@ def extract_condition_polygon(text):
     condition_poly = FIR_POLYGON
     geo_found = False
 
-    # N OF Nxxxx
+    # N OF
     for match in re.findall(r"N OF N(\d{2})(\d{2})", text):
         geo_found = True
         lat = int(match[0]) + int(match[1]) / 60
@@ -82,7 +82,7 @@ def extract_condition_polygon(text):
             box(LON_MIN, lat, LON_MAX, LAT_MAX)
         )
 
-    # S OF Nxxxx
+    # S OF
     for match in re.findall(r"S OF N(\d{2})(\d{2})", text):
         geo_found = True
         lat = int(match[0]) + int(match[1]) / 60
@@ -90,7 +90,7 @@ def extract_condition_polygon(text):
             box(LON_MIN, LAT_MIN, LON_MAX, lat)
         )
 
-    # E OF Wxxxx
+    # E OF
     for match in re.findall(r"E OF W(\d{2})(\d{2})", text):
         geo_found = True
         lon = -(int(match[0]) + int(match[1]) / 60)
@@ -98,7 +98,7 @@ def extract_condition_polygon(text):
             box(lon, LAT_MIN, LON_MAX, LAT_MAX)
         )
 
-    # W OF Wxxxx
+    # W OF
     for match in re.findall(r"W OF W(\d{2})(\d{2})", text):
         geo_found = True
         lon = -(int(match[0]) + int(match[1]) / 60)
@@ -197,15 +197,15 @@ def decision_for_zone(events):
     # HARD LIMITS
     if vis is not None:
         if vis < 1500:
-            return "NO-GO", vis, base
+            return "NO-GO", vis, base, True, turb_sev, turb_mod
         elif vis < 3000:
-            return "MARGINAL", vis, base
+            return "MARGINAL", vis, base, True, turb_sev, turb_mod
 
     if base is not None:
         if base < 300:
-            return "NO-GO", vis, base
+            return "NO-GO", vis, base, True, turb_sev, turb_mod
         elif base < 500:
-            return "MARGINAL", vis, base
+            return "MARGINAL", vis, base, True, turb_sev, turb_mod
 
     score = 0
 
@@ -236,16 +236,48 @@ def decision_for_zone(events):
     else:
         decision = "GO"
 
-    return decision, vis, base
+    ts_flag = ts_isol or ts_ocnl or ts_frq or ts_gen
+
+    return decision, vis, base, ts_flag, turb_sev, turb_mod
 
 # -------------------------------------------------
-# EXECUÇÃO + MAPA
+# EXECUÇÃO
 # -------------------------------------------------
 if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     zone_data = parse_gamet(gamet_text)
     results = {z: decision_for_zone(zone_data[z]) for z in ZONES}
 
+    # ---------------- BRIEFING ----------------
+    st.subheader("📋 Briefing Detalhado")
+    cols = st.columns(3)
+
+    for i, z in enumerate(ZONES):
+        decision, vis, base, ts_flag, turb_sev, turb_mod = results[z]
+
+        with cols[i]:
+            st.markdown(f"### {z}")
+
+            if decision == "NO-GO":
+                st.error("🔴 NO-GO")
+            elif decision == "MARGINAL":
+                st.warning("⚠️ MARGINAL")
+            else:
+                st.success("✅ GO")
+
+            st.write(f"👁️ {vis} m" if vis else "👁️ —")
+            st.write(f"☁️ {base} ft AGL" if base else "☁️ —")
+            st.write(f"⛈️ {'Sim' if ts_flag else 'Não'}")
+
+            if turb_sev:
+                st.write("🌪️ Turbulência Severa")
+            elif turb_mod:
+                st.write("🌬️ Turbulência Moderada")
+            else:
+                st.write("🌬️ Turbulência Não Significativa")
+
+    # ---------------- MAPA ----------------
+    st.divider()
     st.subheader("🌍 Mapa VFR – WGS84")
 
     fig, ax = plt.subplots(figsize=(6, 9))
@@ -266,7 +298,6 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
             alpha=0.25
         )
 
-    # TODAS AS CIDADES
     cities = {
         "Bragança": (41.806, -6.756),
         "Viana do Castelo": (41.693, -8.832),
@@ -308,5 +339,5 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     st.pyplot(fig)
 
-    st.caption("Motor cartográfico v4.19 – Baseline estável sem regressões.")
+    st.caption("Motor cartográfico v4.20 – Baseline estável com briefing completo.")
 
