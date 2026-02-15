@@ -9,7 +9,7 @@ from shapely.geometry import box
 # CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v4.12")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v4.13")
 
 # -------------------------------------------------
 # INPUT
@@ -61,37 +61,40 @@ def split_into_sections(text):
     return sections
 
 # -------------------------------------------------
-# POLÍGONO CONDIÇÃO
+# EXTRACÇÃO DE CONDIÇÃO GEOGRÁFICA
 # -------------------------------------------------
 def extract_condition_polygon(text):
 
     condition_poly = FIR_POLYGON
-
     geo_found = False
 
     for match in re.findall(r"N OF N(\d{2})(\d{2})", text):
         geo_found = True
         lat = int(match[0]) + int(match[1]) / 60
-        poly = box(LON_MIN, lat, LON_MAX, LAT_MAX)
-        condition_poly = condition_poly.intersection(poly)
+        condition_poly = condition_poly.intersection(
+            box(LON_MIN, lat, LON_MAX, LAT_MAX)
+        )
 
     for match in re.findall(r"S OF N(\d{2})(\d{2})", text):
         geo_found = True
         lat = int(match[0]) + int(match[1]) / 60
-        poly = box(LON_MIN, LAT_MIN, LON_MAX, lat)
-        condition_poly = condition_poly.intersection(poly)
+        condition_poly = condition_poly.intersection(
+            box(LON_MIN, LAT_MIN, LON_MAX, lat)
+        )
 
     for match in re.findall(r"E OF W(\d{2})(\d{2})", text):
         geo_found = True
         lon = -(int(match[0]) + int(match[1]) / 60)
-        poly = box(lon, LAT_MIN, LON_MAX, LAT_MAX)
-        condition_poly = condition_poly.intersection(poly)
+        condition_poly = condition_poly.intersection(
+            box(lon, LAT_MIN, LON_MAX, LAT_MAX)
+        )
 
     for match in re.findall(r"W OF W(\d{2})(\d{2})", text):
         geo_found = True
         lon = -(int(match[0]) + int(match[1]) / 60)
-        poly = box(LON_MIN, LAT_MIN, lon, LAT_MAX)
-        condition_poly = condition_poly.intersection(poly)
+        condition_poly = condition_poly.intersection(
+            box(LON_MIN, LAT_MIN, lon, LAT_MAX)
+        )
 
     if not geo_found:
         return FIR_POLYGON
@@ -99,13 +102,12 @@ def extract_condition_polygon(text):
     return condition_poly
 
 # -------------------------------------------------
-# PARSER PRINCIPAL (estrutura robusta)
+# PARSER PRINCIPAL
 # -------------------------------------------------
 def parse_gamet(text):
 
     text = normalize_text(text)
     sections = split_into_sections(text)
-
     zone_data = {z: [] for z in ZONES}
 
     for section in sections:
@@ -136,13 +138,15 @@ def parse_gamet(text):
             # ---------------- CLD ----------------
             if section.startswith("CLD:") or section.startswith("SIG CLD:"):
 
-                # AGL
-                for base_min, _ in re.findall(r"(\d{3})-(\d{3})/?.*?HFT AGL", section):
-                    zone_data[zone_name].append(("BASE", int(base_min) * 100))
+                # BASE AGL
+                for match in re.findall(r"\b(\d{3})-\d{3}(?:/\d{3})?HFT AGL", section):
+                    base_agl = int(match) * 100
+                    zone_data[zone_name].append(("BASE", base_agl))
 
-                # AMSL → conversão simples para AGL
-                for base_min, _ in re.findall(r"(\d{3})-(\d{3})/?.*?HFT AMSL", section):
-                    agl_est = int(base_min) * 100 - 500
+                # BASE AMSL (convertido para AGL aproximado)
+                for match in re.findall(r"\b(\d{3})-\d{3}(?:/\d{3})?HFT AMSL", section):
+                    base_amsl = int(match) * 100
+                    agl_est = base_amsl - 500
                     if agl_est > 0:
                         zone_data[zone_name].append(("BASE", agl_est))
 
@@ -177,11 +181,16 @@ def decision_for_zone(events):
         return "NO-GO", vis, base, ts, turb_sev, turb_mod
 
     score = 0
-    if vis and 3000 <= vis < 5000: score += 30
-    if base and 500 <= base < 1500: score += 40
-    if ts: score += 50
-    if turb_sev: score += 45
-    elif turb_mod: score += 35
+    if vis and 3000 <= vis < 5000:
+        score += 30
+    if base and 500 <= base < 1500:
+        score += 40
+    if ts:
+        score += 50
+    if turb_sev:
+        score += 45
+    elif turb_mod:
+        score += 35
 
     if score >= 140:
         decision = "NO-GO"
@@ -201,7 +210,6 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     results = {z: decision_for_zone(zone_data[z]) for z in ZONES}
 
     st.subheader("📋 Briefing Detalhado")
-
     cols = st.columns(3)
 
     for i, z in enumerate(ZONES):
@@ -228,9 +236,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
             else:
                 st.write("🌬️ Não significativa")
 
-    # -------------------------------------------------
-    # MAPA
-    # -------------------------------------------------
+    # ---------------- MAPA ----------------
     st.divider()
     st.subheader("🗺️ Mapa VFR")
 
@@ -267,20 +273,21 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         ax.plot(x, y, "ko", markersize=4)
         ax.text(x + 0.02, y, name, fontsize=8, va="center")
 
-    ax.set_xlim(0,1)
-    ax.set_ylim(-4.5,14)
+    ax.set_xlim(0, 1)
+    ax.set_ylim(-4.5, 14)
     ax.set_xticks([])
     ax.set_yticks([])
     ax.set_title("Decisão VFR por Zona")
 
     ax.legend(handles=[
-        Patch(facecolor="green",alpha=0.25,label="GO"),
-        Patch(facecolor="orange",alpha=0.25,label="MARGINAL"),
-        Patch(facecolor="red",alpha=0.25,label="NO-GO"),
-        Line2D([0],[0],marker='o',color='black',linestyle='None',label='Cidade')
+        Patch(facecolor="green", alpha=0.25, label="GO"),
+        Patch(facecolor="orange", alpha=0.25, label="MARGINAL"),
+        Patch(facecolor="red", alpha=0.25, label="NO-GO"),
+        Line2D([0], [0], marker='o', color='black',
+               linestyle='None', label='Cidade')
     ])
 
-    col1, col2, col3 = st.columns([1,2,1])
+    col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.pyplot(fig)
 
