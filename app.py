@@ -9,7 +9,7 @@ from shapely.geometry import box
 # CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v4.18")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v4.19")
 
 # -------------------------------------------------
 # INPUT
@@ -52,7 +52,7 @@ def normalize_text(text):
     return text
 
 # -------------------------------------------------
-# SPLIT
+# SPLIT POR FENÓMENO
 # -------------------------------------------------
 def split_into_sections(text):
     pattern = r"(SFC VIS:|VIS:|SIGWX:|SIG CLD:|CLD:|TURB:|ICE:|MT OBSC:|MTW:)"
@@ -67,14 +67,14 @@ def split_into_sections(text):
     return sections
 
 # -------------------------------------------------
-# GEOGRAFIA
+# INTERSECÇÃO GEOGRÁFICA
 # -------------------------------------------------
 def extract_condition_polygon(text):
 
     condition_poly = FIR_POLYGON
     geo_found = False
 
-    # N OF
+    # N OF Nxxxx
     for match in re.findall(r"N OF N(\d{2})(\d{2})", text):
         geo_found = True
         lat = int(match[0]) + int(match[1]) / 60
@@ -82,7 +82,7 @@ def extract_condition_polygon(text):
             box(LON_MIN, lat, LON_MAX, LAT_MAX)
         )
 
-    # S OF
+    # S OF Nxxxx
     for match in re.findall(r"S OF N(\d{2})(\d{2})", text):
         geo_found = True
         lat = int(match[0]) + int(match[1]) / 60
@@ -90,7 +90,7 @@ def extract_condition_polygon(text):
             box(LON_MIN, LAT_MIN, LON_MAX, lat)
         )
 
-    # E OF
+    # E OF Wxxxx
     for match in re.findall(r"E OF W(\d{2})(\d{2})", text):
         geo_found = True
         lon = -(int(match[0]) + int(match[1]) / 60)
@@ -98,7 +98,7 @@ def extract_condition_polygon(text):
             box(lon, LAT_MIN, LON_MAX, LAT_MAX)
         )
 
-    # W OF
+    # W OF Wxxxx
     for match in re.findall(r"W OF W(\d{2})(\d{2})", text):
         geo_found = True
         lon = -(int(match[0]) + int(match[1]) / 60)
@@ -131,6 +131,7 @@ def parse_gamet(text):
 
             # VIS
             if section.startswith("VIS:") or section.startswith("SFC VIS:"):
+
                 ranges = re.findall(r"(\d{4})-(\d{4})M", section)
                 singles = re.findall(r"\b(\d{4})M\b", section)
 
@@ -147,9 +148,11 @@ def parse_gamet(text):
             # CLD
             if section.startswith("CLD:") or section.startswith("SIG CLD:"):
 
+                # AGL
                 for match in re.findall(r"\b(\d{3})-\d{3}(?:/\d{3})?HFT AGL", section):
                     zone_data[zone_name].append(("BASE", int(match) * 100))
 
+                # AMSL → AGL
                 for match in re.findall(r"\b(\d{3})-\d{3}(?:/\d{3})?HFT AMSL", section):
                     base_amsl = int(match) * 100
                     agl_est = base_amsl - ZONE_ELEVATION[zone_name]
@@ -227,11 +230,13 @@ def decision_for_zone(events):
         score += 30
 
     if score >= 120:
-        return "NO-GO", vis, base
+        decision = "NO-GO"
     elif score >= 60:
-        return "MARGINAL", vis, base
+        decision = "MARGINAL"
     else:
-        return "GO", vis, base
+        decision = "GO"
+
+    return decision, vis, base
 
 # -------------------------------------------------
 # EXECUÇÃO + MAPA
@@ -241,7 +246,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     zone_data = parse_gamet(gamet_text)
     results = {z: decision_for_zone(zone_data[z]) for z in ZONES}
 
-    st.subheader("🌍 Mapa VFR – WGS84 Consolidado")
+    st.subheader("🌍 Mapa VFR – WGS84")
 
     fig, ax = plt.subplots(figsize=(6, 9))
     color_map = {"GO": "green", "MARGINAL": "orange", "NO-GO": "red"}
@@ -261,15 +266,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
             alpha=0.25
         )
 
-    # Linha costeira simplificada
-    coast_lon = [-8.9, -9.0, -9.1, -9.2, -9.15, -9.1, -9.0,
-                 -8.9, -8.8, -8.7, -8.6, -8.7, -8.8, -8.9, -9.0]
-    coast_lat = [41.9, 41.6, 41.2, 40.8, 40.2, 39.6, 39.0,
-                 38.4, 37.8, 37.2, 36.9, 37.3, 38.0, 39.5, 41.0]
-
-    ax.plot(coast_lon, coast_lat, color="black", linewidth=1.5)
-
-    # Cidades
+    # TODAS AS CIDADES
     cities = {
         "Bragança": (41.806, -6.756),
         "Viana do Castelo": (41.693, -8.832),
@@ -305,10 +302,11 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         Patch(facecolor="green", alpha=0.25, label="GO"),
         Patch(facecolor="orange", alpha=0.25, label="MARGINAL"),
         Patch(facecolor="red", alpha=0.25, label="NO-GO"),
-        Line2D([0], [0], color='black', label='Linha Costeira')
+        Line2D([0], [0], marker='o', color='black',
+               linestyle='None', label='Cidade')
     ])
 
     st.pyplot(fig)
 
-    st.caption("Motor cartográfico v4.18 – Versão consolidada final.")
+    st.caption("Motor cartográfico v4.19 – Baseline estável sem regressões.")
 
