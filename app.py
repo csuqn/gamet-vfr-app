@@ -9,7 +9,7 @@ from shapely.geometry import box
 # CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v4.10")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v4.11")
 
 # -------------------------------------------------
 # INPUT
@@ -49,7 +49,7 @@ def normalize_text(text):
 # SPLIT POR FENÓMENO
 # -------------------------------------------------
 def split_into_sections(text):
-    pattern = r"(SFC VIS:|VIS:|SIGWX:|SIG CLD:|CLD:|TURB:|ICE:|MT OBSC:)"
+    pattern = r"(SFC VIS:|VIS:|SIGWX:|SIG CLD:|CLD:|TURB:|ICE:|MT OBSC:|MTW:)"
     parts = re.split(pattern, text)
     sections = []
 
@@ -123,6 +123,7 @@ def parse_gamet(text):
     for section in sections:
 
         is_turb_section = section.startswith("TURB:")
+        is_cld_section = section.startswith("CLD:") or section.startswith("SIG CLD:")
 
         subblocks = split_subblocks(section)
 
@@ -135,28 +136,51 @@ def parse_gamet(text):
                 if not zone_poly.intersects(condition_poly):
                     continue
 
-                # VIS
+                # -------------------------------------------------
+                # VISIBILIDADE
+                # -------------------------------------------------
                 if "ABV" not in block:
-                    for low, _ in re.findall(r"(\d{4})-(\d{4})M", block):
+                    ranges = re.findall(r"(\d{4})-(\d{4})M", block)
+                    singles = re.findall(r"\b(\d{4})M\b", block)
+
+                    used_values = set()
+
+                    for low, high in ranges:
+                        used_values.add(low)
                         zone_data[zone_name].append(("VIS", int(low)))
 
-                    for val in re.findall(r"\b(\d{4})M\b", block):
-                        zone_data[zone_name].append(("VIS", int(val)))
+                    for val in singles:
+                        if val not in used_values:
+                            zone_data[zone_name].append(("VIS", int(val)))
 
-                # BASE
-                if section.startswith("CLD:") or section.startswith("SIG CLD:"):
-                    for base_min, _ in re.findall(r"(\d{3})-(\d{3})/?.*?HFT", block):
+                # -------------------------------------------------
+                # BASES NUVENS
+                # -------------------------------------------------
+                if is_cld_section:
+
+                    # AGL
+                    for base_min, _ in re.findall(r"(\d{3})-(\d{3})/?.*?HFT AGL", block):
                         zone_data[zone_name].append(("BASE", int(base_min) * 100))
 
-                # TS
+                    # AMSL → conversão aproximada para AGL
+                    for base_min, _ in re.findall(r"(\d{3})-(\d{3})/?.*?HFT AMSL", block):
+                        agl_estimate = int(base_min) * 100 - 500
+                        if agl_estimate > 0:
+                            zone_data[zone_name].append(("BASE", agl_estimate))
+
+                # -------------------------------------------------
+                # TROVOADAS
+                # -------------------------------------------------
                 if re.search(r"\bTS\b", block):
                     zone_data[zone_name].append(("TS", 1))
 
-                # TURB
+                # -------------------------------------------------
+                # TURBULÊNCIA (corrigido)
+                # -------------------------------------------------
                 if is_turb_section:
-                    if "SEV" in section:
+                    if "SEV" in block:
                         zone_data[zone_name].append(("TURB", "SEV"))
-                    elif "MOD" in section:
+                    elif "MOD" in block:
                         zone_data[zone_name].append(("TURB", "MOD"))
 
     return zone_data
@@ -204,15 +228,6 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     st.subheader("📋 Briefing Detalhado")
 
-    with st.expander("ℹ️ Legenda"):
-        st.markdown("""
-👁️ **Visibilidade mínima**  
-☁️ **Base de nuvens (ft AGL)**  
-⛈️ **Trovoadas (TS)**  
-🌬️ **Turbulência moderada**  
-🌪️ **Turbulência severa**
-""")
-
     cols = st.columns(3)
 
     for i, z in enumerate(ZONES):
@@ -239,7 +254,9 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
             else:
                 st.write("🌬️ Não significativa")
 
-    # ---------------- MAPA ----------------
+    # -------------------------------------------------
+    # MAPA
+    # -------------------------------------------------
     st.divider()
     st.subheader("🗺️ Mapa VFR")
 
@@ -293,6 +310,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     with col2:
         st.pyplot(fig)
 
-    st.caption("Motor cartográfico com interseção geométrica real.")
+    st.caption("Motor cartográfico com intersecção geométrica real.")
+
 
 
