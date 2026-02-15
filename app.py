@@ -183,8 +183,10 @@ def decision_for_zone(events):
     score = 0
     if vis and 3000 <= vis < 5000:
         score += 30
+        
     if base and 500 <= base <= 1500:
     score += 40
+    
     if ts:
         score += 50
     if turb_sev:
