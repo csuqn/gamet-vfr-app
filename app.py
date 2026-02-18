@@ -9,7 +9,7 @@ from shapely.geometry import box
 # CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v4.20")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v4.21")
 
 # -------------------------------------------------
 # INPUT
@@ -52,7 +52,7 @@ def normalize_text(text):
     return text
 
 # -------------------------------------------------
-# SPLIT POR FENÓMENO
+# SPLIT
 # -------------------------------------------------
 def split_into_sections(text):
     pattern = r"(SFC VIS:|VIS:|SIGWX:|SIG CLD:|CLD:|TURB:|ICE:|MT OBSC:|MTW:)"
@@ -74,7 +74,6 @@ def extract_condition_polygon(text):
     condition_poly = FIR_POLYGON
     geo_found = False
 
-    # N OF
     for match in re.findall(r"N OF N(\d{2})(\d{2})", text):
         geo_found = True
         lat = int(match[0]) + int(match[1]) / 60
@@ -82,7 +81,6 @@ def extract_condition_polygon(text):
             box(LON_MIN, lat, LON_MAX, LAT_MAX)
         )
 
-    # S OF
     for match in re.findall(r"S OF N(\d{2})(\d{2})", text):
         geo_found = True
         lat = int(match[0]) + int(match[1]) / 60
@@ -90,7 +88,6 @@ def extract_condition_polygon(text):
             box(LON_MIN, LAT_MIN, LON_MAX, lat)
         )
 
-    # E OF
     for match in re.findall(r"E OF W(\d{2})(\d{2})", text):
         geo_found = True
         lon = -(int(match[0]) + int(match[1]) / 60)
@@ -98,7 +95,6 @@ def extract_condition_polygon(text):
             box(lon, LAT_MIN, LON_MAX, LAT_MAX)
         )
 
-    # W OF
     for match in re.findall(r"W OF W(\d{2})(\d{2})", text):
         geo_found = True
         lon = -(int(match[0]) + int(match[1]) / 60)
@@ -148,25 +144,23 @@ def parse_gamet(text):
             # CLD
             if section.startswith("CLD:") or section.startswith("SIG CLD:"):
 
-                # AGL
                 for match in re.findall(r"\b(\d{3})-\d{3}(?:/\d{3})?HFT AGL", section):
                     zone_data[zone_name].append(("BASE", int(match) * 100))
 
-                # AMSL → AGL
                 for match in re.findall(r"\b(\d{3})-\d{3}(?:/\d{3})?HFT AMSL", section):
                     base_amsl = int(match) * 100
                     agl_est = base_amsl - ZONE_ELEVATION[zone_name]
                     if agl_est > 0:
                         zone_data[zone_name].append(("BASE", agl_est))
 
-            # TS
+            # TS (fix robusto)
             if re.search(r"\bISOL TS\b", section):
                 zone_data[zone_name].append(("TS", "ISOL"))
             elif re.search(r"\bOCNL TS\b", section):
                 zone_data[zone_name].append(("TS", "OCNL"))
             elif re.search(r"\bFRQ TS\b", section):
                 zone_data[zone_name].append(("TS", "FRQ"))
-            elif re.search(r"\bTS\b", section):
+            elif re.search(r"(^|\s)TS(\s|$)", section):
                 zone_data[zone_name].append(("TS", "GEN"))
 
             # TURB
@@ -265,8 +259,8 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
             else:
                 st.success("✅ GO")
 
-            st.write(f"👁️ {vis} m" if vis else "👁️ —")
-            st.write(f"☁️ {base} ft AGL" if base else "☁️ —")
+            st.write(f"👁️ {vis} m" if vis is not None else "👁️ —")
+            st.write(f"☁️ {base} ft AGL" if base is not None else "☁️ —")
             st.write(f"⛈️ {'Sim' if ts_flag else 'Não'}")
 
             if turb_sev:
@@ -339,5 +333,5 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     st.pyplot(fig)
 
-    st.caption("Motor cartográfico v4.20 – Baseline estável com briefing completo.")
+    st.caption("Motor cartográfico v4.21 – Patch estável sem regressões.")
 
