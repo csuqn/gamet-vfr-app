@@ -9,7 +9,7 @@ from shapely.geometry import box
 # CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v4.21")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v4.22")
 
 # -------------------------------------------------
 # INPUT
@@ -153,7 +153,7 @@ def parse_gamet(text):
                     if agl_est > 0:
                         zone_data[zone_name].append(("BASE", agl_est))
 
-            # TS (fix robusto)
+            # TS
             if re.search(r"\bISOL TS\b", section):
                 zone_data[zone_name].append(("TS", "ISOL"))
             elif re.search(r"\bOCNL TS\b", section):
@@ -185,21 +185,23 @@ def decision_for_zone(events):
     ts_frq  = any(t == "TS" and v == "FRQ" for t, v in events)
     ts_gen  = any(t == "TS" and v == "GEN" for t, v in events)
 
+    ts_flag = ts_isol or ts_ocnl or ts_frq or ts_gen
+
     turb_sev = any(t == "TURB" and v == "SEV" for t, v in events)
     turb_mod = any(t == "TURB" and v == "MOD" for t, v in events)
 
     # HARD LIMITS
     if vis is not None:
         if vis < 1500:
-            return "NO-GO", vis, base, True, turb_sev, turb_mod
+            return "NO-GO", vis, base, ts_flag, turb_sev, turb_mod
         elif vis < 3000:
-            return "MARGINAL", vis, base, True, turb_sev, turb_mod
+            return "MARGINAL", vis, base, ts_flag, turb_sev, turb_mod
 
     if base is not None:
         if base < 300:
-            return "NO-GO", vis, base, True, turb_sev, turb_mod
+            return "NO-GO", vis, base, ts_flag, turb_sev, turb_mod
         elif base < 500:
-            return "MARGINAL", vis, base, True, turb_sev, turb_mod
+            return "MARGINAL", vis, base, ts_flag, turb_sev, turb_mod
 
     score = 0
 
@@ -229,8 +231,6 @@ def decision_for_zone(events):
         decision = "MARGINAL"
     else:
         decision = "GO"
-
-    ts_flag = ts_isol or ts_ocnl or ts_frq or ts_gen
 
     return decision, vis, base, ts_flag, turb_sev, turb_mod
 
@@ -333,5 +333,5 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     st.pyplot(fig)
 
-    st.caption("Motor cartográfico v4.21 – Patch estável sem regressões.")
+    st.caption("Motor cartográfico v4.22 – TS fix definitivo.")
 
