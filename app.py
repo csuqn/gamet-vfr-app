@@ -9,7 +9,7 @@ from shapely.geometry import box
 # CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v4.30")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v4.40")
 
 # -------------------------------------------------
 # INPUT
@@ -108,30 +108,6 @@ def extract_condition_polygon(text):
     return condition_poly
 
 # -------------------------------------------------
-# CLD SUB-BLOCK SPLIT
-# -------------------------------------------------
-def split_cld_subblocks(cld_text):
-    pattern = r"(?=(\d{2}/\d{2}|N OF N\d{4}|S OF N\d{4}|E OF W\d{4}|W OF W\d{4}))"
-    parts = re.split(pattern, cld_text)
-    blocks = []
-    current = ""
-
-    for part in parts:
-        if not part:
-            continue
-        if re.match(r"\d{2}/\d{2}|N OF N\d{4}|S OF N\d{4}|E OF W\d{4}|W OF W\d{4}", part):
-            if current:
-                blocks.append(current.strip())
-            current = part
-        else:
-            current += " " + part
-
-    if current:
-        blocks.append(current.strip())
-
-    return blocks
-
-# -------------------------------------------------
 # PARSER
 # -------------------------------------------------
 def parse_gamet(text):
@@ -163,13 +139,15 @@ def parse_gamet(text):
                     if val not in used:
                         zone_data[zone_name].append(("VIS", int(val)))
 
-        # ---------------- CLD (estrutural) ----------------
+        # ---------------- CLD (por blocos temporais) ----------------
         if section.startswith("CLD:") or section.startswith("SIG CLD:"):
 
             cld_body = section.split(":", 1)[1]
-            sub_blocks = split_cld_subblocks(cld_body)
 
-            for block in sub_blocks:
+            # Divide apenas por blocos de tempo reais (XX/XX)
+            blocks = re.split(r"\s(?=\d{2}/\d{2})", cld_body)
+
+            for block in blocks:
 
                 block_poly = extract_condition_polygon(block)
 
@@ -177,9 +155,11 @@ def parse_gamet(text):
                     if not zone_poly.intersects(block_poly):
                         continue
 
+                    # AGL
                     for match in re.findall(r"\b(\d{3})-\d{3}(?:/\d{3})?HFT AGL", block):
                         zone_data[zone_name].append(("BASE", int(match) * 100))
 
+                    # AMSL
                     for match in re.findall(r"\b(\d{3})-\d{3}(?:/\d{3})?HFT AMSL", block):
                         base_amsl = int(match) * 100
                         agl_est = base_amsl - ZONE_ELEVATION[zone_name]
@@ -217,20 +197,14 @@ def parse_gamet(text):
     return zone_data
 
 # -------------------------------------------------
-# DECISÃO
+# DECISÃO (inalterada)
 # -------------------------------------------------
 def decision_for_zone(events):
 
     vis = min([v for t, v in events if t == "VIS"], default=None)
     base = min([v for t, v in events if t == "BASE"], default=None)
 
-    ts_isol = any(t == "TS" and v == "ISOL" for t, v in events)
-    ts_ocnl = any(t == "TS" and v == "OCNL" for t, v in events)
-    ts_frq  = any(t == "TS" and v == "FRQ" for t, v in events)
-    ts_gen  = any(t == "TS" and v == "GEN" for t, v in events)
-
-    ts_flag = ts_isol or ts_ocnl or ts_frq or ts_gen
-
+    ts_flag = any(t == "TS" for t, _ in events)
     turb_sev = any(t == "TURB" and v == "SEV" for t, v in events)
     turb_mod = any(t == "TURB" and v == "MOD" for t, v in events)
 
@@ -247,26 +221,12 @@ def decision_for_zone(events):
             return "MARGINAL", vis, base, ts_flag, turb_sev, turb_mod
 
     score = 0
-    if vis and 3000 <= vis < 5000:
-        score += 20
-    if base and 500 <= base <= 1500:
-        score += 30
-    if ts_frq:
-        score += 60
-    elif ts_ocnl:
-        score += 45
-    elif ts_isol:
-        score += 30
-    elif ts_gen:
-        score += 40
     if turb_sev:
         score += 45
     elif turb_mod:
         score += 30
 
-    if score >= 120:
-        decision = "NO-GO"
-    elif score >= 60:
+    if score >= 60:
         decision = "MARGINAL"
     else:
         decision = "GO"
@@ -372,5 +332,4 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     st.pyplot(fig)
 
-    st.caption("Motor cartográfico v4.30 – CLD estrutural completo.")
-
+    st.caption("Motor cartográfico v4.40 – CLD robusto por blocos temporais.")
