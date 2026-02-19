@@ -243,16 +243,16 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     # ---------------- BRIEFING ----------------
     st.subheader("📋 Briefing Detalhado")
-    
+
     with st.expander("ℹ️ Legenda do Briefing"):
-    st.markdown("""
+        st.markdown("""
 **🔴 NO-GO** – Condições abaixo dos mínimos VFR definidos  
 **⚠️ MARGINAL** – Condições próximas dos limites operacionais  
 **✅ GO** – Condições favoráveis à operação VFR  
 
 **👁️ Visibilidade** – Valor mínimo considerado (em metros)  
 **☁️ Base** – Altura mínima da base das nuvens (ft AGL)  
-**⛈️ TS** – Presença de trovoadas (Thunderstorms)  
+**⛈️ TS** – Presença de trovoadas  
 **🌪️ Turbulência Severa** – Turbulência significativa  
 **🌬️ Turbulência Moderada** – Turbulência operacionalmente relevante  
 """)
