@@ -346,4 +346,4 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     st.pyplot(fig)
 
-    st.caption("Motor cartográfico v4.40 – CLD robusto por blocos temporais.")
+    st.caption("Motor cartográfico v4.41")
