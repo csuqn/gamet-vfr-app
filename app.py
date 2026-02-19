@@ -243,6 +243,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     # ---------------- BRIEFING ----------------
     st.subheader("📋 Briefing Detalhado")
+    
     with st.expander("ℹ️ Legenda do Briefing"):
     st.markdown("""
 **🔴 NO-GO** – Condições abaixo dos mínimos VFR definidos  
