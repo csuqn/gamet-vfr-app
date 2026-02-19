@@ -9,7 +9,7 @@ from shapely.geometry import box
 # CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v4.40")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v4.41")
 
 # -------------------------------------------------
 # INPUT
