@@ -9,7 +9,7 @@ from shapely.geometry import box
 # CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v4.22")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v4.30")
 
 # -------------------------------------------------
 # INPUT
@@ -52,7 +52,7 @@ def normalize_text(text):
     return text
 
 # -------------------------------------------------
-# SPLIT
+# SPLIT PRINCIPAL
 # -------------------------------------------------
 def split_into_sections(text):
     pattern = r"(SFC VIS:|VIS:|SIGWX:|SIG CLD:|CLD:|TURB:|ICE:|MT OBSC:|MTW:)"
@@ -108,6 +108,30 @@ def extract_condition_polygon(text):
     return condition_poly
 
 # -------------------------------------------------
+# CLD SUB-BLOCK SPLIT
+# -------------------------------------------------
+def split_cld_subblocks(cld_text):
+    pattern = r"(?=(\d{2}/\d{2}|N OF N\d{4}|S OF N\d{4}|E OF W\d{4}|W OF W\d{4}))"
+    parts = re.split(pattern, cld_text)
+    blocks = []
+    current = ""
+
+    for part in parts:
+        if not part:
+            continue
+        if re.match(r"\d{2}/\d{2}|N OF N\d{4}|S OF N\d{4}|E OF W\d{4}|W OF W\d{4}", part):
+            if current:
+                blocks.append(current.strip())
+            current = part
+        else:
+            current += " " + part
+
+    if current:
+        blocks.append(current.strip())
+
+    return blocks
+
+# -------------------------------------------------
 # PARSER
 # -------------------------------------------------
 def parse_gamet(text):
@@ -118,21 +142,19 @@ def parse_gamet(text):
 
     for section in sections:
 
-        section_poly = extract_condition_polygon(section)
+        # ---------------- VIS ----------------
+        if section.startswith("VIS:") or section.startswith("SFC VIS:"):
 
-        for zone_name, zone_poly in ZONES.items():
+            section_poly = extract_condition_polygon(section)
 
-            if not zone_poly.intersects(section_poly):
-                continue
-
-            # VIS
-            if section.startswith("VIS:") or section.startswith("SFC VIS:"):
+            for zone_name, zone_poly in ZONES.items():
+                if not zone_poly.intersects(section_poly):
+                    continue
 
                 ranges = re.findall(r"(\d{4})-(\d{4})M", section)
                 singles = re.findall(r"\b(\d{4})M\b", section)
 
                 used = set()
-
                 for low, _ in ranges:
                     used.add(low)
                     zone_data[zone_name].append(("VIS", int(low)))
@@ -141,34 +163,56 @@ def parse_gamet(text):
                     if val not in used:
                         zone_data[zone_name].append(("VIS", int(val)))
 
-            # CLD
-            if section.startswith("CLD:") or section.startswith("SIG CLD:"):
+        # ---------------- CLD (estrutural) ----------------
+        if section.startswith("CLD:") or section.startswith("SIG CLD:"):
 
-                for match in re.findall(r"\b(\d{3})-\d{3}(?:/\d{3})?HFT AGL", section):
-                    zone_data[zone_name].append(("BASE", int(match) * 100))
+            cld_body = section.split(":", 1)[1]
+            sub_blocks = split_cld_subblocks(cld_body)
 
-                for match in re.findall(r"\b(\d{3})-\d{3}(?:/\d{3})?HFT AMSL", section):
-                    base_amsl = int(match) * 100
-                    agl_est = base_amsl - ZONE_ELEVATION[zone_name]
-                    if agl_est > 0:
-                        zone_data[zone_name].append(("BASE", agl_est))
+            for block in sub_blocks:
 
-            # TS
-            if re.search(r"\bISOL TS\b", section):
-                zone_data[zone_name].append(("TS", "ISOL"))
-            elif re.search(r"\bOCNL TS\b", section):
-                zone_data[zone_name].append(("TS", "OCNL"))
-            elif re.search(r"\bFRQ TS\b", section):
-                zone_data[zone_name].append(("TS", "FRQ"))
-            elif re.search(r"(^|\s)TS(\s|$)", section):
-                zone_data[zone_name].append(("TS", "GEN"))
+                block_poly = extract_condition_polygon(block)
 
-            # TURB
-            if section.startswith("TURB:"):
+                for zone_name, zone_poly in ZONES.items():
+                    if not zone_poly.intersects(block_poly):
+                        continue
+
+                    for match in re.findall(r"\b(\d{3})-\d{3}(?:/\d{3})?HFT AGL", block):
+                        zone_data[zone_name].append(("BASE", int(match) * 100))
+
+                    for match in re.findall(r"\b(\d{3})-\d{3}(?:/\d{3})?HFT AMSL", block):
+                        base_amsl = int(match) * 100
+                        agl_est = base_amsl - ZONE_ELEVATION[zone_name]
+                        if agl_est > 0:
+                            zone_data[zone_name].append(("BASE", agl_est))
+
+        # ---------------- TURB ----------------
+        if section.startswith("TURB:"):
+
+            section_poly = extract_condition_polygon(section)
+
+            for zone_name, zone_poly in ZONES.items():
+                if not zone_poly.intersects(section_poly):
+                    continue
+
                 if "SEV" in section:
                     zone_data[zone_name].append(("TURB", "SEV"))
                 elif "MOD" in section:
                     zone_data[zone_name].append(("TURB", "MOD"))
+
+        # ---------------- TS ----------------
+        if re.search(r"\bISOL TS\b", section):
+            for z in ZONES:
+                zone_data[z].append(("TS", "ISOL"))
+        elif re.search(r"\bOCNL TS\b", section):
+            for z in ZONES:
+                zone_data[z].append(("TS", "OCNL"))
+        elif re.search(r"\bFRQ TS\b", section):
+            for z in ZONES:
+                zone_data[z].append(("TS", "FRQ"))
+        elif re.search(r"(^|\s)TS(\s|$)", section):
+            for z in ZONES:
+                zone_data[z].append(("TS", "GEN"))
 
     return zone_data
 
@@ -190,7 +234,6 @@ def decision_for_zone(events):
     turb_sev = any(t == "TURB" and v == "SEV" for t, v in events)
     turb_mod = any(t == "TURB" and v == "MOD" for t, v in events)
 
-    # HARD LIMITS
     if vis is not None:
         if vis < 1500:
             return "NO-GO", vis, base, ts_flag, turb_sev, turb_mod
@@ -204,13 +247,10 @@ def decision_for_zone(events):
             return "MARGINAL", vis, base, ts_flag, turb_sev, turb_mod
 
     score = 0
-
     if vis and 3000 <= vis < 5000:
         score += 20
-
     if base and 500 <= base <= 1500:
         score += 30
-
     if ts_frq:
         score += 60
     elif ts_ocnl:
@@ -219,7 +259,6 @@ def decision_for_zone(events):
         score += 30
     elif ts_gen:
         score += 40
-
     if turb_sev:
         score += 45
     elif turb_mod:
@@ -333,5 +372,5 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     st.pyplot(fig)
 
-    st.caption("Motor cartográfico v4.22 – TS fix definitivo.")
+    st.caption("Motor cartográfico v4.30 – CLD estrutural completo.")
 
