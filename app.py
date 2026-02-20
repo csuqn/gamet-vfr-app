@@ -26,6 +26,7 @@ gamet_text = st.text_area(
 
 SECTOR_NORTE = Polygon([
     (-8.843611, 41.867500),
+    (-7.000000, 41.860000),   # ponto intermédio para elevar fronteira
     (-6.621944, 41.700556),
     (-6.818333, 40.399444),
     (-8.016667, 39.383333),
