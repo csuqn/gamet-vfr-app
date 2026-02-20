@@ -10,7 +10,7 @@ from shapely.ops import unary_union
 # CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v4.51")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v4.52")
 
 # -------------------------------------------------
 # INPUT
@@ -21,7 +21,7 @@ gamet_text = st.text_area(
 )
 
 # -------------------------------------------------
-# LIMITES ORIGINAIS (RESTaurados)
+# LIMITES OPERACIONAIS ORIGINAIS (Parser)
 # -------------------------------------------------
 LAT_MIN, LAT_MAX = 36.5, 42.5
 LON_MIN, LON_MAX = -9.5, -6.0
@@ -70,7 +70,7 @@ ZONES = {
     "SECTOR SUL": SECTOR_SUL_LOWER,
 }
 
-# União real dos sectores = FIR operacional
+# União correta (compatível Shapely 2.x)
 FIR_POLYGON = unary_union(list(ZONES.values()))
 
 ZONE_ELEVATION = {
@@ -80,7 +80,7 @@ ZONE_ELEVATION = {
 }
 
 # -------------------------------------------------
-# NORMALIZAÇÃO (INALTERADO)
+# NORMALIZAÇÃO
 # -------------------------------------------------
 def normalize_text(text):
     text = text.upper()
@@ -90,22 +90,20 @@ def normalize_text(text):
     return text
 
 # -------------------------------------------------
-# SPLIT PRINCIPAL (INALTERADO)
+# SPLIT PRINCIPAL
 # -------------------------------------------------
 def split_into_sections(text):
     pattern = r"(SFC VIS:|VIS:|SIGWX:|SIG CLD:|CLD:|TURB:|ICE:|MT OBSC:|MTW:)"
     parts = re.split(pattern, text)
     sections = []
-
     for i in range(1, len(parts), 2):
         marker = parts[i]
         content = parts[i + 1] if i + 1 < len(parts) else ""
         sections.append((marker + content).strip())
-
     return sections
 
 # -------------------------------------------------
-# INTERSECÇÃO GEOGRÁFICA (BASE REAL FIR)
+# INTERSECÇÃO GEOGRÁFICA
 # -------------------------------------------------
 def extract_condition_polygon(text):
 
@@ -146,7 +144,7 @@ def extract_condition_polygon(text):
     return condition_poly
 
 # -------------------------------------------------
-# PARSER (EXATAMENTE v4.41)
+# PARSER (INALTERADO)
 # -------------------------------------------------
 def parse_gamet(text):
 
@@ -158,42 +156,31 @@ def parse_gamet(text):
 
         # VIS
         if section.startswith("VIS:") or section.startswith("SFC VIS:"):
-
             section_poly = extract_condition_polygon(section)
-
             for zone_name, zone_poly in ZONES.items():
                 if not zone_poly.intersects(section_poly):
                     continue
-
                 ranges = re.findall(r"(\d{4})-(\d{4})M", section)
                 singles = re.findall(r"\b(\d{4})M\b", section)
-
                 used = set()
                 for low, _ in ranges:
                     used.add(low)
                     zone_data[zone_name].append(("VIS", int(low)))
-
                 for val in singles:
                     if val not in used:
                         zone_data[zone_name].append(("VIS", int(val)))
 
         # CLD
         if section.startswith("CLD:") or section.startswith("SIG CLD:"):
-
             cld_body = section.split(":", 1)[1]
             blocks = re.split(r"\s(?=\d{2}/\d{2})", cld_body)
-
             for block in blocks:
-
                 block_poly = extract_condition_polygon(block)
-
                 for zone_name, zone_poly in ZONES.items():
                     if not zone_poly.intersects(block_poly):
                         continue
-
                     for match in re.findall(r"\b(\d{3})-\d{3}(?:/\d{3})?HFT AGL", block):
                         zone_data[zone_name].append(("BASE", int(match) * 100))
-
                     for match in re.findall(r"\b(\d{3})-\d{3}(?:/\d{3})?HFT AMSL", block):
                         base_amsl = int(match) * 100
                         agl_est = base_amsl - ZONE_ELEVATION[zone_name]
@@ -202,13 +189,10 @@ def parse_gamet(text):
 
         # TURB
         if section.startswith("TURB:"):
-
             section_poly = extract_condition_polygon(section)
-
             for zone_name, zone_poly in ZONES.items():
                 if not zone_poly.intersects(section_poly):
                     continue
-
                 if "SEV" in section:
                     zone_data[zone_name].append(("TURB", "SEV"))
                 elif "MOD" in section:
@@ -220,19 +204,16 @@ def parse_gamet(text):
             for zone_name, zone_poly in ZONES.items():
                 if zone_poly.intersects(section_poly):
                     zone_data[zone_name].append(("TS", "ISOL"))
-
         elif re.search(r"\bOCNL TS\b", section):
             section_poly = extract_condition_polygon(section)
             for zone_name, zone_poly in ZONES.items():
                 if zone_poly.intersects(section_poly):
                     zone_data[zone_name].append(("TS", "OCNL"))
-
         elif re.search(r"\bFRQ TS\b", section):
             section_poly = extract_condition_polygon(section)
             for zone_name, zone_poly in ZONES.items():
                 if zone_poly.intersects(section_poly):
                     zone_data[zone_name].append(("TS", "FRQ"))
-
         elif re.search(r"(^|\s)TS(\s|$)", section):
             section_poly = extract_condition_polygon(section)
             for zone_name, zone_poly in ZONES.items():
@@ -271,11 +252,7 @@ def decision_for_zone(events):
     elif turb_mod:
         score += 30
 
-    if score >= 60:
-        decision = "MARGINAL"
-    else:
-        decision = "GO"
-
+    decision = "MARGINAL" if score >= 60 else "GO"
     return decision, vis, base, ts_flag, turb_sev, turb_mod
 
 # -------------------------------------------------
@@ -294,7 +271,6 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
         with cols[i]:
             st.markdown(f"### {z}")
-
             if decision == "NO-GO":
                 st.error("🔴 NO-GO")
             elif decision == "MARGINAL":
@@ -327,6 +303,14 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         ax.fill(x, y, alpha=0.25, color=color_map[results[zone_name][0]])
         ax.plot(x, y)
 
+    # Ajuste dinâmico correto
+    minx, miny, maxx, maxy = FIR_POLYGON.bounds
+    margin = 0.3
+    ax.set_xlim(minx - margin, maxx + margin)
+    ax.set_ylim(miny - margin, maxy + margin)
+    ax.set_aspect('equal', adjustable='box')
+
+    # Cidades
     cities = {
         "Bragança": (41.806, -6.756),
         "Viana do Castelo": (41.693, -8.832),
@@ -351,14 +335,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     for name, (lat, lon) in cities.items():
         ax.plot(lon, lat, "ko", markersize=4)
         ax.text(lon + 0.05, lat, name, fontsize=8, va="center")
-# Ajustar limites ao polígono real da FIR
-minx, miny, maxx, maxy = FIR_POLYGON.bounds
 
-ax.set_xlim(minx - 0.3, maxx + 0.3)
-ax.set_ylim(miny - 0.3, maxy + 0.3)
-
-# Corrigir proporção geográfica
-ax.set_aspect('equal', adjustable='box'))
     ax.set_xlabel("Longitude (°W)")
     ax.set_ylabel("Latitude (°N)")
     ax.grid(True, linestyle="--", alpha=0.4)
@@ -372,5 +349,4 @@ ax.set_aspect('equal', adjustable='box'))
     ])
 
     st.pyplot(fig)
-
-    st.caption("Motor cartográfico v4.51 – Versão Estável Auditada")
+    st.caption("Motor cartográfico v4.52 – Estável e Auditado")
