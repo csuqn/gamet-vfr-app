@@ -351,9 +351,14 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     for name, (lat, lon) in cities.items():
         ax.plot(lon, lat, "ko", markersize=4)
         ax.text(lon + 0.05, lat, name, fontsize=8, va="center")
+# Ajustar limites ao polígono real da FIR
+minx, miny, maxx, maxy = FIR_POLYGON.bounds
 
-    ax.set_xlim(LON_MIN, LON_MAX)
-    ax.set_ylim(LAT_MIN, LAT_MAX)
+ax.set_xlim(minx - 0.3, maxx + 0.3)
+ax.set_ylim(miny - 0.3, maxy + 0.3)
+
+# Corrigir proporção geográfica
+ax.set_aspect('equal', adjustable='box'))
     ax.set_xlabel("Longitude (°W)")
     ax.set_ylabel("Latitude (°N)")
     ax.grid(True, linestyle="--", alpha=0.4)
