@@ -10,7 +10,7 @@ from shapely.ops import unary_union
 # CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v8.00")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v8.10")
 
 # -------------------------------------------------
 # INPUT
@@ -21,12 +21,12 @@ gamet_text = st.text_area(
 )
 
 # -------------------------------------------------
-# SECTORES UPPER (fronteira ajustada manualmente)
+# SECTORES UPPER (ajuste manual estável)
 # -------------------------------------------------
 
 SECTOR_NORTE = Polygon([
     (-8.843611, 41.867500),
-    (-7.100000, 41.860000),   # ajuste para garantir Bragança dentro
+    (-7.100000, 41.860000),
     (-6.621944, 41.700556),
     (-6.818333, 40.399444),
     (-8.016667, 39.383333),
@@ -163,7 +163,7 @@ def extract_condition_polygon(text):
     return FIR_POLYGON if not geo_found else condition_poly
 
 # -------------------------------------------------
-# PARSER COMPLETO (4.41)
+# PARSER COMPLETO
 # -------------------------------------------------
 
 def parse_gamet(text):
@@ -272,3 +272,79 @@ def decision_for_zone(events):
     decision = "MARGINAL" if score >= 60 else "GO"
 
     return decision, vis, base, ts_flag, turb_sev, turb_mod
+
+# -------------------------------------------------
+# EXECUÇÃO + BRIEFING + MAPA
+# -------------------------------------------------
+
+if st.button("🔍 Analisar GAMET") and gamet_text.strip():
+
+    zone_data = parse_gamet(gamet_text)
+    results = {z: decision_for_zone(zone_data[z]) for z in ZONES}
+
+    st.subheader("📋 Briefing Detalhado")
+
+    with st.expander("ℹ️ Legenda do Briefing"):
+        st.markdown("""
+**🔴 NO-GO** – Condições abaixo dos mínimos VFR definidos  
+**⚠️ MARGINAL** – Condições próximas dos limites operacionais  
+**✅ GO** – Condições favoráveis à operação VFR  
+""")
+
+    cols = st.columns(3)
+
+    for i, z in enumerate(ZONES):
+        decision, vis, base, ts_flag, turb_sev, turb_mod = results[z]
+
+        with cols[i]:
+            st.markdown(f"### {z}")
+
+            if decision == "NO-GO":
+                st.error("🔴 NO-GO")
+            elif decision == "MARGINAL":
+                st.warning("⚠️ MARGINAL")
+            else:
+                st.success("✅ GO")
+
+            st.write(f"👁️ {vis} m" if vis is not None else "👁️ —")
+            st.write(f"☁️ {base} ft AGL" if base is not None else "☁️ —")
+            st.write(f"⛈️ {'Sim' if ts_flag else 'Não'}")
+
+            if turb_sev:
+                st.write("🌪️ Turbulência Severa")
+            elif turb_mod:
+                st.write("🌬️ Turbulência Moderada")
+            else:
+                st.write("🌬️ Turbulência Não Significativa")
+
+    st.divider()
+    st.subheader("🌍 Mapa VFR")
+
+    fig, ax = plt.subplots(figsize=(7, 10))
+    color_map = {"GO": "green", "MARGINAL": "orange", "NO-GO": "red"}
+
+    for zone_name, poly in ZONES.items():
+        geoms = [poly] if poly.geom_type == "Polygon" else list(poly.geoms)
+        for geom in geoms:
+            x, y = geom.exterior.xy
+            ax.fill(x, y, alpha=0.25, color=color_map[results[zone_name][0]])
+            ax.plot(x, y)
+
+    for name, (lat, lon) in CITIES.items():
+        ax.plot(lon, lat, "ko", markersize=4)
+        ax.text(lon + 0.05, lat, name, fontsize=8)
+
+    ax.set_xlim(FIR_MINX - 0.3, FIR_MAXX + 0.3)
+    ax.set_ylim(FIR_MINY - 0.3, FIR_MAXY + 0.3)
+    ax.set_aspect("equal", adjustable="box")
+    ax.grid(True, linestyle="--", alpha=0.4)
+
+    ax.legend(handles=[
+        Patch(facecolor="green", alpha=0.25, label="GO"),
+        Patch(facecolor="orange", alpha=0.25, label="MARGINAL"),
+        Patch(facecolor="red", alpha=0.25, label="NO-GO"),
+        Line2D([0], [0], marker='o', color='black',
+               linestyle='None', label='Cidade')
+    ])
+
+    st.pyplot(fig)
