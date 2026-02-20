@@ -10,7 +10,7 @@ from shapely.ops import unary_union
 # CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v5.10")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v6.40")
 
 # -------------------------------------------------
 # INPUT
@@ -21,46 +21,46 @@ gamet_text = st.text_area(
 )
 
 # -------------------------------------------------
-# SECTORES LOWER (AIP ENR 2.1)
+# SECTORES UPPER (fronteira simplificada reta)
 # -------------------------------------------------
-SECTOR_NORTE_LOWER = Polygon([
-    (-8.83750, 41.88556),
-    (-6.81833, 40.39944),
-    (-8.01667, 39.38333),
-    (-10.00000, 38.90000),
-    (-9.78472, 39.34861),
-    (-9.44250, 40.19972),
-    (-9.36806, 40.38222),
-    (-9.25139, 40.64889),
-    (-9.18639, 40.82778),
+
+SECTOR_NORTE = Polygon([
+    (-8.843611, 41.867500),
+    (-6.621944, 41.700556),
+    (-6.818333, 40.399444),
+    (-8.016667, 39.383333),
+    (-10.000000, 38.900000),
+    (-9.784722, 39.348611),
+    (-9.442500, 40.199722),
+    (-9.368056, 40.382222),
+    (-9.250000, 40.648889),
+    (-9.186389, 40.827778),
 ]).buffer(0)
 
-SECTOR_CENTRO_LOWER = Polygon([
-    (-6.81833, 40.39944),
-    (-7.20639, 37.99917),
-    (-9.00000, 38.00000),
-    (-9.20000, 38.00000),
-    (-9.46667, 38.00000),
-    (-10.00000, 38.00000),
-    (-10.00000, 38.90000),
-    (-8.01667, 39.38333),
+SECTOR_CENTRO = Polygon([
+    (-6.818333, 40.399444),
+    (-7.230000, 37.999444),
+    (-9.000000, 38.000000),
+    (-9.200000, 38.000000),
+    (-9.466667, 38.000000),
+    (-10.000000, 38.000000),
+    (-10.000000, 38.900000),
+    (-8.016667, 39.383333),
 ]).buffer(0)
 
-SECTOR_SUL_LOWER = Polygon([
-    (-7.20639, 37.99917),
-    (-7.38833, 37.12500),
-    (-7.38639, 36.67111),
-    (-7.38333, 35.96667),
-    (-10.73333, 35.96667),
-    (-9.46667, 38.00000),
-    (-9.20000, 38.00000),
-    (-9.00000, 38.00000),
+SECTOR_SUL = Polygon([
+    (-7.230000, 37.999444),
+    (-7.383333, 35.966667),
+    (-10.733333, 35.966667),
+    (-9.466667, 38.000000),
+    (-9.200000, 38.000000),
+    (-9.000000, 38.000000),
 ]).buffer(0)
 
 ZONES = {
-    "SECTOR NORTE": SECTOR_NORTE_LOWER,
-    "SECTOR CENTRO": SECTOR_CENTRO_LOWER,
-    "SECTOR SUL": SECTOR_SUL_LOWER,
+    "SECTOR NORTE": SECTOR_NORTE,
+    "SECTOR CENTRO": SECTOR_CENTRO,
+    "SECTOR SUL": SECTOR_SUL,
 }
 
 FIR_POLYGON = unary_union(list(ZONES.values()))
@@ -131,13 +131,10 @@ def extract_condition_polygon(text):
             box(FIR_MINX, FIR_MINY, lon, FIR_MAXY)
         )
 
-    if not geo_found:
-        return FIR_POLYGON
-
-    return condition_poly
+    return FIR_POLYGON if not geo_found else condition_poly
 
 # -------------------------------------------------
-# PARSER (INALTERADO)
+# PARSER COMPLETO (4.41)
 # -------------------------------------------------
 def parse_gamet(text):
 
@@ -148,41 +145,30 @@ def parse_gamet(text):
     for section in sections:
 
         if section.startswith("VIS:") or section.startswith("SFC VIS:"):
-
             section_poly = extract_condition_polygon(section)
-
             for zone_name, zone_poly in ZONES.items():
                 if not zone_poly.intersects(section_poly):
                     continue
-
                 ranges = re.findall(r"(\d{4})-(\d{4})M", section)
                 singles = re.findall(r"\b(\d{4})M\b", section)
-
                 used = set()
                 for low, _ in ranges:
                     used.add(low)
                     zone_data[zone_name].append(("VIS", int(low)))
-
                 for val in singles:
                     if val not in used:
                         zone_data[zone_name].append(("VIS", int(val)))
 
         if section.startswith("CLD:") or section.startswith("SIG CLD:"):
-
             cld_body = section.split(":", 1)[1]
             blocks = re.split(r"\s(?=\d{2}/\d{2})", cld_body)
-
             for block in blocks:
-
                 block_poly = extract_condition_polygon(block)
-
                 for zone_name, zone_poly in ZONES.items():
                     if not zone_poly.intersects(block_poly):
                         continue
-
                     for match in re.findall(r"\b(\d{3})-\d{3}(?:/\d{3})?HFT AGL", block):
                         zone_data[zone_name].append(("BASE", int(match) * 100))
-
                     for match in re.findall(r"\b(\d{3})-\d{3}(?:/\d{3})?HFT AMSL", block):
                         base_amsl = int(match) * 100
                         agl_est = base_amsl - ZONE_ELEVATION[zone_name]
@@ -190,13 +176,10 @@ def parse_gamet(text):
                             zone_data[zone_name].append(("BASE", agl_est))
 
         if section.startswith("TURB:"):
-
             section_poly = extract_condition_polygon(section)
-
             for zone_name, zone_poly in ZONES.items():
                 if not zone_poly.intersects(section_poly):
                     continue
-
                 if "SEV" in section:
                     zone_data[zone_name].append(("TURB", "SEV"))
                 elif "MOD" in section:
@@ -207,19 +190,16 @@ def parse_gamet(text):
             for zone_name, zone_poly in ZONES.items():
                 if zone_poly.intersects(section_poly):
                     zone_data[zone_name].append(("TS", "ISOL"))
-
         elif re.search(r"\bOCNL TS\b", section):
             section_poly = extract_condition_polygon(section)
             for zone_name, zone_poly in ZONES.items():
                 if zone_poly.intersects(section_poly):
                     zone_data[zone_name].append(("TS", "OCNL"))
-
         elif re.search(r"\bFRQ TS\b", section):
             section_poly = extract_condition_polygon(section)
             for zone_name, zone_poly in ZONES.items():
                 if zone_poly.intersects(section_poly):
                     zone_data[zone_name].append(("TS", "FRQ"))
-
         elif re.search(r"(^|\s)TS(\s|$)", section):
             section_poly = extract_condition_polygon(section)
             for zone_name, zone_poly in ZONES.items():
@@ -229,7 +209,7 @@ def parse_gamet(text):
     return zone_data
 
 # -------------------------------------------------
-# DECISÃO (INALTERADO)
+# DECISÃO COMPLETA (4.41)
 # -------------------------------------------------
 def decision_for_zone(events):
 
@@ -258,23 +238,26 @@ def decision_for_zone(events):
     elif turb_mod:
         score += 30
 
-    if score >= 60:
-        decision = "MARGINAL"
-    else:
-        decision = "GO"
+    decision = "MARGINAL" if score >= 60 else "GO"
 
     return decision, vis, base, ts_flag, turb_sev, turb_mod
 
 # -------------------------------------------------
-# EXECUÇÃO COMPLETA (BRIEFING + MAPA + CIDADES)
+# EXECUÇÃO (Briefing + Mapa + Cidades)
 # -------------------------------------------------
 if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     zone_data = parse_gamet(gamet_text)
     results = {z: decision_for_zone(zone_data[z]) for z in ZONES}
 
-    # ---------------- BRIEFING ----------------
     st.subheader("📋 Briefing Detalhado")
+
+    with st.expander("ℹ️ Legenda do Briefing"):
+        st.markdown("""
+**🔴 NO-GO** – Condições abaixo dos mínimos VFR definidos  
+**⚠️ MARGINAL** – Condições próximas dos limites operacionais  
+**✅ GO** – Condições favoráveis à operação VFR  
+""")
 
     cols = st.columns(3)
 
@@ -302,32 +285,24 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
             else:
                 st.write("🌬️ Turbulência Não Significativa")
 
-    # ---------------- MAPA ----------------
     st.divider()
-    st.subheader("🌍 Mapa VFR – Sectores LOWER Oficiais")
+    st.subheader("🌍 Mapa VFR – Sectores UPPER")
 
     fig, ax = plt.subplots(figsize=(7, 10))
     color_map = {"GO": "green", "MARGINAL": "orange", "NO-GO": "red"}
 
     for zone_name, poly in ZONES.items():
-
-        if poly.geom_type == "Polygon":
-            geoms = [poly]
-        else:
-            geoms = list(poly.geoms)
-
+        geoms = [poly] if poly.geom_type == "Polygon" else list(poly.geoms)
         for geom in geoms:
             x, y = geom.exterior.xy
             ax.fill(x, y, alpha=0.25, color=color_map[results[zone_name][0]])
             ax.plot(x, y)
 
-    # Ajuste viewport
     margin = 0.3
     ax.set_xlim(FIR_MINX - margin, FIR_MAXX + margin)
     ax.set_ylim(FIR_MINY - margin, FIR_MAXY + margin)
     ax.set_aspect('equal', adjustable='box')
 
-    # CIDADES
     cities = {
         "Bragança": (41.806, -6.756),
         "Viana do Castelo": (41.693, -8.832),
@@ -353,8 +328,6 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         ax.plot(lon, lat, "ko", markersize=4)
         ax.text(lon + 0.05, lat, name, fontsize=8, va="center")
 
-    ax.set_xlabel("Longitude (°W)")
-    ax.set_ylabel("Latitude (°N)")
     ax.grid(True, linestyle="--", alpha=0.4)
 
     ax.legend(handles=[
