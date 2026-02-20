@@ -71,7 +71,7 @@ ZONES = {
 }
 
 # União real dos sectores = FIR operacional
-FIR_POLYGON = unary_union(ZONES.values())
+FIR_POLYGON = unary_union(list(ZONES.values()))
 
 ZONE_ELEVATION = {
     "SECTOR NORTE": 1700,
