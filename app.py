@@ -10,7 +10,7 @@ from shapely.ops import unary_union
 # CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v6.40")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v8.00")
 
 # -------------------------------------------------
 # INPUT
@@ -21,12 +21,12 @@ gamet_text = st.text_area(
 )
 
 # -------------------------------------------------
-# SECTORES UPPER (fronteira simplificada reta)
+# SECTORES UPPER (fronteira ajustada manualmente)
 # -------------------------------------------------
 
 SECTOR_NORTE = Polygon([
     (-8.843611, 41.867500),
-    (-7.000000, 41.860000),   # ponto intermédio para elevar fronteira
+    (-7.100000, 41.860000),   # ajuste para garantir Bragança dentro
     (-6.621944, 41.700556),
     (-6.818333, 40.399444),
     (-8.016667, 39.383333),
@@ -74,8 +74,34 @@ ZONE_ELEVATION = {
 }
 
 # -------------------------------------------------
+# CIDADES
+# -------------------------------------------------
+
+CITIES = {
+    "Bragança": (41.806, -6.756),
+    "Viana do Castelo": (41.693, -8.832),
+    "Braga": (41.545, -8.426),
+    "Vila Real": (41.300, -7.744),
+    "Porto": (41.149, -8.610),
+    "Viseu": (40.661, -7.909),
+    "Aveiro": (40.640, -8.653),
+    "Guarda": (40.537, -7.267),
+    "Coimbra": (40.203, -8.410),
+    "Leiria": (39.744, -8.807),
+    "Castelo Branco": (39.823, -7.493),
+    "Santarém": (39.236, -8.686),
+    "Portalegre": (39.292, -7.428),
+    "Lisboa": (38.722, -9.139),
+    "Setúbal": (38.524, -8.888),
+    "Évora": (38.571, -7.913),
+    "Beja": (38.015, -7.863),
+    "Faro": (37.019, -7.930),
+}
+
+# -------------------------------------------------
 # NORMALIZAÇÃO
 # -------------------------------------------------
+
 def normalize_text(text):
     text = text.upper()
     text = text.replace("0F", "OF")
@@ -86,6 +112,7 @@ def normalize_text(text):
 # -------------------------------------------------
 # SPLIT
 # -------------------------------------------------
+
 def split_into_sections(text):
     pattern = r"(SFC VIS:|VIS:|SIGWX:|SIG CLD:|CLD:|TURB:|ICE:|MT OBSC:|MTW:)"
     parts = re.split(pattern, text)
@@ -99,6 +126,7 @@ def split_into_sections(text):
 # -------------------------------------------------
 # INTERSECÇÃO
 # -------------------------------------------------
+
 def extract_condition_polygon(text):
 
     condition_poly = FIR_POLYGON
@@ -137,6 +165,7 @@ def extract_condition_polygon(text):
 # -------------------------------------------------
 # PARSER COMPLETO (4.41)
 # -------------------------------------------------
+
 def parse_gamet(text):
 
     text = normalize_text(text)
@@ -210,8 +239,9 @@ def parse_gamet(text):
     return zone_data
 
 # -------------------------------------------------
-# DECISÃO COMPLETA (4.41)
+# DECISÃO
 # -------------------------------------------------
+
 def decision_for_zone(events):
 
     vis = min([v for t, v in events if t == "VIS"], default=None)
@@ -242,101 +272,3 @@ def decision_for_zone(events):
     decision = "MARGINAL" if score >= 60 else "GO"
 
     return decision, vis, base, ts_flag, turb_sev, turb_mod
-
-# -------------------------------------------------
-# EXECUÇÃO (Briefing + Mapa + Cidades)
-# -------------------------------------------------
-if st.button("🔍 Analisar GAMET") and gamet_text.strip():
-
-    zone_data = parse_gamet(gamet_text)
-    results = {z: decision_for_zone(zone_data[z]) for z in ZONES}
-
-    st.subheader("📋 Briefing Detalhado")
-
-    with st.expander("ℹ️ Legenda do Briefing"):
-        st.markdown("""
-**🔴 NO-GO** – Condições abaixo dos mínimos VFR definidos  
-**⚠️ MARGINAL** – Condições próximas dos limites operacionais  
-**✅ GO** – Condições favoráveis à operação VFR  
-""")
-
-    cols = st.columns(3)
-
-    for i, z in enumerate(ZONES):
-        decision, vis, base, ts_flag, turb_sev, turb_mod = results[z]
-
-        with cols[i]:
-            st.markdown(f"### {z}")
-
-            if decision == "NO-GO":
-                st.error("🔴 NO-GO")
-            elif decision == "MARGINAL":
-                st.warning("⚠️ MARGINAL")
-            else:
-                st.success("✅ GO")
-
-            st.write(f"👁️ {vis} m" if vis is not None else "👁️ —")
-            st.write(f"☁️ {base} ft AGL" if base is not None else "☁️ —")
-            st.write(f"⛈️ {'Sim' if ts_flag else 'Não'}")
-
-            if turb_sev:
-                st.write("🌪️ Turbulência Severa")
-            elif turb_mod:
-                st.write("🌬️ Turbulência Moderada")
-            else:
-                st.write("🌬️ Turbulência Não Significativa")
-
-    st.divider()
-    st.subheader("🌍 Mapa VFR – Sectores UPPER")
-
-    fig, ax = plt.subplots(figsize=(7, 10))
-    color_map = {"GO": "green", "MARGINAL": "orange", "NO-GO": "red"}
-
-    for zone_name, poly in ZONES.items():
-        geoms = [poly] if poly.geom_type == "Polygon" else list(poly.geoms)
-        for geom in geoms:
-            x, y = geom.exterior.xy
-            ax.fill(x, y, alpha=0.25, color=color_map[results[zone_name][0]])
-            ax.plot(x, y)
-
-    margin = 0.3
-    ax.set_xlim(FIR_MINX - margin, FIR_MAXX + margin)
-    ax.set_ylim(FIR_MINY - margin, FIR_MAXY + margin)
-    ax.set_aspect('equal', adjustable='box')
-
-    cities = {
-        "Bragança": (41.806, -6.756),
-        "Viana do Castelo": (41.693, -8.832),
-        "Braga": (41.545, -8.426),
-        "Vila Real": (41.300, -7.744),
-        "Porto": (41.149, -8.610),
-        "Viseu": (40.661, -7.909),
-        "Aveiro": (40.640, -8.653),
-        "Guarda": (40.537, -7.267),
-        "Coimbra": (40.203, -8.410),
-        "Leiria": (39.744, -8.807),
-        "Castelo Branco": (39.823, -7.493),
-        "Santarém": (39.236, -8.686),
-        "Portalegre": (39.292, -7.428),
-        "Lisboa": (38.722, -9.139),
-        "Setúbal": (38.524, -8.888),
-        "Évora": (38.571, -7.913),
-        "Beja": (38.015, -7.863),
-        "Faro": (37.019, -7.930),
-    }
-
-    for name, (lat, lon) in cities.items():
-        ax.plot(lon, lat, "ko", markersize=4)
-        ax.text(lon + 0.05, lat, name, fontsize=8, va="center")
-
-    ax.grid(True, linestyle="--", alpha=0.4)
-
-    ax.legend(handles=[
-        Patch(facecolor="green", alpha=0.25, label="GO"),
-        Patch(facecolor="orange", alpha=0.25, label="MARGINAL"),
-        Patch(facecolor="red", alpha=0.25, label="NO-GO"),
-        Line2D([0], [0], marker='o', color='black',
-               linestyle='None', label='Cidade')
-    ])
-
-    st.pyplot(fig)
