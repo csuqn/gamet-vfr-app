@@ -3,59 +3,41 @@ import re
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
-from shapely.geometry import box, Polygon
+from shapely.geometry import box, Polygon, MultiPolygon
 from shapely.ops import unary_union
+from dataclasses import dataclass
 
 # -------------------------------------------------
 # CONFIG
 # -------------------------------------------------
-st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v8.20")
 
-# -------------------------------------------------
-# INPUT
-# -------------------------------------------------
-gamet_text = st.text_area(
-    "Cole aqui o texto completo do GAMET (LPPC)",
-    height=260
-)
+st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v10.2 FINAL")
+
+gamet_text = st.text_area("Cole aqui o texto completo do GAMET (LPPC)", height=300)
 
 # -------------------------------------------------
 # SECTORES
 # -------------------------------------------------
 
 SECTOR_NORTE = Polygon([
-    (-8.843611, 41.867500),
-    (-6.850000, 41.900000),
-    (-6.621944, 41.700556),
-    (-6.818333, 40.399444),
-    (-8.016667, 39.383333),
-    (-10.000000, 38.900000),
-    (-9.784722, 39.348611),
-    (-9.442500, 40.199722),
-    (-9.368056, 40.382222),
-    (-9.250000, 40.648889),
+    (-8.843611, 41.867500), (-6.850000, 41.900000),
+    (-6.621944, 41.700556), (-6.818333, 40.399444),
+    (-8.016667, 39.383333), (-10.000000, 38.900000),
+    (-9.784722, 39.348611), (-9.442500, 40.199722),
+    (-9.368056, 40.382222), (-9.250000, 40.648889),
     (-9.186389, 40.827778),
 ]).buffer(0)
 
 SECTOR_CENTRO = Polygon([
-    (-6.818333, 40.399444),
-    (-7.230000, 37.999444),
-    (-9.000000, 38.000000),
-    (-9.200000, 38.000000),
-    (-9.466667, 38.000000),
-    (-10.000000, 38.000000),
-    (-10.000000, 38.900000),
-    (-8.016667, 39.383333),
+    (-6.818333, 40.399444), (-7.230000, 37.999444),
+    (-9.000000, 38.000000), (-10.000000, 38.000000),
+    (-10.000000, 38.900000), (-8.016667, 39.383333),
 ]).buffer(0)
 
 SECTOR_SUL = Polygon([
-    (-7.230000, 37.999444),
-    (-7.383333, 35.966667),
-    (-10.733333, 35.966667),
-    (-9.466667, 38.000000),
-    (-9.200000, 38.000000),
-    (-9.000000, 38.000000),
+    (-7.230000, 37.999444), (-7.383333, 35.966667),
+    (-10.733333, 35.966667), (-9.000000, 38.000000),
 ]).buffer(0)
 
 ZONES = {
@@ -99,248 +81,236 @@ CITIES = {
 }
 
 # -------------------------------------------------
-# NORMALIZAÇÃO
+# DATA MODEL
 # -------------------------------------------------
 
-def normalize_text(text):
+@dataclass
+class MetBlock:
+    phenomenon: str
+    polygon: object
+    value: object
+
+# -------------------------------------------------
+# NORMALIZE
+# -------------------------------------------------
+
+def normalize(text):
     text = text.upper()
-    text = text.replace("0F", "OF")
-    text = text.replace("O F", "OF")
+    text = text.replace("–", "-")
     text = re.sub(r"\s+", " ", text)
     return text
 
 # -------------------------------------------------
-# SPLIT
+# GEO
 # -------------------------------------------------
 
-def split_into_sections(text):
-    pattern = r"(SFC VIS:|VIS:|SIGWX:|SIG CLD:|CLD:|TURB:|ICE:|MT OBSC:|MTW:)"
-    parts = re.split(pattern, text)
-    sections = []
-    for i in range(1, len(parts), 2):
-        marker = parts[i]
-        content = parts[i + 1] if i + 1 < len(parts) else ""
-        sections.append((marker + content).strip())
-    return sections
-
-# -------------------------------------------------
-# INTERSECÇÃO GEOGRÁFICA
-# -------------------------------------------------
-
-def extract_condition_polygon(text):
-
-    condition_poly = FIR_POLYGON
+def extract_polygon(line):
+    poly = FIR_POLYGON
     geo_found = False
 
-    # BTN Nxxxx AND Nxxxx
-    btn_match = re.search(r"BTN N(\d{2})(\d{2}) AND N(\d{2})(\d{2})", text)
-    if btn_match:
+    for m in re.findall(r"BTN N(\d{2})(\d{2}) AND N(\d{2})(\d{2})", line):
         geo_found = True
-        lat1 = int(btn_match.group(1)) + int(btn_match.group(2)) / 60
-        lat2 = int(btn_match.group(3)) + int(btn_match.group(4)) / 60
-        lat_min = min(lat1, lat2)
-        lat_max = max(lat1, lat2)
-        condition_poly = condition_poly.intersection(
-            box(FIR_MINX, lat_min, FIR_MAXX, lat_max)
-        )
+        lat1 = int(m[0]) + int(m[1])/60
+        lat2 = int(m[2]) + int(m[3])/60
+        poly = poly.intersection(box(FIR_MINX, min(lat1, lat2), FIR_MAXX, max(lat1, lat2)))
 
-    for match in re.findall(r"N OF N(\d{2})(\d{2})", text):
+    for m in re.findall(r"S OF N(\d{2})(\d{2})", line):
         geo_found = True
-        lat = int(match[0]) + int(match[1]) / 60
-        condition_poly = condition_poly.intersection(
-            box(FIR_MINX, lat, FIR_MAXX, FIR_MAXY)
-        )
+        lat = int(m[0]) + int(m[1])/60
+        poly = poly.intersection(box(FIR_MINX, FIR_MINY, FIR_MAXX, lat))
 
-    for match in re.findall(r"S OF N(\d{2})(\d{2})", text):
+    for m in re.findall(r"N OF N(\d{2})(\d{2})", line):
         geo_found = True
-        lat = int(match[0]) + int(match[1]) / 60
-        condition_poly = condition_poly.intersection(
-            box(FIR_MINX, FIR_MINY, FIR_MAXX, lat)
-        )
+        lat = int(m[0]) + int(m[1])/60
+        poly = poly.intersection(box(FIR_MINX, lat, FIR_MAXX, FIR_MAXY))
 
-    for match in re.findall(r"E OF W(\d{2})(\d{2})", text):
+    for m in re.findall(r"W OF W(\d{2})(\d{2})", line):
         geo_found = True
-        lon = -(int(match[0]) + int(match[1]) / 60)
-        condition_poly = condition_poly.intersection(
-            box(lon, FIR_MINY, FIR_MAXX, FIR_MAXY)
-        )
+        lon = -(int(m[0]) + int(m[1])/60)
+        poly = poly.intersection(box(FIR_MINX, FIR_MINY, lon, FIR_MAXY))
 
-    for match in re.findall(r"W OF W(\d{2})(\d{2})", text):
+    for m in re.findall(r"E OF W(\d{2})(\d{2})", line):
         geo_found = True
-        lon = -(int(match[0]) + int(match[1]) / 60)
-        condition_poly = condition_poly.intersection(
-            box(FIR_MINX, FIR_MINY, lon, FIR_MAXY)
-        )
+        lon = -(int(m[0]) + int(m[1])/60)
+        poly = poly.intersection(box(lon, FIR_MINY, FIR_MAXX, FIR_MAXY))
 
-    return FIR_POLYGON if not geo_found else condition_poly
+    if not geo_found:
+        return FIR_POLYGON
+
+    return poly if not poly.is_empty else None
 
 # -------------------------------------------------
-# PARSER
+# FSM PARSER
 # -------------------------------------------------
 
 def parse_gamet(text):
 
-    text = normalize_text(text)
-    sections = split_into_sections(text)
+    text = normalize(text)
+    lines = text.split(" ")
+    text = " ".join(lines)
+    raw_lines = re.split(r"(?=SFC VIS|VIS:|SIG CLD|CLD:|SIGWX|TURB|ICE|SECN)", text)
+
+    state = "IDLE"
+    blocks = []
+
+    for chunk in raw_lines:
+
+        chunk = chunk.strip()
+
+        if chunk.startswith("SECN"):
+            state = "IDLE"
+            continue
+
+        if chunk.startswith("SFC VIS") or chunk.startswith("VIS:"):
+            state = "VIS"
+            chunk = chunk.split(":",1)[1] if ":" in chunk else ""
+        elif chunk.startswith("SIG CLD") or chunk.startswith("CLD:"):
+            state = "CLD"
+            chunk = chunk.split(":",1)[1] if ":" in chunk else ""
+        elif chunk.startswith("SIGWX"):
+            state = "SIGWX"
+            chunk = chunk.split(":",1)[1] if ":" in chunk else ""
+        elif chunk.startswith("TURB"):
+            state = "TURB"
+            chunk = chunk.split(":",1)[1] if ":" in chunk else ""
+        elif chunk.startswith("ICE"):
+            state = "ICE"
+            chunk = chunk.split(":",1)[1] if ":" in chunk else ""
+
+        if not chunk or state == "IDLE":
+            continue
+
+        poly = extract_polygon(chunk)
+        if not poly:
+            continue
+
+        # VIS
+        if state == "VIS":
+            for m in re.finditer(r"\b(\d{3,4})\s*-\s*(\d{3,4})M\b", chunk):
+                blocks.append(MetBlock("VIS", poly, int(m.group(1))))
+            for m in re.finditer(r"\b(\d{3,4})M\b", chunk):
+                if not re.search(rf"{m.group(1)}\s*-\s*\d{{3,4}}M", chunk):
+                    blocks.append(MetBlock("VIS", poly, int(m.group(1))))
+            if re.search(r"\b9999\b", chunk):
+                blocks.append(MetBlock("VIS", poly, 9999))
+            if "P6KM" in chunk:
+                blocks.append(MetBlock("VIS", poly, 6000))
+
+        # CLD
+        elif state == "CLD":
+            for m in re.finditer(r"\b(\d{3})\s*-\s*(\d{3})HFT AGL\b", chunk):
+                blocks.append(MetBlock("BASE_AGL", poly, int(m.group(1))*100))
+            for m in re.finditer(r"\b(\d{3})HFT AGL\b", chunk):
+                if not re.search(rf"{m.group(1)}\s*-\s*\d{{3}}HFT", chunk):
+                    blocks.append(MetBlock("BASE_AGL", poly, int(m.group(1))*100))
+            for m in re.finditer(r"\b(\d{3})\s*-\s*(\d{3})HFT AMSL\b", chunk):
+                blocks.append(MetBlock("BASE_AMSL", poly, int(m.group(1))*100))
+            for m in re.finditer(r"\b(\d{3})HFT AMSL\b", chunk):
+                if not re.search(rf"{m.group(1)}\s*-\s*\d{{3}}HFT AMSL", chunk):
+                    blocks.append(MetBlock("BASE_AMSL", poly, int(m.group(1))*100))
+
+        # SIGWX
+        elif state == "SIGWX":
+            if "FRQ TS" in chunk:
+                blocks.append(MetBlock("TS", poly, "FRQ"))
+            elif "OCNL TS" in chunk:
+                blocks.append(MetBlock("TS", poly, "OCNL"))
+            elif "ISOL TS" in chunk:
+                blocks.append(MetBlock("TS", poly, "ISOL"))
+            elif re.search(r"\bTS\b", chunk):
+                blocks.append(MetBlock("TS", poly, "GEN"))
+
+        # TURB
+        elif state == "TURB":
+            if "SEV" in chunk:
+                blocks.append(MetBlock("TURB", poly, "SEV"))
+            elif "MOD" in chunk:
+                blocks.append(MetBlock("TURB", poly, "MOD"))
+
+        # ICE
+        elif state == "ICE":
+            if "SEV" in chunk:
+                blocks.append(MetBlock("ICE", poly, "SEV"))
+            elif "MOD" in chunk:
+                blocks.append(MetBlock("ICE", poly, "MOD"))
+
+    return blocks
+
+# -------------------------------------------------
+# BUILD + DECISION
+# -------------------------------------------------
+
+def build_zone_data(blocks):
     zone_data = {z: [] for z in ZONES}
-
-    for section in sections:
-
-        if section.startswith("VIS:") or section.startswith("SFC VIS:"):
-            section_poly = extract_condition_polygon(section)
-            for zone_name, zone_poly in ZONES.items():
-                if not zone_poly.intersects(section_poly):
-                    continue
-                ranges = re.findall(r"(\d{4})-(\d{4})M", section)
-                singles = re.findall(r"\b(\d{4})M\b", section)
-                used = set()
-                for low, _ in ranges:
-                    used.add(low)
-                    zone_data[zone_name].append(("VIS", int(low)))
-                for val in singles:
-                    if val not in used:
-                        zone_data[zone_name].append(("VIS", int(val)))
-
-        if section.startswith("CLD:") or section.startswith("SIG CLD:"):
-            cld_body = section.split(":", 1)[1]
-            blocks = re.split(r"\s(?=\d{2}/\d{2})", cld_body)
-            for block in blocks:
-                block_poly = extract_condition_polygon(block)
-                for zone_name, zone_poly in ZONES.items():
-                    if not zone_poly.intersects(block_poly):
-                        continue
-                    for match in re.findall(r"\b(\d{3})-\d{3}(?:/\d{3})?HFT AGL", block):
-                        zone_data[zone_name].append(("BASE", int(match) * 100))
-                    for match in re.findall(r"\b(\d{3})-\d{3}(?:/\d{3})?HFT AMSL", block):
-                        base_amsl = int(match) * 100
-                        agl_est = base_amsl - ZONE_ELEVATION[zone_name]
-                        if agl_est > 0:
-                            zone_data[zone_name].append(("BASE", agl_est))
-
-        if section.startswith("TURB:"):
-            section_poly = extract_condition_polygon(section)
-            for zone_name, zone_poly in ZONES.items():
-                if not zone_poly.intersects(section_poly):
-                    continue
-                if "SEV" in section:
-                    zone_data[zone_name].append(("TURB", "SEV"))
-                elif "MOD" in section:
-                    zone_data[zone_name].append(("TURB", "MOD"))
-
-        if re.search(r"\bISOL TS\b", section):
-            section_poly = extract_condition_polygon(section)
-            for zone_name, zone_poly in ZONES.items():
-                if zone_poly.intersects(section_poly):
-                    zone_data[zone_name].append(("TS", "ISOL"))
-        elif re.search(r"\bOCNL TS\b", section):
-            section_poly = extract_condition_polygon(section)
-            for zone_name, zone_poly in ZONES.items():
-                if zone_poly.intersects(section_poly):
-                    zone_data[zone_name].append(("TS", "OCNL"))
-        elif re.search(r"\bFRQ TS\b", section):
-            section_poly = extract_condition_polygon(section)
-            for zone_name, zone_poly in ZONES.items():
-                if zone_poly.intersects(section_poly):
-                    zone_data[zone_name].append(("TS", "FRQ"))
-        elif re.search(r"(^|\s)TS(\s|$)", section):
-            section_poly = extract_condition_polygon(section)
-            for zone_name, zone_poly in ZONES.items():
-                if zone_poly.intersects(section_poly):
-                    zone_data[zone_name].append(("TS", "GEN"))
-
+    for block in blocks:
+        for zone_name, zone_poly in ZONES.items():
+            if zone_poly.intersects(block.polygon):
+                if block.phenomenon == "BASE_AMSL":
+                    agl = block.value - ZONE_ELEVATION[zone_name]
+                    agl = max(0, agl)
+                    zone_data[zone_name].append(("BASE", agl))
+                elif block.phenomenon == "BASE_AGL":
+                    zone_data[zone_name].append(("BASE", block.value))
+                else:
+                    zone_data[zone_name].append((block.phenomenon, block.value))
     return zone_data
 
-# -------------------------------------------------
-# DECISÃO
-# -------------------------------------------------
+def decision(events):
+    vis = min([v for t,v in events if t=="VIS"], default=None)
+    base = min([v for t,v in events if t=="BASE"], default=None)
 
-def decision_for_zone(events):
+    if vis is not None and vis < 1500:
+        return "NO-GO", vis, base
+    if base is not None and base < 300:
+        return "NO-GO", vis, base
+    if vis is not None and vis < 3000:
+        return "MARGINAL", vis, base
+    if base is not None and base < 500:
+        return "MARGINAL", vis, base
 
-    vis = min([v for t, v in events if t == "VIS"], default=None)
-    base = min([v for t, v in events if t == "BASE"], default=None)
-
-    ts_flag = any(t == "TS" for t, _ in events)
-    turb_sev = any(t == "TURB" and v == "SEV" for t, v in events)
-    turb_mod = any(t == "TURB" and v == "MOD" for t, v in events)
-
-    if vis is not None:
-        if vis < 1500:
-            return "NO-GO", vis, base, ts_flag, turb_sev, turb_mod
-        elif vis < 3000:
-            return "MARGINAL", vis, base, ts_flag, turb_sev, turb_mod
-
-    if base is not None:
-        if base < 300:
-            return "NO-GO", vis, base, ts_flag, turb_sev, turb_mod
-        elif base < 500:
-            return "MARGINAL", vis, base, ts_flag, turb_sev, turb_mod
-
-    score = 0
-    if turb_sev:
-        score += 45
-    elif turb_mod:
-        score += 30
-
-    decision = "MARGINAL" if score >= 60 else "GO"
-
-    return decision, vis, base, ts_flag, turb_sev, turb_mod
+    return "GO", vis, base
 
 # -------------------------------------------------
-# EXECUÇÃO
+# EXECUTION
 # -------------------------------------------------
 
 if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
-    zone_data = parse_gamet(gamet_text)
-    results = {z: decision_for_zone(zone_data[z]) for z in ZONES}
+    blocks = parse_gamet(gamet_text)
+    zone_data = build_zone_data(blocks)
+    results = {z: decision(zone_data[z]) for z in ZONES}
 
-    st.subheader("📋 Briefing Detalhado")
-
+    st.subheader("📋 Briefing")
     cols = st.columns(3)
 
-    for i, z in enumerate(ZONES):
-        decision, vis, base, ts_flag, turb_sev, turb_mod = results[z]
-
+    for i,z in enumerate(ZONES):
+        dec, vis, base = results[z]
         with cols[i]:
             st.markdown(f"### {z}")
-
-            if decision == "NO-GO":
-                st.error("🔴 NO-GO")
-            elif decision == "MARGINAL":
-                st.warning("⚠️ MARGINAL")
-            else:
-                st.success("✅ GO")
-
+            if dec=="NO-GO": st.error("🔴 NO-GO")
+            elif dec=="MARGINAL": st.warning("⚠️ MARGINAL")
+            else: st.success("✅ GO")
             st.write(f"👁️ {vis} m" if vis is not None else "👁️ —")
             st.write(f"☁️ {base} ft AGL" if base is not None else "☁️ —")
-            st.write(f"⛈️ {'Sim' if ts_flag else 'Não'}")
 
-            if turb_sev:
-                st.write("🌪️ Turbulência Severa")
-            elif turb_mod:
-                st.write("🌬️ Turbulência Moderada")
-            else:
-                st.write("🌬️ Turbulência Não Significativa")
+    st.subheader("🌍 Mapa")
 
-    st.divider()
-    st.subheader("🌍 Mapa VFR")
-
-    fig, ax = plt.subplots(figsize=(7, 10))
-    color_map = {"GO": "green", "MARGINAL": "orange", "NO-GO": "red"}
+    fig, ax = plt.subplots(figsize=(7,10))
+    color_map = {"GO":"green","MARGINAL":"orange","NO-GO":"red"}
 
     for zone_name, poly in ZONES.items():
-        geoms = [poly] if poly.geom_type == "Polygon" else list(poly.geoms)
-        for geom in geoms:
-            x, y = geom.exterior.xy
-            ax.fill(x, y, alpha=0.25, color=color_map[results[zone_name][0]])
-            ax.plot(x, y)
+        geoms = [poly] if isinstance(poly, Polygon) else poly.geoms
+        for g in geoms:
+            x,y = g.exterior.xy
+            ax.fill(x,y,alpha=0.25,color=color_map[results[zone_name][0]])
+            ax.plot(x,y)
 
     for name, (lat, lon) in CITIES.items():
         ax.plot(lon, lat, "ko", markersize=4)
         ax.text(lon + 0.05, lat, name, fontsize=8)
 
-    ax.set_xlim(FIR_MINX - 0.3, FIR_MAXX + 0.3)
-    ax.set_ylim(FIR_MINY - 0.3, FIR_MAXY + 0.3)
+    ax.set_xlim(FIR_MINX-0.3, FIR_MAXX+0.3)
+    ax.set_ylim(FIR_MINY-0.3, FIR_MAXY+0.3)
     ax.set_aspect("equal", adjustable="box")
     ax.grid(True, linestyle="--", alpha=0.4)
 
