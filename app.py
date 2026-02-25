@@ -1,4 +1,3 @@
-
 import streamlit as st
 import re
 import matplotlib.pyplot as plt
@@ -13,7 +12,7 @@ from dataclasses import dataclass
 # -------------------------------------------------
 
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v10.4")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v10.5")
 
 gamet_text = st.text_area("Cole aqui o texto completo do GAMET (LPPC)", height=300)
 
@@ -146,12 +145,25 @@ def extract_polygon(line):
 def parse_gamet(text):
 
     text = normalize(text)
-    lines = [l.strip() for l in text.splitlines() if l.strip()]
+
+    raw_lines = text.splitlines()
+
+    if len(raw_lines) <= 1:
+        lines = re.split(
+            r"(?=SFC VIS|VIS:|SIG CLD|CLD:|SIGWX|TURB|ICE|SECN)",
+            text
+        )
+    else:
+        lines = [l.strip() for l in raw_lines if l.strip()]
 
     state = "IDLE"
     blocks = []
 
     for line in lines:
+
+        line = line.strip()
+        if not line:
+            continue
 
         if line.startswith("SECN"):
             state = "IDLE"
@@ -180,7 +192,6 @@ def parse_gamet(text):
         if not poly:
             continue
 
-        # VIS
         if state == "VIS":
             for m in re.finditer(r"\b(\d{3,4})\s*-\s*(\d{3,4})M\b", line):
                 blocks.append(MetBlock("VIS", poly, int(m.group(1))))
@@ -192,7 +203,6 @@ def parse_gamet(text):
             if "P6KM" in line:
                 blocks.append(MetBlock("VIS", poly, 6000))
 
-        # CLD
         elif state == "CLD":
 
             for m in re.finditer(r"\b(\d{3})\s*-\s*(\d{3})(?:/\d{3})?HFT AGL\b", line):
