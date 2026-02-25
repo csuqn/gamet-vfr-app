@@ -3,7 +3,7 @@ import re
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
-from shapely.geometry import box, Polygon, MultiPolygon
+from shapely.geometry import box, Polygon
 from shapely.ops import unary_union
 from dataclasses import dataclass
 
@@ -12,7 +12,7 @@ from dataclasses import dataclass
 # -------------------------------------------------
 
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v10.2 FINAL")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v10.3.1")
 
 gamet_text = st.text_area("Cole aqui o texto completo do GAMET (LPPC)", height=300)
 
@@ -97,11 +97,10 @@ class MetBlock:
 def normalize(text):
     text = text.upper()
     text = text.replace("–", "-")
-    text = re.sub(r"\s+", " ", text)
     return text
 
 # -------------------------------------------------
-# GEO
+# GEO EXTRACTION
 # -------------------------------------------------
 
 def extract_polygon(line):
@@ -146,92 +145,89 @@ def extract_polygon(line):
 def parse_gamet(text):
 
     text = normalize(text)
-    lines = text.split(" ")
-    text = " ".join(lines)
-    raw_lines = re.split(r"(?=SFC VIS|VIS:|SIG CLD|CLD:|SIGWX|TURB|ICE|SECN)", text)
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
 
     state = "IDLE"
     blocks = []
 
-    for chunk in raw_lines:
+    for line in lines:
 
-        chunk = chunk.strip()
-
-        if chunk.startswith("SECN"):
+        if line.startswith("SECN"):
             state = "IDLE"
             continue
 
-        if chunk.startswith("SFC VIS") or chunk.startswith("VIS:"):
+        if line.startswith("SFC VIS") or line.startswith("VIS:"):
             state = "VIS"
-            chunk = chunk.split(":",1)[1] if ":" in chunk else ""
-        elif chunk.startswith("SIG CLD") or chunk.startswith("CLD:"):
+            line = line.split(":",1)[1] if ":" in line else ""
+        elif line.startswith("SIG CLD") or line.startswith("CLD:"):
             state = "CLD"
-            chunk = chunk.split(":",1)[1] if ":" in chunk else ""
-        elif chunk.startswith("SIGWX"):
+            line = line.split(":",1)[1] if ":" in line else ""
+        elif line.startswith("SIGWX"):
             state = "SIGWX"
-            chunk = chunk.split(":",1)[1] if ":" in chunk else ""
-        elif chunk.startswith("TURB"):
+            line = line.split(":",1)[1] if ":" in line else ""
+        elif line.startswith("TURB"):
             state = "TURB"
-            chunk = chunk.split(":",1)[1] if ":" in chunk else ""
-        elif chunk.startswith("ICE"):
+            line = line.split(":",1)[1] if ":" in line else ""
+        elif line.startswith("ICE"):
             state = "ICE"
-            chunk = chunk.split(":",1)[1] if ":" in chunk else ""
+            line = line.split(":",1)[1] if ":" in line else ""
 
-        if not chunk or state == "IDLE":
+        if not line or state == "IDLE":
             continue
 
-        poly = extract_polygon(chunk)
+        poly = extract_polygon(line)
         if not poly:
             continue
 
         # VIS
         if state == "VIS":
-            for m in re.finditer(r"\b(\d{3,4})\s*-\s*(\d{3,4})M\b", chunk):
+            for m in re.finditer(r"\b(\d{3,4})\s*-\s*(\d{3,4})M\b", line):
                 blocks.append(MetBlock("VIS", poly, int(m.group(1))))
-            for m in re.finditer(r"\b(\d{3,4})M\b", chunk):
-                if not re.search(rf"{m.group(1)}\s*-\s*\d{{3,4}}M", chunk):
+            for m in re.finditer(r"\b(\d{3,4})M\b", line):
+                if not re.search(rf"{m.group(1)}\s*-\s*\d{{3,4}}M", line):
                     blocks.append(MetBlock("VIS", poly, int(m.group(1))))
-            if re.search(r"\b9999\b", chunk):
+            if re.search(r"\b9999\b", line):
                 blocks.append(MetBlock("VIS", poly, 9999))
-            if "P6KM" in chunk:
+            if "P6KM" in line:
                 blocks.append(MetBlock("VIS", poly, 6000))
 
         # CLD
         elif state == "CLD":
-            for m in re.finditer(r"\b(\d{3})\s*-\s*(\d{3})HFT AGL\b", chunk):
+
+            for m in re.finditer(r"\b(\d{3})\s*-\s*(\d{3})(?:/\d{3})?HFT AGL\b", line):
                 blocks.append(MetBlock("BASE_AGL", poly, int(m.group(1))*100))
-            for m in re.finditer(r"\b(\d{3})HFT AGL\b", chunk):
-                if not re.search(rf"{m.group(1)}\s*-\s*\d{{3}}HFT", chunk):
+
+            for m in re.finditer(r"\b(\d{3})HFT AGL\b", line):
+                if not re.search(rf"{m.group(1)}\s*-\s*\d{{3}}(?:/\d{{3}})?HFT AGL", line):
                     blocks.append(MetBlock("BASE_AGL", poly, int(m.group(1))*100))
-            for m in re.finditer(r"\b(\d{3})\s*-\s*(\d{3})HFT AMSL\b", chunk):
+
+            for m in re.finditer(r"\b(\d{3})\s*-\s*(\d{3})(?:/\d{3})?HFT AMSL\b", line):
                 blocks.append(MetBlock("BASE_AMSL", poly, int(m.group(1))*100))
-            for m in re.finditer(r"\b(\d{3})HFT AMSL\b", chunk):
-                if not re.search(rf"{m.group(1)}\s*-\s*\d{{3}}HFT AMSL", chunk):
+
+            for m in re.finditer(r"\b(\d{3})HFT AMSL\b", line):
+                if not re.search(rf"{m.group(1)}\s*-\s*\d{{3}}(?:/\d{{3}})?HFT AMSL", line):
                     blocks.append(MetBlock("BASE_AMSL", poly, int(m.group(1))*100))
 
-        # SIGWX
         elif state == "SIGWX":
-            if "FRQ TS" in chunk:
+            if "FRQ TS" in line:
                 blocks.append(MetBlock("TS", poly, "FRQ"))
-            elif "OCNL TS" in chunk:
+            elif "OCNL TS" in line:
                 blocks.append(MetBlock("TS", poly, "OCNL"))
-            elif "ISOL TS" in chunk:
+            elif "ISOL TS" in line:
                 blocks.append(MetBlock("TS", poly, "ISOL"))
-            elif re.search(r"\bTS\b", chunk):
+            elif re.search(r"\bTS\b", line):
                 blocks.append(MetBlock("TS", poly, "GEN"))
 
-        # TURB
         elif state == "TURB":
-            if "SEV" in chunk:
+            if "SEV" in line:
                 blocks.append(MetBlock("TURB", poly, "SEV"))
-            elif "MOD" in chunk:
+            elif "MOD" in line:
                 blocks.append(MetBlock("TURB", poly, "MOD"))
 
-        # ICE
         elif state == "ICE":
-            if "SEV" in chunk:
+            if "SEV" in line:
                 blocks.append(MetBlock("ICE", poly, "SEV"))
-            elif "MOD" in chunk:
+            elif "MOD" in line:
                 blocks.append(MetBlock("ICE", poly, "MOD"))
 
     return blocks
@@ -246,8 +242,7 @@ def build_zone_data(blocks):
         for zone_name, zone_poly in ZONES.items():
             if zone_poly.intersects(block.polygon):
                 if block.phenomenon == "BASE_AMSL":
-                    agl = block.value - ZONE_ELEVATION[zone_name]
-                    agl = max(0, agl)
+                    agl = max(0, block.value - ZONE_ELEVATION[zone_name])
                     zone_data[zone_name].append(("BASE", agl))
                 elif block.phenomenon == "BASE_AGL":
                     zone_data[zone_name].append(("BASE", block.value))
@@ -292,34 +287,3 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
             else: st.success("✅ GO")
             st.write(f"👁️ {vis} m" if vis is not None else "👁️ —")
             st.write(f"☁️ {base} ft AGL" if base is not None else "☁️ —")
-
-    st.subheader("🌍 Mapa")
-
-    fig, ax = plt.subplots(figsize=(7,10))
-    color_map = {"GO":"green","MARGINAL":"orange","NO-GO":"red"}
-
-    for zone_name, poly in ZONES.items():
-        geoms = [poly] if isinstance(poly, Polygon) else poly.geoms
-        for g in geoms:
-            x,y = g.exterior.xy
-            ax.fill(x,y,alpha=0.25,color=color_map[results[zone_name][0]])
-            ax.plot(x,y)
-
-    for name, (lat, lon) in CITIES.items():
-        ax.plot(lon, lat, "ko", markersize=4)
-        ax.text(lon + 0.05, lat, name, fontsize=8)
-
-    ax.set_xlim(FIR_MINX-0.3, FIR_MAXX+0.3)
-    ax.set_ylim(FIR_MINY-0.3, FIR_MAXY+0.3)
-    ax.set_aspect("equal", adjustable="box")
-    ax.grid(True, linestyle="--", alpha=0.4)
-
-    ax.legend(handles=[
-        Patch(facecolor="green", alpha=0.25, label="GO"),
-        Patch(facecolor="orange", alpha=0.25, label="MARGINAL"),
-        Patch(facecolor="red", alpha=0.25, label="NO-GO"),
-        Line2D([0], [0], marker='o', color='black',
-               linestyle='None', label='Cidade')
-    ])
-
-    st.pyplot(fig)
