@@ -10,7 +10,7 @@ from shapely.ops import unary_union
 # CONFIG
 # -------------------------------------------------
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v8.10")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v8.20")
 
 # -------------------------------------------------
 # INPUT
@@ -21,7 +21,7 @@ gamet_text = st.text_area(
 )
 
 # -------------------------------------------------
-# SECTORES UPPER (ajuste manual estável)
+# SECTORES
 # -------------------------------------------------
 
 SECTOR_NORTE = Polygon([
@@ -124,13 +124,25 @@ def split_into_sections(text):
     return sections
 
 # -------------------------------------------------
-# INTERSECÇÃO
+# INTERSECÇÃO GEOGRÁFICA
 # -------------------------------------------------
 
 def extract_condition_polygon(text):
 
     condition_poly = FIR_POLYGON
     geo_found = False
+
+    # BTN Nxxxx AND Nxxxx
+    btn_match = re.search(r"BTN N(\d{2})(\d{2}) AND N(\d{2})(\d{2})", text)
+    if btn_match:
+        geo_found = True
+        lat1 = int(btn_match.group(1)) + int(btn_match.group(2)) / 60
+        lat2 = int(btn_match.group(3)) + int(btn_match.group(4)) / 60
+        lat_min = min(lat1, lat2)
+        lat_max = max(lat1, lat2)
+        condition_poly = condition_poly.intersection(
+            box(FIR_MINX, lat_min, FIR_MAXX, lat_max)
+        )
 
     for match in re.findall(r"N OF N(\d{2})(\d{2})", text):
         geo_found = True
@@ -163,7 +175,7 @@ def extract_condition_polygon(text):
     return FIR_POLYGON if not geo_found else condition_poly
 
 # -------------------------------------------------
-# PARSER COMPLETO
+# PARSER
 # -------------------------------------------------
 
 def parse_gamet(text):
@@ -274,7 +286,7 @@ def decision_for_zone(events):
     return decision, vis, base, ts_flag, turb_sev, turb_mod
 
 # -------------------------------------------------
-# EXECUÇÃO + BRIEFING + MAPA
+# EXECUÇÃO
 # -------------------------------------------------
 
 if st.button("🔍 Analisar GAMET") and gamet_text.strip():
@@ -283,13 +295,6 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     results = {z: decision_for_zone(zone_data[z]) for z in ZONES}
 
     st.subheader("📋 Briefing Detalhado")
-
-    with st.expander("ℹ️ Legenda do Briefing"):
-        st.markdown("""
-**🔴 NO-GO** – Condições abaixo dos mínimos VFR definidos  
-**⚠️ MARGINAL** – Condições próximas dos limites operacionais  
-**✅ GO** – Condições favoráveis à operação VFR  
-""")
 
     cols = st.columns(3)
 
