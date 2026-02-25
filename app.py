@@ -3,7 +3,7 @@ import re
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
-from shapely.geometry import box, Polygon
+from shapely.geometry import box, Polygon, MultiPolygon
 from shapely.ops import unary_union
 from dataclasses import dataclass
 
@@ -12,7 +12,7 @@ from dataclasses import dataclass
 # -------------------------------------------------
 
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v10.5")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v10.8 FINAL")
 
 gamet_text = st.text_area("Cole aqui o texto completo do GAMET (LPPC)", height=300)
 
@@ -145,7 +145,6 @@ def extract_polygon(line):
 def parse_gamet(text):
 
     text = normalize(text)
-
     raw_lines = text.splitlines()
 
     if len(raw_lines) <= 1:
@@ -262,19 +261,23 @@ def build_zone_data(blocks):
     return zone_data
 
 def decision(events):
+
     vis = min([v for t,v in events if t=="VIS"], default=None)
     base = min([v for t,v in events if t=="BASE"], default=None)
+    ts = [v for t,v in events if t=="TS"]
+    turb = [v for t,v in events if t=="TURB"]
+    ice = [v for t,v in events if t=="ICE"]
 
     if vis is not None and vis < 1500:
-        return "NO-GO", vis, base
+        return "NO-GO", vis, base, ts, turb, ice
     if base is not None and base < 300:
-        return "NO-GO", vis, base
+        return "NO-GO", vis, base, ts, turb, ice
     if vis is not None and vis < 3000:
-        return "MARGINAL", vis, base
+        return "MARGINAL", vis, base, ts, turb, ice
     if base is not None and base < 500:
-        return "MARGINAL", vis, base
+        return "MARGINAL", vis, base, ts, turb, ice
 
-    return "GO", vis, base
+    return "GO", vis, base, ts, turb, ice
 
 # -------------------------------------------------
 # EXECUTION
@@ -290,14 +293,25 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     cols = st.columns(3)
 
     for i,z in enumerate(ZONES):
-        dec, vis, base = results[z]
+
+        dec, vis, base, ts, turb, ice = results[z]
+
         with cols[i]:
+
             st.markdown(f"### {z}")
-            if dec=="NO-GO": st.error("🔴 NO-GO")
-            elif dec=="MARGINAL": st.warning("⚠️ MARGINAL")
-            else: st.success("✅ GO")
-            st.write(f"👁️ {vis} m" if vis is not None else "👁️ —")
-            st.write(f"☁️ {base} ft AGL" if base is not None else "☁️ —")
+
+            if dec=="NO-GO":
+                st.error("🔴 NO-GO")
+            elif dec=="MARGINAL":
+                st.warning("⚠️ MARGINAL")
+            else:
+                st.success("✅ GO")
+
+            st.write(f"👁️ VIS: {vis} m" if vis is not None else "👁️ VIS: —")
+            st.write(f"☁️ BASE: {base} ft AGL" if base is not None else "☁️ BASE: —")
+            st.write(f"⛈️ TS: {', '.join(ts)}" if ts else "⛈️ TS: —")
+            st.write(f"🌪 TURB: {', '.join(turb)}" if turb else "🌪 TURB: —")
+            st.write(f"❄ ICE: {', '.join(ice)}" if ice else "❄ ICE: —")
 
     st.subheader("🌍 Mapa")
 
@@ -306,9 +320,16 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     for zone_name, poly in ZONES.items():
         decision_value = results[zone_name][0]
-        x, y = poly.exterior.xy
-        ax.fill(x, y, alpha=0.25, color=color_map[decision_value])
-        ax.plot(x, y, linewidth=1)
+
+        if isinstance(poly, MultiPolygon):
+            geoms = poly.geoms
+        else:
+            geoms = [poly]
+
+        for g in geoms:
+            x, y = g.exterior.xy
+            ax.fill(x, y, alpha=0.25, color=color_map[decision_value])
+            ax.plot(x, y, linewidth=1)
 
     for name, (lat, lon) in CITIES.items():
         ax.plot(lon, lat, "ko", markersize=4)
