@@ -1,3 +1,4 @@
+
 import streamlit as st
 import re
 import matplotlib.pyplot as plt
@@ -12,7 +13,7 @@ from dataclasses import dataclass
 # -------------------------------------------------
 
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v10.3.1")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v10.4")
 
 gamet_text = st.text_area("Cole aqui o texto completo do GAMET (LPPC)", height=300)
 
@@ -100,7 +101,7 @@ def normalize(text):
     return text
 
 # -------------------------------------------------
-# GEO EXTRACTION
+# GEO
 # -------------------------------------------------
 
 def extract_polygon(line):
@@ -287,3 +288,33 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
             else: st.success("✅ GO")
             st.write(f"👁️ {vis} m" if vis is not None else "👁️ —")
             st.write(f"☁️ {base} ft AGL" if base is not None else "☁️ —")
+
+    st.subheader("🌍 Mapa")
+
+    fig, ax = plt.subplots(figsize=(7, 10))
+    color_map = {"GO": "green", "MARGINAL": "orange", "NO-GO": "red"}
+
+    for zone_name, poly in ZONES.items():
+        decision_value = results[zone_name][0]
+        x, y = poly.exterior.xy
+        ax.fill(x, y, alpha=0.25, color=color_map[decision_value])
+        ax.plot(x, y, linewidth=1)
+
+    for name, (lat, lon) in CITIES.items():
+        ax.plot(lon, lat, "ko", markersize=4)
+        ax.text(lon + 0.05, lat, name, fontsize=8)
+
+    ax.set_xlim(FIR_MINX - 0.3, FIR_MAXX + 0.3)
+    ax.set_ylim(FIR_MINY - 0.3, FIR_MAXY + 0.3)
+    ax.set_aspect("equal", adjustable="box")
+    ax.grid(True, linestyle="--", alpha=0.4)
+
+    ax.legend(handles=[
+        Patch(facecolor="green", alpha=0.25, label="GO"),
+        Patch(facecolor="orange", alpha=0.25, label="MARGINAL"),
+        Patch(facecolor="red", alpha=0.25, label="NO-GO"),
+        Line2D([0], [0], marker='o', color='black',
+               linestyle='None', label='Cidade')
+    ])
+
+    st.pyplot(fig)
