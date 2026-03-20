@@ -187,9 +187,12 @@ def parse_gamet(text):
         if not line or state == "IDLE":
             continue
 
-        poly = extract_polygon(line)
-        if not poly:
-            continue
+        new_poly = extract_polygon(line)
+
+if new_poly:
+    current_polygon = new_poly
+
+poly = current_polygon
 
         if state == "VIS":
             for m in re.finditer(r"\b(\d{3,4})\s*-\s*(\d{3,4})M\b", line):
