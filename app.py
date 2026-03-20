@@ -56,7 +56,7 @@ ZONE_ELEVATION = {
 }
 
 # -------------------------------------------------
-# CIDADES
+# CIDADES (COMPLETO)
 # -------------------------------------------------
 
 CITIES = {
@@ -109,200 +109,152 @@ def extract_polygon(line):
 
     for m in re.findall(r"BTN N(\d{2})(\d{2}) AND N(\d{2})(\d{2})", line):
         geo_found = True
-        lat1 = int(m[0]) + int(m[1])/60
-        lat2 = int(m[2]) + int(m[3])/60
+        lat1 = int(m[0]) + int(m[1]) / 60
+        lat2 = int(m[2]) + int(m[3]) / 60
         poly = poly.intersection(box(FIR_MINX, min(lat1, lat2), FIR_MAXX, max(lat1, lat2)))
-
-    for m in re.findall(r"S OF N(\d{2})(\d{2})", line):
-        geo_found = True
-        lat = int(m[0]) + int(m[1])/60
-        poly = poly.intersection(box(FIR_MINX, FIR_MINY, FIR_MAXX, lat))
 
     for m in re.findall(r"N OF N(\d{2})(\d{2})", line):
         geo_found = True
-        lat = int(m[0]) + int(m[1])/60
+        lat = int(m[0]) + int(m[1]) / 60
         poly = poly.intersection(box(FIR_MINX, lat, FIR_MAXX, FIR_MAXY))
 
-    for m in re.findall(r"W OF W(\d{2})(\d{2})", line):
+    for m in re.findall(r"S OF N(\d{2})(\d{2})", line):
         geo_found = True
-        lon = -(int(m[0]) + int(m[1])/60)
-        poly = poly.intersection(box(FIR_MINX, FIR_MINY, lon, FIR_MAXY))
+        lat = int(m[0]) + int(m[1]) / 60
+        poly = poly.intersection(box(FIR_MINX, FIR_MINY, FIR_MAXX, lat))
 
-    for m in re.findall(r"E OF W(\d{2})(\d{2})", line):
-        geo_found = True
-        lon = -(int(m[0]) + int(m[1])/60)
-        poly = poly.intersection(box(lon, FIR_MINY, FIR_MAXX, FIR_MAXY))
-
-    if not geo_found:
-        return FIR_POLYGON
-
-    return poly if not poly.is_empty else None
+    return poly if geo_found else None
 
 # -------------------------------------------------
-# FSM PARSER
+# PARSER (CORRIGIDO)
 # -------------------------------------------------
 
 def parse_gamet(text):
 
     text = normalize(text)
-    raw_lines = text.splitlines()
 
-    if len(raw_lines) <= 1:
-        lines = re.split(
-            r"(?=SFC VIS|VIS:|SIG CLD|CLD:|SIGWX|TURB|ICE|SECN)",
-            text
-        )
-    else:
-        lines = [l.strip() for l in raw_lines if l.strip()]
+    text = re.sub(r"(SECN\s+[IVX]+)", r"\n\1", text)
+    text = re.sub(r"(SFC VIS|VIS:|SIG CLD|CLD:|SIGWX|TURB|ICE)", r"\n\1", text)
+
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
 
     state = "IDLE"
     blocks = []
+    current_polygon = FIR_POLYGON
 
-for line in lines:
+    for raw_line in lines:
 
-    line = line.strip()
-    if not line:
-        continue
+        line = raw_line.strip()
+        if not line:
+            continue
 
-    if line.startswith("SECN"):
-        state = "IDLE"
-        continue
+        if line.startswith("SECN"):
+            state = "IDLE"
+            current_polygon = FIR_POLYGON
+            continue
 
-    if line.startswith("SFC VIS") or line.startswith("VIS:"):
-        state = "VIS"
-        line = line.split(":",1)[1] if ":" in line else ""
-    elif line.startswith("SIG CLD") or line.startswith("CLD:"):
-        state = "CLD"
-        line = line.split(":",1)[1] if ":" in line else ""
-    elif line.startswith("SIGWX"):
-        state = "SIGWX"
-        line = line.split(":",1)[1] if ":" in line else ""
-    elif line.startswith("TURB"):
-        state = "TURB"
-        line = line.split(":",1)[1] if ":" in line else ""
-    elif line.startswith("ICE"):
-        state = "ICE"
-        line = line.split(":",1)[1] if ":" in line else ""
+        content = line
 
-    if not line or state == "IDLE":
-        continue
+        if line.startswith("SFC VIS") or line.startswith("VIS:"):
+            state = "VIS"
+            content = line.split(":",1)[1] if ":" in line else ""
 
-    # ✅ AQUI entra o patch correto
-    new_poly = extract_polygon(line)
+        elif line.startswith("SIG CLD") or line.startswith("CLD:"):
+            state = "CLD"
+            content = line.split(":",1)[1] if ":" in line else ""
 
-    if new_poly:
-        current_polygon = new_poly
+        elif line.startswith("SIGWX"):
+            state = "SIGWX"
+            content = line.split(":",1)[1] if ":" in line else ""
 
-    poly = current_polygon
+        elif line.startswith("TURB"):
+            state = "TURB"
+            content = line.split(":",1)[1] if ":" in line else ""
 
+        elif line.startswith("ICE"):
+            state = "ICE"
+            content = line.split(":",1)[1] if ":" in line else ""
+
+        if state == "IDLE":
+            continue
+
+        # GEO CONTEXT
+        new_poly = extract_polygon(line)
+        if new_poly is not None:
+            current_polygon = new_poly
+
+        poly = current_polygon
+
+        # PARSE
         if state == "VIS":
-            for m in re.finditer(r"\b(\d{3,4})\s*-\s*(\d{3,4})M\b", line):
+            for m in re.finditer(r"\b(\d{3,4})M\b", content):
                 blocks.append(MetBlock("VIS", poly, int(m.group(1))))
-            for m in re.finditer(r"\b(\d{3,4})M\b", line):
-                if not re.search(rf"{m.group(1)}\s*-\s*\d{{3,4}}M", line):
-                    blocks.append(MetBlock("VIS", poly, int(m.group(1))))
-            if re.search(r"\b9999\b", line):
-                blocks.append(MetBlock("VIS", poly, 9999))
-            if "P6KM" in line:
-                blocks.append(MetBlock("VIS", poly, 6000))
 
         elif state == "CLD":
-
-            for m in re.finditer(r"\b(\d{3})\s*-\s*(\d{3})(?:/\d{3})?HFT AGL\b", line):
+            for m in re.finditer(r"\b(\d{3})\s*-\s*(\d{3})HFT AGL\b", content):
                 blocks.append(MetBlock("BASE_AGL", poly, int(m.group(1))*100))
-
-            for m in re.finditer(r"\b(\d{3})HFT AGL\b", line):
-                if not re.search(rf"{m.group(1)}\s*-\s*\d{{3}}(?:/\d{{3}})?HFT AGL", line):
+            for m in re.finditer(r"\b(\d{3})HFT AGL\b", content):
+                if not re.search(rf"{m.group(1)}\s*-\s*\d{{3}}HFT AGL", content):
                     blocks.append(MetBlock("BASE_AGL", poly, int(m.group(1))*100))
 
-            for m in re.finditer(r"\b(\d{3})\s*-\s*(\d{3})(?:/\d{3})?HFT AMSL\b", line):
-                blocks.append(MetBlock("BASE_AMSL", poly, int(m.group(1))*100))
-
-            for m in re.finditer(r"\b(\d{3})HFT AMSL\b", line):
-                if not re.search(rf"{m.group(1)}\s*-\s*\d{{3}}(?:/\d{{3}})?HFT AMSL", line):
-                    blocks.append(MetBlock("BASE_AMSL", poly, int(m.group(1))*100))
-
         elif state == "SIGWX":
-            if "FRQ TS" in line:
+            if "FRQ TS" in content:
                 blocks.append(MetBlock("TS", poly, "FRQ"))
-            elif "OCNL TS" in line:
+            elif "OCNL TS" in content:
                 blocks.append(MetBlock("TS", poly, "OCNL"))
-            elif "ISOL TS" in line:
+            elif "ISOL TS" in content:
                 blocks.append(MetBlock("TS", poly, "ISOL"))
-            elif re.search(r"\bTS\b", line):
+            elif "TS" in content:
                 blocks.append(MetBlock("TS", poly, "GEN"))
 
         elif state == "TURB":
-            if "SEV" in line:
+            if "SEV" in content:
                 blocks.append(MetBlock("TURB", poly, "SEV"))
-            elif "MOD" in line:
+            elif "MOD" in content:
                 blocks.append(MetBlock("TURB", poly, "MOD"))
 
         elif state == "ICE":
-            if "SEV" in line:
+            if "SEV" in content:
                 blocks.append(MetBlock("ICE", poly, "SEV"))
-            elif "MOD" in line:
+            elif "MOD" in content:
                 blocks.append(MetBlock("ICE", poly, "MOD"))
 
     return blocks
 
 # -------------------------------------------------
-# BUILD + DECISION
+# BUILD
 # -------------------------------------------------
 
-def build_zone_data(blocks, area_threshold=0.15):
-    """
-    Distribui eventos meteorológicos por sector com base na percentagem
-    de área afetada (evita contaminação de sectores inteiros).
-    
-    area_threshold: fração mínima de área (ex: 0.15 = 15%)
-    """
+def build_zone_data(blocks, threshold=0.15):
 
     zone_data = {z: [] for z in ZONES}
 
     for block in blocks:
-
         if block.polygon is None or block.polygon.is_empty:
             continue
 
-        for zone_name, zone_poly in ZONES.items():
+        for zone, poly in ZONES.items():
 
-            # Interseção real
-            intersection = zone_poly.intersection(block.polygon)
+            inter = poly.intersection(block.polygon)
 
-            if intersection.is_empty:
+            if inter.is_empty:
                 continue
 
-            # Percentagem de área afetada
-            try:
-                coverage = intersection.area / zone_poly.area
-            except ZeroDivisionError:
-                coverage = 0
+            coverage = inter.area / poly.area
 
-            # Filtro por threshold
-            if coverage < area_threshold:
+            if coverage < threshold:
                 continue
 
-            # --- Aplicação do fenómeno ---
-
-            if block.phenomenon == "BASE_AMSL":
-
-                agl = block.value - ZONE_ELEVATION[zone_name]
-
-                # Segurança: evitar valores negativos irreais
-                if agl <= 0:
-                    agl = 0
-
-                zone_data[zone_name].append(("BASE", agl))
-
-            elif block.phenomenon == "BASE_AGL":
-
-                zone_data[zone_name].append(("BASE", block.value))
-
+            if block.phenomenon == "BASE_AGL":
+                zone_data[zone].append(("BASE", block.value))
             else:
-                zone_data[zone_name].append((block.phenomenon, block.value))
+                zone_data[zone].append((block.phenomenon, block.value))
 
     return zone_data
+
+# -------------------------------------------------
+# DECISION
+# -------------------------------------------------
 
 def decision(events):
 
@@ -357,37 +309,47 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
             st.write(f"🌪 TURB: {', '.join(turb)}" if turb else "🌪 TURB: —")
             st.write(f"❄ ICE: {', '.join(ice)}" if ice else "❄ ICE: —")
 
+    # -------- LEGENDA --------
+    with st.expander("📖 Legenda do Briefing", expanded=False):
+        st.markdown("""
+- 🟢 GO – Condições VFR aceitáveis  
+- 🟠 MARGINAL – Próximo dos mínimos  
+- 🔴 NO-GO – Abaixo dos mínimos  
+
+- 👁️ VIS – Visibilidade (m)  
+- ☁️ BASE – Base das nuvens (ft AGL)  
+- ⛈️ TS – Trovoadas  
+- 🌪 TURB – Turbulência  
+- ❄ ICE – Gelo  
+""")
+
+    # -------- MAPA --------
     st.subheader("🌍 Mapa")
 
     fig, ax = plt.subplots(figsize=(7, 10))
-    color_map = {"GO": "green", "MARGINAL": "orange", "NO-GO": "red"}
+    colors = {"GO": "green", "MARGINAL": "orange", "NO-GO": "red"}
 
-    for zone_name, poly in ZONES.items():
-        decision_value = results[zone_name][0]
+    for z, poly in ZONES.items():
+        dec = results[z][0]
 
-        if isinstance(poly, MultiPolygon):
-            geoms = poly.geoms
-        else:
-            geoms = [poly]
+        geoms = poly.geoms if isinstance(poly, MultiPolygon) else [poly]
 
         for g in geoms:
             x, y = g.exterior.xy
-            ax.fill(x, y, alpha=0.25, color=color_map[decision_value])
-            ax.plot(x, y, linewidth=1)
+            ax.fill(x, y, alpha=0.3, color=colors[dec])
+            ax.plot(x, y)
 
     for name, (lat, lon) in CITIES.items():
         ax.plot(lon, lat, "ko", markersize=4)
         ax.text(lon + 0.05, lat, name, fontsize=8)
 
-    ax.set_xlim(FIR_MINX - 0.3, FIR_MAXX + 0.3)
-    ax.set_ylim(FIR_MINY - 0.3, FIR_MAXY + 0.3)
-    ax.set_aspect("equal", adjustable="box")
+    ax.set_aspect("equal")
     ax.grid(True, linestyle="--", alpha=0.4)
 
     ax.legend(handles=[
-        Patch(facecolor="green", alpha=0.25, label="GO"),
-        Patch(facecolor="orange", alpha=0.25, label="MARGINAL"),
-        Patch(facecolor="red", alpha=0.25, label="NO-GO"),
+        Patch(facecolor="green", alpha=0.3, label="GO"),
+        Patch(facecolor="orange", alpha=0.3, label="MARGINAL"),
+        Patch(facecolor="red", alpha=0.3, label="NO-GO"),
         Line2D([0], [0], marker='o', color='black',
                linestyle='None', label='Cidade')
     ])
