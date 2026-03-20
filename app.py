@@ -132,21 +132,48 @@ def extract_polygon(line):
     poly = FIR_POLYGON
     geo_found = False
 
+    # Helper: converter graus+minutos numa longitude com sinal
+    def _lon(deg, minn, hemi):
+        val = int(deg) + int(minn) / 60
+        return -val if hemi == "W" else val
+
+    # BTN N\d\d\d\d AND N\d\d\d\d  (latitude)
     for m in re.findall(r"BTN\s+N(\d{2})(\d{2})\s+AND\s+N(\d{2})(\d{2})", line):
         geo_found = True
         lat1 = int(m[0]) + int(m[1]) / 60
         lat2 = int(m[2]) + int(m[3]) / 60
         poly = poly.intersection(box(FIR_MINX, min(lat1, lat2), FIR_MAXX, max(lat1, lat2)))
 
+    # BTN W/E\d\d\d\d AND W/E\d\d\d\d  (longitude)
+    for m in re.findall(r"BTN\s+([WE])(\d{2,3})(\d{2})\s+AND\s+([WE])(\d{2,3})(\d{2})", line):
+        geo_found = True
+        lon1 = _lon(m[1], m[2], m[0])
+        lon2 = _lon(m[4], m[5], m[3])
+        poly = poly.intersection(box(min(lon1, lon2), FIR_MINY, max(lon1, lon2), FIR_MAXY))
+
+    # N OF N\d\d\d\d
     for m in re.findall(r"N\s+OF\s+N(\d{2})(\d{2})", line):
         geo_found = True
         lat = int(m[0]) + int(m[1]) / 60
         poly = poly.intersection(box(FIR_MINX, lat, FIR_MAXX, FIR_MAXY))
 
+    # S OF N\d\d\d\d
     for m in re.findall(r"S\s+OF\s+N(\d{2})(\d{2})", line):
         geo_found = True
         lat = int(m[0]) + int(m[1]) / 60
         poly = poly.intersection(box(FIR_MINX, FIR_MINY, FIR_MAXX, lat))
+
+    # E OF W/E\d\d\d\d
+    for m in re.findall(r"E\s+OF\s+([WE])(\d{2,3})(\d{2})", line):
+        geo_found = True
+        lon = _lon(m[1], m[2], m[0])
+        poly = poly.intersection(box(lon, FIR_MINY, FIR_MAXX, FIR_MAXY))
+
+    # W OF W/E\d\d\d\d
+    for m in re.findall(r"W\s+OF\s+([WE])(\d{2,3})(\d{2})", line):
+        geo_found = True
+        lon = _lon(m[1], m[2], m[0])
+        poly = poly.intersection(box(FIR_MINX, FIR_MINY, lon, FIR_MAXY))
 
     return poly if geo_found else None
 
@@ -494,7 +521,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
             st.write(f"❄ ICE: {', '.join(ice)}"      if ice  else "❄ ICE: —")
 
             if reasons:
-                with st.expander("ℹ️ Motivos da decisão"):
+                with st.expander("ℹ️ Motivos da decisão", expanded=True):
                     for r in reasons:
                         st.write(f"• {r}")
 
