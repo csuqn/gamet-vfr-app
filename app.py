@@ -187,10 +187,12 @@ def parse_gamet(text):
         if not line or state == "IDLE":
             continue
 
-        new_poly = extract_polygon(line)
+new_poly = extract_polygon(line)
 
 if new_poly:
     current_polygon = new_poly
+
+poly = current_polygon
 
 poly = current_polygon
 
