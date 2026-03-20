@@ -246,18 +246,58 @@ def parse_gamet(text):
 # BUILD + DECISION
 # -------------------------------------------------
 
-def build_zone_data(blocks):
+def build_zone_data(blocks, area_threshold=0.15):
+    """
+    Distribui eventos meteorológicos por sector com base na percentagem
+    de área afetada (evita contaminação de sectores inteiros).
+    
+    area_threshold: fração mínima de área (ex: 0.15 = 15%)
+    """
+
     zone_data = {z: [] for z in ZONES}
+
     for block in blocks:
+
+        if block.polygon is None or block.polygon.is_empty:
+            continue
+
         for zone_name, zone_poly in ZONES.items():
-            if zone_poly.intersects(block.polygon):
-                if block.phenomenon == "BASE_AMSL":
-                    agl = max(0, block.value - ZONE_ELEVATION[zone_name])
-                    zone_data[zone_name].append(("BASE", agl))
-                elif block.phenomenon == "BASE_AGL":
-                    zone_data[zone_name].append(("BASE", block.value))
-                else:
-                    zone_data[zone_name].append((block.phenomenon, block.value))
+
+            # Interseção real
+            intersection = zone_poly.intersection(block.polygon)
+
+            if intersection.is_empty:
+                continue
+
+            # Percentagem de área afetada
+            try:
+                coverage = intersection.area / zone_poly.area
+            except ZeroDivisionError:
+                coverage = 0
+
+            # Filtro por threshold
+            if coverage < area_threshold:
+                continue
+
+            # --- Aplicação do fenómeno ---
+
+            if block.phenomenon == "BASE_AMSL":
+
+                agl = block.value - ZONE_ELEVATION[zone_name]
+
+                # Segurança: evitar valores negativos irreais
+                if agl <= 0:
+                    agl = 0
+
+                zone_data[zone_name].append(("BASE", agl))
+
+            elif block.phenomenon == "BASE_AGL":
+
+                zone_data[zone_name].append(("BASE", block.value))
+
+            else:
+                zone_data[zone_name].append((block.phenomenon, block.value))
+
     return zone_data
 
 def decision(events):
