@@ -249,11 +249,18 @@ def parse_gamet(text):
                 val = int(float(m.group(1)) * 1000)
                 blocks.append(MetBlock("VIS", poly, val, qualifier))
 
-            # Captura metros (3-4 dígitos seguidos de M)
-            # Exige que NÃO seja precedido de HFT ou FL
+            # Intervalo com M único no final: 2000-5000M → captura o mínimo (pior caso VFR)
+            for m in re.finditer(r"\b(\d{3,4})-(\d{3,4})M\b", vis_content):
+                val = min(int(m.group(1)), int(m.group(2)))
+                if 100 <= val <= 9999:
+                    blocks.append(MetBlock("VIS", poly, val, qualifier))
+
+            # Valor simples: 2500M — ignora valores que já fazem parte de um intervalo
             for m in re.finditer(r"(?<!\d)(\d{3,4})M\b", vis_content):
+                pos = m.start()
+                if vis_content[max(0, pos - 5):pos].rstrip().endswith("-"):
+                    continue
                 val = int(m.group(1))
-                # Sanity check: visibilidade plausível (100m a 9999m)
                 if 100 <= val <= 9999:
                     blocks.append(MetBlock("VIS", poly, val, qualifier))
 
