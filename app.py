@@ -160,41 +160,40 @@ def parse_gamet(text):
 
     for line in lines:
 
-        line = line.strip()
-        if not line:
-            continue
+    line = line.strip()
+    if not line:
+        continue
 
-        if line.startswith("SECN"):
-            state = "IDLE"
-            continue
+    if line.startswith("SECN"):
+        state = "IDLE"
+        continue
 
-        if line.startswith("SFC VIS") or line.startswith("VIS:"):
-            state = "VIS"
-            line = line.split(":",1)[1] if ":" in line else ""
-        elif line.startswith("SIG CLD") or line.startswith("CLD:"):
-            state = "CLD"
-            line = line.split(":",1)[1] if ":" in line else ""
-        elif line.startswith("SIGWX"):
-            state = "SIGWX"
-            line = line.split(":",1)[1] if ":" in line else ""
-        elif line.startswith("TURB"):
-            state = "TURB"
-            line = line.split(":",1)[1] if ":" in line else ""
-        elif line.startswith("ICE"):
-            state = "ICE"
-            line = line.split(":",1)[1] if ":" in line else ""
+    if line.startswith("SFC VIS") or line.startswith("VIS:"):
+        state = "VIS"
+        line = line.split(":",1)[1] if ":" in line else ""
+    elif line.startswith("SIG CLD") or line.startswith("CLD:"):
+        state = "CLD"
+        line = line.split(":",1)[1] if ":" in line else ""
+    elif line.startswith("SIGWX"):
+        state = "SIGWX"
+        line = line.split(":",1)[1] if ":" in line else ""
+    elif line.startswith("TURB"):
+        state = "TURB"
+        line = line.split(":",1)[1] if ":" in line else ""
+    elif line.startswith("ICE"):
+        state = "ICE"
+        line = line.split(":",1)[1] if ":" in line else ""
 
-        if not line or state == "IDLE":
-            continue
+    if not line or state == "IDLE":
+        continue
 
-new_poly = extract_polygon(line)
+    # ✅ AQUI entra o patch correto
+    new_poly = extract_polygon(line)
 
-if new_poly:
-    current_polygon = new_poly
+    if new_poly:
+        current_polygon = new_poly
 
-poly = current_polygon
-
-poly = current_polygon
+    poly = current_polygon
 
         if state == "VIS":
             for m in re.finditer(r"\b(\d{3,4})\s*-\s*(\d{3,4})M\b", line):
