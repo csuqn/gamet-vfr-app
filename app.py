@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 # -------------------------------------------------
 
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v11.0")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v11.2")
 
 gamet_text = st.text_area("Cole aqui o texto completo do GAMET (LPPC)", height=300)
 
@@ -102,6 +102,7 @@ def normalize(text):
 
 def parse_validity(text):
     """Extrai período de validade e verifica se está ativo."""
+    text = normalize(text)
     m = re.search(r"VALID\s+(\d{2})(\d{2})(\d{2})/(\d{2})(\d{2})(\d{2})", text)
     if not m:
         return None, None, False
@@ -172,8 +173,8 @@ def parse_gamet(text):
     secn1 = re.sub(r"(SECN\s+I\b)", r"\n\1\n", secn1)
     secn1 = re.sub(r"(SFC\s+VIS|VIS\s*:)", r"\n\1", secn1)
     secn1 = re.sub(r"(SIG\s+CLD|CLD\s*:)", r"\n\1", secn1)
-    secn1 = re.sub(r"(SIGWX\s*:?)", r"\n\1", secn1)
-    secn1 = re.sub(r"(TURB\s*:?)", r"\n\1", secn1)
+    secn1 = re.sub(r"(\bSIGWX\b\s*:?)", r"\n\1", secn1)
+    secn1 = re.sub(r"(\bTURB\b\s*:?)", r"\n\1", secn1)
     secn1 = re.sub(r"(\bICE\b\s*:?)", r"\n\1", secn1)
     secn1 = re.sub(r"(SIGMET\s+APPLICABLE)", r"\n\1", secn1)
 
@@ -213,6 +214,7 @@ def parse_gamet(text):
 
         if new_state:
             state = new_state
+            current_polygon = FIR_POLYGON  # reset geo ao mudar de campo
             # Remover a keyword da linha para processar só o conteúdo
             content = re.sub(
                 r"^(SFC\s+VIS\s*:?|VIS\s*:|SIG\s+CLD\s*:?|CLD\s*:|SIGWX\s*:?|TURB\s*:?|ICE\s*:?)\s*",
@@ -434,11 +436,11 @@ def decision(events):
     # ---- Trovoadas — FIX CRÍTICO ----
     if ts_max_risk >= 2:
         decision_level = "NO-GO"
-        reasons.append(f"TS {'/'.join(ts_vals)} (risco alto)")
+        reasons.append(f"TS {'/'.join(_ts_label(v) for v in ts_vals)} (risco alto)")
     elif ts_max_risk == 1:
         if decision_level == "GO":
             decision_level = "MARGINAL"
-        reasons.append(f"TS {'/'.join(ts_vals)} (ISOL)")
+        reasons.append(f"TS {'/'.join(_ts_label(v) for v in ts_vals)} (ISOL)")
 
     return decision_level, vis, base, ts_vals, turb_vals, ice_vals, reasons
 
@@ -518,7 +520,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
 **Regras de decisão TS:**
 - ISOL → MARGINAL
-- OCNL / GEN / ISOL_EMBD / EMBD / FRQ → NO-GO
+- OCNL / GEN / ISOL/EMBD / EMBD / FRQ → NO-GO
 """)
 
     # ---- Mapa ----
