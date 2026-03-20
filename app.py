@@ -132,11 +132,6 @@ def extract_polygon(line):
     poly = FIR_POLYGON
     geo_found = False
 
-    # Helper: converter graus+minutos numa longitude com sinal
-    def _lon(deg, minn, hemi):
-        val = int(deg) + int(minn) / 60
-        return -val if hemi == "W" else val
-
     # BTN N\d\d\d\d AND N\d\d\d\d  (latitude)
     for m in re.findall(r"BTN\s+N(\d{2})(\d{2})\s+AND\s+N(\d{2})(\d{2})", line):
         geo_found = True
@@ -184,6 +179,11 @@ def extract_polygon(line):
 # Palavras-chave que NÃO devem ser confundidas com visibilidade ou altitude
 _FL_PATTERN = re.compile(r"FL\d{2,3}")          # FL050, FL100, FL150 …
 _HPA_PATTERN = re.compile(r"\d+\s*HPA")         # 986HPA, 1005HPA …
+
+def _lon(deg, minn, hemi):
+    """Converte graus+minutos numa longitude com sinal (W negativo, E positivo)."""
+    val = int(deg) + int(minn) / 60
+    return -val if hemi == "W" else val
 
 _TS_DISPLAY = {
     "ISOL_EMBD": "ISOL/EMBD",
@@ -583,3 +583,4 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     ])
 
     st.pyplot(fig)
+    plt.close(fig)
