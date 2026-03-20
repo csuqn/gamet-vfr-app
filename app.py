@@ -1,5 +1,7 @@
 import streamlit as st
 import re
+import time
+import requests
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
@@ -13,9 +15,98 @@ from datetime import datetime, timezone
 # -------------------------------------------------
 
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v11.2")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v12.0")
 
-gamet_text = st.text_area("Cole aqui o texto completo do GAMET (LPPC)", height=300)
+# -------------------------------------------------
+# IPMA SELF-BRIEFING — fetch automático
+# -------------------------------------------------
+
+_IPMA_BASE  = "https://brief-ng.ipma.pt"
+_LOGIN_URL  = f"{_IPMA_BASE}/login.php"
+_SIGMET_URL = f"{_IPMA_BASE}/showsigmet.php"
+
+def fetch_gamet_ipma(username: str, password: str) -> tuple:
+    """
+    Faz login no Self-Briefing IPMA e extrai o GAMET do LPPC.
+    Devolve (sucesso: bool, texto_ou_erro: str).
+    """
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (compatible; GAMET-Decoder/12.0)",
+        "Referer": _IPMA_BASE + "/",
+    })
+
+    # --- Login ---
+    try:
+        resp = session.post(
+            _LOGIN_URL,
+            data={"u": username, "p": password, "remember": "false"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+    except requests.RequestException as e:
+        return False, f"Erro de ligação ao IPMA: {e}"
+
+    # --- Buscar página SIGMET/GAMET ---
+    try:
+        ts = int(time.time() * 1000)
+        resp = session.get(_SIGMET_URL, params={"_": ts}, timeout=10)
+        resp.raise_for_status()
+    except requests.RequestException as e:
+        return False, f"Erro ao carregar dados IPMA: {e}"
+
+    # --- Extrair bloco GAMET do LPPC ---
+    html = resp.text
+
+    # Remover tags HTML e normalizar espaços
+    text_clean = re.sub(r"<[^>]+>", " ", html)
+    text_clean = re.sub(r"&nbsp;", " ", text_clean)
+    text_clean = re.sub(r"\s+", " ", text_clean).strip()
+
+    # Verificar se o login falhou (portal redireciona para login)
+    if "showLogin" in html or "login.php" in html:
+        return False, "Credenciais inválidas ou sessão expirada."
+
+    # Isolar bloco LPPC GAMET ... =
+    m = re.search(r"(LPPC\s+GAMET\s+VALID\s+.+?=)", text_clean, re.DOTALL)
+    if not m:
+        return False, "GAMET do LPPC não encontrado. Pode não estar emitido ainda."
+
+    return True, m.group(1).strip()
+
+
+# -------------------------------------------------
+# UI — credenciais + carregamento automático
+# -------------------------------------------------
+
+with st.expander("📡 Carregar GAMET automaticamente do IPMA", expanded=False):
+    st.caption("As credenciais não são guardadas — são usadas apenas nesta sessão.")
+    col_u, col_p = st.columns(2)
+    with col_u:
+        ipma_user = st.text_input("Utilizador IPMA", key="ipma_user")
+    with col_p:
+        ipma_pass = st.text_input("Password IPMA", type="password", key="ipma_pass")
+
+    if st.button("🔄 Carregar GAMET do Self-Briefing IPMA"):
+        if not ipma_user or not ipma_pass:
+            st.warning("Introduz o utilizador e a password.")
+        else:
+            with st.spinner("A ligar ao Self-Briefing IPMA..."):
+                ok, result = fetch_gamet_ipma(ipma_user, ipma_pass)
+            if ok:
+                st.session_state["gamet_loaded"] = result
+                st.success("✅ GAMET carregado com sucesso!")
+            else:
+                st.error(f"❌ {result}")
+
+# Preencher text_area com GAMET carregado (ou vazio para input manual)
+_default = st.session_state.get("gamet_loaded", "")
+
+gamet_text = st.text_area(
+    "Texto do GAMET (LPPC) — carregado automaticamente ou cole aqui",
+    value=_default,
+    height=200,
+)
 
 # -------------------------------------------------
 # SECTORES
