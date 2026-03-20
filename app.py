@@ -158,7 +158,7 @@ def parse_gamet(text):
     state = "IDLE"
     blocks = []
 
-    for line in lines:
+for line in lines:
 
     line = line.strip()
     if not line:
