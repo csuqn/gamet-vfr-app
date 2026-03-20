@@ -109,10 +109,16 @@ def parse_validity(text):
     day_s, hh_s, mm_s = int(m.group(1)), int(m.group(2)), int(m.group(3))
     day_e, hh_e, mm_e = int(m.group(4)), int(m.group(5)), int(m.group(6))
     now = datetime.now(timezone.utc)
-    # Constrói datetimes no mês/ano corrente
     try:
         start = now.replace(day=day_s, hour=hh_s, minute=mm_s, second=0, microsecond=0)
         end   = now.replace(day=day_e, hour=hh_e, minute=mm_e, second=0, microsecond=0)
+        # Se end ficou antes de start, o GAMET cruza a fronteira do mês — avançar end 1 mês
+        if end < start:
+            # Incrementar mês manualmente (sem dependência de dateutil)
+            month = end.month + 1
+            year  = end.year + (1 if month > 12 else 0)
+            month = 1 if month > 12 else month
+            end = end.replace(year=year, month=month)
         active = start <= now <= end
         return start, end, active
     except Exception:
@@ -171,8 +177,8 @@ def parse_gamet(text):
 
     # ---- Injetar quebras antes de campos conhecidos ----
     secn1 = re.sub(r"(SECN\s+I\b)", r"\n\1\n", secn1)
-    secn1 = re.sub(r"(SFC\s+VIS|VIS\s*:)", r"\n\1", secn1)
-    secn1 = re.sub(r"(SIG\s+CLD|CLD\s*:)", r"\n\1", secn1)
+    secn1 = re.sub(r"(\bSFC\s+VIS\b|\bVIS\s*:)", r"\n\1", secn1)
+    secn1 = re.sub(r"(\bSIG\s+CLD\b|\bCLD\s*:)", r"\n\1", secn1)
     secn1 = re.sub(r"(\bSIGWX\b\s*:?)", r"\n\1", secn1)
     secn1 = re.sub(r"(\bTURB\b\s*:?)", r"\n\1", secn1)
     secn1 = re.sub(r"(\bICE\b\s*:?)", r"\n\1", secn1)
