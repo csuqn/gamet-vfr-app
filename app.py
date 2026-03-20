@@ -533,7 +533,7 @@ def decision(events):
     elif ts_max_risk == 1:
         if decision_level == "GO":
             decision_level = "MARGINAL"
-        reasons.append(f"TS {'/'.join(_ts_label(v) for v in ts_vals)} (ISOL)")
+        reasons.append(f"TS {'/'.join(_ts_label(v) for v in ts_vals)}")
 
     return decision_level, vis, base, ts_vals, turb_vals, ice_vals, reasons
 
