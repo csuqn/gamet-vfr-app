@@ -27,7 +27,7 @@ from datetime import datetime, timezone, timedelta
 # -------------------------------------------------
 
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v14.0")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v15.0")
 
 # -------------------------------------------------
 # IPMA SELF-BRIEFING — fetch automático
@@ -161,6 +161,13 @@ ZONES = {
 
 FIR_POLYGON = unary_union(list(ZONES.values()))
 FIR_MINX, FIR_MINY, FIR_MAXX, FIR_MAXY = FIR_POLYGON.bounds
+
+# Elevação máxima aproximada por sector (ft) — para conversão AMSL→AGL
+ZONE_ELEVATION = {
+    "SECTOR NORTE": 1700,   # Serra da Estrela ~6500ft mas usamos máximo de terreno comum
+    "SECTOR CENTRO": 900,
+    "SECTOR SUL":    250,
+}
 
 # -------------------------------------------------
 # CIDADES
@@ -417,7 +424,7 @@ def parse_wind(secn2: str) -> list:
 
 
 # -------------------------------------------------
-# PARSER — v12
+# PARSER — v15
 # -------------------------------------------------
 
 # Palavras-chave que NÃO devem ser confundidas com visibilidade ou altitude
@@ -448,6 +455,8 @@ def parse_gamet(text):
     secn1 = re.sub(r"(\bSIGWX\b\s*:?)", r"\n\1", secn1)
     secn1 = re.sub(r"(\bTURB\b\s*:?)", r"\n\1", secn1)
     secn1 = re.sub(r"(\bICE\b\s*:?)", r"\n\1", secn1)
+    secn1 = re.sub(r"(\bMT\s+OBSC\b)", r"\n\1", secn1)
+    secn1 = re.sub(r"(\bVA\b\s*:?)", r"\n\1", secn1)
     secn1 = re.sub(r"(SIGMET\s+APPLICABLE)", r"\n\1", secn1)
 
     lines = [l.strip() for l in secn1.splitlines() if l.strip()]
@@ -479,6 +488,10 @@ def parse_gamet(text):
             new_state = "TURB"
         elif re.match(r"ICE", line):
             new_state = "ICE"
+        elif re.match(r"MT\s+OBSC", line):
+            new_state = "MT_OBSC"
+        elif re.match(r"VA\b", line):
+            new_state = "VA"
         elif re.match(r"SECN\s+I\b", line):
             state = "IDLE"
             current_polygon = FIR_POLYGON
@@ -489,7 +502,7 @@ def parse_gamet(text):
             current_polygon = FIR_POLYGON  # reset geo ao mudar de campo
             # Remover a keyword da linha para processar só o conteúdo
             content = re.sub(
-                r"^(SFC\s+VIS\s*:?|VIS\s*:|SIG\s+CLD\s*:?|CLD\s*:|SIGWX\s*:?|TURB\s*:?|ICE\s*:?)\s*",
+                r"^(SFC\s+VIS\s*:?|VIS\s*:|SIG\s+CLD\s*:?|CLD\s*:|SIGWX\s*:?|TURB\s*:?|ICE\s*:?|MT\s+OBSC\s*:?|VA\s*:?)\s*",
                 "", line
             ).strip()
         else:
@@ -513,34 +526,44 @@ def parse_gamet(text):
         # ---- PARSE por estado ----
 
         if state == "VIS":
-            # FIX: ignorar FL\d+ e HPA ao procurar metros de visibilidade
-            # Remove tokens FL### e ###HPA antes de procurar metros
             vis_content = _FL_PATTERN.sub("", content)
             vis_content = _HPA_PATTERN.sub("", vis_content)
 
-            # Captura KM (ex: 2.5KM → 2500m)
-            for m in re.finditer(r"\b(\d+(?:\.\d+)?)\s*KM\b", vis_content):
-                val = int(float(m.group(1)) * 1000)
-                blocks.append(MetBlock("VIS", poly, val, qualifier))
-
-            # Intervalo com M único no final: 2000-5000M → captura o mínimo (pior caso VFR)
-            for m in re.finditer(r"\b(\d{3,4})-(\d{3,4})M\b", vis_content):
-                val = min(int(m.group(1)), int(m.group(2)))
+            # BLW/ABV: usar valor conservador (BLW X → X-1, ABV X → X+1)
+            blw_m = re.search(r"\bBLW\s+(\d{3,4})M\b", vis_content)
+            abv_m = re.search(r"\bABV\s+(\d{3,4})M\b", vis_content)
+            if blw_m:
+                val = int(blw_m.group(1)) - 1
                 if 100 <= val <= 9999:
                     blocks.append(MetBlock("VIS", poly, val, qualifier))
-
-            # Valor simples: 2500M — ignora valores que já fazem parte de um intervalo
-            for m in re.finditer(r"(?<!\d)(\d{3,4})M\b", vis_content):
-                pos = m.start()
-                if vis_content[max(0, pos - 5):pos].rstrip().endswith("-"):
-                    continue
-                val = int(m.group(1))
+            elif abv_m:
+                val = int(abv_m.group(1)) + 1
                 if 100 <= val <= 9999:
                     blocks.append(MetBlock("VIS", poly, val, qualifier))
+            else:
+                # Captura KM
+                for m in re.finditer(r"\b(\d+(?:\.\d+)?)\s*KM\b", vis_content):
+                    val = int(float(m.group(1)) * 1000)
+                    blocks.append(MetBlock("VIS", poly, val, qualifier))
+
+                # Intervalo: 2000-5000M → mínimo
+                for m in re.finditer(r"\b(\d{3,4})-(\d{3,4})M\b", vis_content):
+                    val = min(int(m.group(1)), int(m.group(2)))
+                    if 100 <= val <= 9999:
+                        blocks.append(MetBlock("VIS", poly, val, qualifier))
+
+                # Valor simples
+                for m in re.finditer(r"(?<!\d)(\d{3,4})M\b", vis_content):
+                    pos = m.start()
+                    if vis_content[max(0, pos - 5):pos].rstrip().endswith("-"):
+                        continue
+                    val = int(m.group(1))
+                    if 100 <= val <= 9999:
+                        blocks.append(MetBlock("VIS", poly, val, qualifier))
 
         elif state == "CLD":
-            # FIX CRÍTICO: suporta formato "015-030/XXXHFT AGL" e "015HFT AGL"
-            # Padrão: BASE[-TOPO[/TOPO2]]HFT AGL
+            # Suporta "015-030/XXXHFT AGL", "015HFT AGL" e "035HFT AMSL"
+            # Range HFT AGL
             for m in re.finditer(
                 r"\b(\d{3})-(\d{3})(?:/[A-Z]+)?HFT\s+AGL\b",
                 content
@@ -548,14 +571,23 @@ def parse_gamet(text):
                 base_ft = int(m.group(1)) * 100
                 blocks.append(MetBlock("BASE_AGL", poly, base_ft, qualifier))
 
-            # Base única sem range (ex: 030HFT AGL)
+            # Base única HFT AGL
             for m in re.finditer(r"\b(\d{3})HFT\s+AGL\b", content):
-                # Verificar que não faz parte de um range já capturado
                 pos = m.start()
                 before = content[max(0, pos-4):pos]
                 if "-" not in before:
                     base_ft = int(m.group(1)) * 100
                     blocks.append(MetBlock("BASE_AGL", poly, base_ft, qualifier))
+
+            # AMSL — converter para AGL usando elevação máxima do sector (conservador)
+            # Usa ZONE_ELEVATION se disponível, senão assume 0ft
+            for m in re.finditer(r"\b(\d{3})HFT\s+AMSL\b", content):
+                pos = m.start()
+                before = content[max(0, pos-4):pos]
+                if "-" not in before:
+                    amsl_ft = int(m.group(1)) * 100
+                    # Sem info de sector aqui — guardar como BASE_AMSL para tratamento no build
+                    blocks.append(MetBlock("BASE_AMSL", poly, amsl_ft, qualifier))
 
         elif state == "SIGWX":
             # FIX: EMBD tratado separadamente e eleva risco
@@ -580,38 +612,64 @@ def parse_gamet(text):
                 blocks.append(MetBlock("TS", poly, ts_qualifier, qualifier))
 
         elif state == "TURB":
-            # FIX: captura camada vertical
             layer = ""
             layer_m = re.search(r"(SFC/FL\d+|FL\d+/FL\d+|SFC/\d+FT|ABV\s+FL\d+)", content)
             if layer_m:
                 layer = layer_m.group(1)
-
-            if "SEV" in content:
+            # HVY eleva para SEV
+            if "HVY" in content or "SEV" in content:
                 severity = "SEV"
             elif "MOD" in content:
                 severity = "MOD"
             else:
                 severity = None
-
+            # Movimento
+            mov = ""
+            if "STNR" in content:
+                mov = "STNR"
+            elif re.search(r"MOV\s+[A-Z]{1,3}\s+\d+KT", content):
+                mov_m = re.search(r"MOV\s+([A-Z]{1,3}\s+\d+KT)", content)
+                if mov_m:
+                    mov = f"MOV {mov_m.group(1)}"
+            # Tendência
+            trend = ""
+            if "INTSF" in content:
+                trend = "INTSF"
+            elif "WKN" in content:
+                trend = "WKN"
             if severity:
-                blocks.append(MetBlock("TURB", poly, severity, qualifier, layer))
+                extra = " ".join(filter(None, [mov, trend]))
+                blocks.append(MetBlock("TURB", poly, severity, qualifier,
+                                       layer + (f" {extra}" if extra else "")))
 
         elif state == "ICE":
-            # FIX: captura nível de gelo
             layer = ""
             layer_m = re.search(r"(ABV\s+FL\d+|FL\d+/FL\d+|SFC/FL\d+)", content)
             if layer_m:
                 layer = layer_m.group(1)
-
-            if "SEV" in content:
+            # HVY eleva SEV
+            if "HVY" in content or "SEV" in content:
                 severity = "SEV"
             elif "MOD" in content:
                 severity = "MOD"
             else:
                 severity = None
-
+            # Tendência
+            trend = ""
+            if "INTSF" in content:
+                trend = "INTSF"
+            elif "WKN" in content:
+                trend = "WKN"
             if severity:
-                blocks.append(MetBlock("ICE", poly, severity, qualifier, layer))
+                blocks.append(MetBlock("ICE", poly, severity, qualifier, layer + (f" {trend}" if trend else "")))
+
+        elif state == "MT_OBSC":
+            # Montanhas obscurecidas — sempre NO-GO para VFR
+            blocks.append(MetBlock("MT_OBSC", poly, "MT OBSC", qualifier))
+
+        elif state == "VA":
+            # Cinzas vulcânicas — sempre NO-GO
+            blocks.append(MetBlock("VA", poly, "VA", qualifier))
 
     # ---- Extração Secção II: FZLVL, QNH e vento ----
     fzlvl_values = [int(m) for m in re.findall(r"(\d{4,5})FT\s+AMSL", secn2)]
@@ -643,13 +701,18 @@ def build_zone_data(blocks, threshold=0.15):
                 continue
             if block.phenomenon == "BASE_AGL":
                 zone_data[zone].append(("BASE", block.value, block.qualifier, block.layer))
+            elif block.phenomenon == "BASE_AMSL":
+                # Converter AMSL → AGL usando elevação máxima do sector (conservador)
+                elev = ZONE_ELEVATION.get(zone, 0)
+                agl_ft = max(0, block.value - elev)
+                zone_data[zone].append(("BASE", agl_ft, block.qualifier, block.layer))
             else:
                 zone_data[zone].append((block.phenomenon, block.value, block.qualifier, block.layer))
 
     return zone_data
 
 # -------------------------------------------------
-# DECISION — v12
+# DECISION — v15
 # -------------------------------------------------
 
 # Hierarquia de risco TS (do mais grave para o menos grave)
@@ -663,11 +726,13 @@ TS_RISK = {
 }
 
 def decision(events):
-    vis_vals  = [v for t, v, *_ in events if t == "VIS"]
-    base_vals = [v for t, v, *_ in events if t == "BASE"]
-    ts_vals   = [v for t, v, *_ in events if t == "TS"]
-    turb_vals = [v for t, v, *_ in events if t == "TURB"]
-    ice_vals  = [v for t, v, *_ in events if t == "ICE"]
+    vis_vals    = [v for t, v, *_ in events if t == "VIS"]
+    base_vals   = [v for t, v, *_ in events if t == "BASE"]
+    ts_vals     = [v for t, v, *_ in events if t == "TS"]
+    turb_vals   = [v for t, v, *_ in events if t == "TURB"]
+    ice_vals    = [v for t, v, *_ in events if t == "ICE"]
+    mt_obsc     = [v for t, v, *_ in events if t == "MT_OBSC"]
+    va_vals     = [v for t, v, *_ in events if t == "VA"]
 
     # Camadas verticais de TURB e ICE (para mostrar no briefing)
     turb_layers = [layer for t, v, q, layer in events if t == "TURB" and layer]
@@ -711,6 +776,16 @@ def decision(events):
             decision_level = "MARGINAL"
         reasons.append(f"BASE {base}ft < 500ft")
 
+    # ---- Cinzas vulcânicas — sempre NO-GO ----
+    if va_vals:
+        decision_level = "NO-GO"
+        reasons.append("VA (cinzas vulcânicas) — NO-GO imediato")
+
+    # ---- Montanhas obscurecidas — NO-GO para VFR ----
+    if mt_obsc:
+        decision_level = "NO-GO"
+        reasons.append("MT OBSC (montanhas obscurecidas) — NO-GO VFR")
+
     # ---- Trovoadas ----
     if ts_max_risk >= 2:
         decision_level = "NO-GO"
@@ -720,7 +795,7 @@ def decision(events):
             decision_level = "MARGINAL"
         reasons.append(f"TS {'/'.join(_ts_label(v) for v in ts_vals)}")
 
-    return decision_level, vis, base, ts_vals, turb_vals, turb_layers, ice_vals, ice_layers, reasons
+    return decision_level, vis, base, ts_vals, turb_vals, turb_layers, ice_vals, ice_layers, mt_obsc, va_vals, reasons
 
 # -------------------------------------------------
 # PDF EXPORT — v14
@@ -745,7 +820,7 @@ def _pdf_briefing_page(pdf, results, gamet_text, validity_label):
 
     col_x = [0.05, 0.37, 0.69]
     for idx, z in enumerate(ZONES):
-        dec, vis, base, ts, turb, turb_layers, ice, ice_layers, reasons = results[z]
+        dec, vis, base, ts, turb, turb_layers, ice, ice_layers, mt_obsc, va_vals, reasons = results[z]
         cx = col_x[idx]
         color = colors.get(dec, "#888")
 
@@ -779,6 +854,10 @@ def _pdf_briefing_page(pdf, results, gamet_text, validity_label):
             entries.append(f"ICE:  {ice_str}")
         else:
             entries.append("ICE:  —")
+        if va_vals:
+            entries.append("VA:   CINZAS VULC.")
+        if mt_obsc:
+            entries.append("MTOBS: MONT. OBSC.")
 
         row_y = y - 0.068  # abaixo das 2 linhas do cabeçalho
         for entry in entries:
@@ -882,7 +961,7 @@ def generate_pdf(results, gamet_text, fzlvl_min, qnh_min, validity_label) -> byt
         # Metadados
         d = pdf.infodict()
         d["Title"]   = "LPPC GAMET Briefing VFR"
-        d["Author"]  = "GAMET Decoder v14.0"
+        d["Author"]  = "GAMET Decoder v15.0"
         d["Subject"] = "Briefing meteorológico VFR – FIR LPPC"
     buf.seek(0)
     return buf.getvalue()
@@ -928,7 +1007,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     cols = st.columns(3)
 
     for i, z in enumerate(ZONES):
-        dec, vis, base, ts, turb, turb_layers, ice, ice_layers, reasons = results[z]
+        dec, vis, base, ts, turb, turb_layers, ice, ice_layers, mt_obsc, va_vals, reasons = results[z]
 
         with cols[i]:
             st.markdown(f"### {z}")
@@ -961,6 +1040,9 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
                 st.write(f"❄️ ICE: {ice_str}")
             else:
                 st.write("❄️ ICE: —")
+
+            st.write("🌋 VA: ⚠️ CINZAS VULCÂNICAS" if va_vals else "🌋 VA: —")
+            st.write("⛰️ MT OBSC: ⚠️ MONTANHAS OBSCURECIDAS" if mt_obsc else "⛰️ MT OBSC: —")
 
             if reasons:
                 with st.expander("ℹ️ Motivos da decisão", expanded=True):
@@ -1037,6 +1119,17 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
 **QNH mínimo:**
 - Pressão atmosférica mínima prevista na área. Usa este valor para calibrar o altímetro se voares para o ponto mais baixo da FIR.
+
+**Outros fenómenos:**
+- ⛰️ MT OBSC – Montanhas obscurecidas por nuvens ou neblina. NO-GO imediato para VFR — terreno elevado invisível.
+- 🌋 VA – Cinzas vulcânicas. NO-GO imediato — perigo para motores e visibilidade.
+- BLW – Abaixo de (ex: VIS BLW 1500M → visibilidade inferior a 1500m).
+- ABV – Acima de (ex: VIS ABV 5000M → visibilidade superior a 5000m).
+- HVY – Intensidade elevada (equivale a SEV para decisão VFR).
+- INTSF – Fenómeno em intensificação (tendência de agravamento).
+- WKN – Fenómeno em enfraquecimento (tendência de melhoria).
+- STNR – Fenómeno estacionário.
+- MOV – Fenómeno em movimento (ex: MOV NE 15KT).
 """)
 
     # ---- Exportar PDF ----
