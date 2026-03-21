@@ -1,27 +1,51 @@
 import streamlit as st
 import re
+import io
 import time
 import requests
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
 from shapely.geometry import box, Polygon, MultiPolygon
 from shapely.ops import unary_union
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 # -------------------------------------------------
 # CONFIG
 # -------------------------------------------------
 
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v12.0")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v13.0")
 
 # -------------------------------------------------
 # IPMA SELF-BRIEFING — fetch automático
 # -------------------------------------------------
 
 _SIGMET_URL = "https://brief-ng.ipma.pt/showsigmet.php"
+
+# Horas UTC de emissão do GAMET (0300, 0900, 1500, 2100Z)
+_GAMET_HOURS = [3, 9, 15, 21]
+
+def next_gamet_time() -> datetime:
+    """Calcula o próximo momento de emissão do GAMET em UTC."""
+    now = datetime.now(timezone.utc)
+    for h in _GAMET_HOURS:
+        candidate = now.replace(hour=h, minute=5, second=0, microsecond=0)
+        if candidate > now:
+            return candidate
+    # Nenhum hoje — próximo é amanhã às 03Z
+    tomorrow = now + timedelta(days=1)
+    return tomorrow.replace(hour=3, minute=5, second=0, microsecond=0)
+
+def format_countdown(dt: datetime) -> str:
+    """Formata tempo restante até dt em hh:mm:ss."""
+    delta = dt - datetime.now(timezone.utc)
+    total = max(0, int(delta.total_seconds()))
+    h, rem = divmod(total, 3600)
+    m, s   = divmod(rem, 60)
+    return f"{h:02d}:{m:02d}:{s:02d}"
 
 def fetch_gamet_ipma() -> tuple:
     """
@@ -58,16 +82,30 @@ def fetch_gamet_ipma() -> tuple:
 # UI — carregamento automático
 # -------------------------------------------------
 
-with st.expander("📡 Carregar GAMET do IPMA", expanded=False):
-    if st.button("🔄 Carregar GAMET do Self-Briefing IPMA"):
-        with st.spinner("A carregar do Self-Briefing IPMA..."):
-            ok, result = fetch_gamet_ipma()
-        if ok:
-            st.session_state["gamet_loaded"] = result
-            st.session_state["gamet_loaded_at"] = datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%MZ")
-            st.success("✅ GAMET carregado com sucesso!")
-        else:
-            st.error(f"❌ {result}")
+# Auto-fetch ao arrancar se não há GAMET em sessão
+if "gamet_loaded" not in st.session_state:
+    with st.spinner("A carregar GAMET do Self-Briefing IPMA..."):
+        ok, result = fetch_gamet_ipma()
+    if ok:
+        st.session_state["gamet_loaded"]    = result
+        st.session_state["gamet_loaded_at"] = datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%MZ")
+
+with st.expander("📡 GAMET do IPMA", expanded=False):
+    col_btn, col_next = st.columns([1, 2])
+    with col_btn:
+        if st.button("🔄 Recarregar GAMET"):
+            with st.spinner("A carregar..."):
+                ok, result = fetch_gamet_ipma()
+            if ok:
+                st.session_state["gamet_loaded"]    = result
+                st.session_state["gamet_loaded_at"] = datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%MZ")
+                st.success("✅ GAMET actualizado!")
+            else:
+                st.error(f"❌ {result}")
+    with col_next:
+        nxt = next_gamet_time()
+        st.info(f"⏭️ Próximo GAMET esperado: **{nxt.strftime('%H:%MZ')}** "
+                f"(em {format_countdown(nxt)})")
 
     if "gamet_loaded_at" in st.session_state:
         st.caption(f"⏱️ Carregado às {st.session_state['gamet_loaded_at']}")
@@ -546,16 +584,183 @@ def decision(events):
     return decision_level, vis, base, ts_vals, turb_vals, turb_layers, ice_vals, ice_layers, reasons
 
 # -------------------------------------------------
+# PDF EXPORT — v13
+# -------------------------------------------------
+
+def _pdf_briefing_page(pdf, results, gamet_text, validity_label):
+    """Página 1 — Decisão VFR por sector."""
+    fig, ax = plt.subplots(figsize=(8.27, 11.69))  # A4
+    ax.axis("off")
+    fig.patch.set_facecolor("white")
+
+    colors = {"GO": "#2ecc71", "MARGINAL": "#e67e22", "NO-GO": "#e74c3c"}
+    y = 0.97
+
+    ax.text(0.5, y, "LPPC GAMET – Briefing VFR", ha="center", va="top",
+            fontsize=16, fontweight="bold", transform=ax.transAxes)
+    y -= 0.04
+    if validity_label:
+        ax.text(0.5, y, validity_label, ha="center", va="top",
+                fontsize=9, color="#555", transform=ax.transAxes)
+    y -= 0.04
+
+    col_x = [0.05, 0.37, 0.69]
+    for idx, z in enumerate(ZONES):
+        dec, vis, base, ts, turb, turb_layers, ice, ice_layers, reasons = results[z]
+        cx = col_x[idx]
+        color = colors.get(dec, "#888")
+
+        # Cabeçalho do sector
+        ax.text(cx, y, z, va="top", fontsize=11, fontweight="bold",
+                transform=ax.transAxes)
+        ax.text(cx + 0.28, y, dec, va="top", fontsize=11, fontweight="bold",
+                color=color, ha="right", transform=ax.transAxes)
+
+        dy = 0.038
+        entries = [
+            f"VIS:  {vis} m"        if vis  is not None else "VIS:  —",
+            f"BASE: {base} ft AGL"  if base is not None else "BASE: —",
+            f"TS:   {', '.join(_ts_label(v) for v in ts)}" if ts else "TS:   —",
+        ]
+        # TURB com camada
+        if turb:
+            turb_str = ", ".join(
+                f"{v} ({turb_layers[idx]})" if idx < len(turb_layers) and turb_layers[idx] else v
+                for idx, v in enumerate(turb)
+            )
+            entries.append(f"TURB: {turb_str}")
+        else:
+            entries.append("TURB: —")
+        # ICE com camada
+        if ice:
+            ice_str = ", ".join(
+                f"{v} ({ice_layers[idx]})" if idx < len(ice_layers) and ice_layers[idx] else v
+                for idx, v in enumerate(ice)
+            )
+            entries.append(f"ICE:  {ice_str}")
+        else:
+            entries.append("ICE:  —")
+
+        row_y = y - dy
+        for entry in entries:
+            ax.text(cx, row_y, entry, va="top", fontsize=8,
+                    fontfamily="monospace", transform=ax.transAxes)
+            row_y -= dy
+
+        # Motivos
+        if reasons:
+            row_y -= 0.005
+            ax.text(cx, row_y, "Motivos:", va="top", fontsize=7,
+                    color="#555", transform=ax.transAxes)
+            row_y -= dy * 0.8
+            for r in reasons:
+                ax.text(cx, row_y, f"  • {r}", va="top", fontsize=7,
+                        color="#555", transform=ax.transAxes)
+                row_y -= dy * 0.8
+
+    # Rodapé com texto bruto
+    y_raw = 0.38
+    ax.axhline(y_raw + 0.02, color="#ccc", linewidth=0.5, transform=ax.transAxes)
+    ax.text(0.05, y_raw, "Texto GAMET original:", va="top", fontsize=7,
+            fontweight="bold", color="#555", transform=ax.transAxes)
+    raw_lines = [gamet_text[i:i+100] for i in range(0, min(len(gamet_text), 600), 100)]
+    for rl in raw_lines:
+        y_raw -= 0.03
+        ax.text(0.05, y_raw, rl, va="top", fontsize=6,
+                fontfamily="monospace", color="#777", transform=ax.transAxes)
+
+    pdf.savefig(fig, bbox_inches="tight")
+    plt.close(fig)
+
+
+def _pdf_map_page(pdf, results):
+    """Página 2 — Mapa por sector."""
+    fig, ax = plt.subplots(figsize=(8.27, 11.69))
+    fig.patch.set_facecolor("white")
+    colors = {"GO": "green", "MARGINAL": "orange", "NO-GO": "red"}
+
+    for z, poly in ZONES.items():
+        dec = results[z][0]
+        geoms = poly.geoms if isinstance(poly, MultiPolygon) else [poly]
+        for g in geoms:
+            x, y = g.exterior.xy
+            ax.fill(x, y, alpha=0.35, color=colors[dec])
+            ax.plot(x, y, color=colors[dec], linewidth=1)
+
+    for name, (lat, lon) in CITIES.items():
+        ax.plot(lon, lat, "ko", markersize=3)
+        ax.text(lon + 0.05, lat, name, fontsize=7)
+
+    ax.set_aspect("equal")
+    ax.grid(True, linestyle="--", alpha=0.4)
+    ax.set_title("Mapa VFR – FIR LPPC", fontsize=12, fontweight="bold")
+    ax.legend(handles=[
+        Patch(facecolor="green",  alpha=0.35, label="GO"),
+        Patch(facecolor="orange", alpha=0.35, label="MARGINAL"),
+        Patch(facecolor="red",    alpha=0.35, label="NO-GO"),
+        Line2D([0],[0], marker="o", color="black", linestyle="None", label="Cidade"),
+    ])
+
+    pdf.savefig(fig, bbox_inches="tight")
+    plt.close(fig)
+
+
+def _pdf_secn2_page(pdf, fzlvl_min, qnh_min):
+    """Página 3 — Dados adicionais Secção II."""
+    fig, ax = plt.subplots(figsize=(8.27, 11.69))
+    ax.axis("off")
+    fig.patch.set_facecolor("white")
+
+    ax.text(0.5, 0.95, "Dados Adicionais – Secção II",
+            ha="center", va="top", fontsize=14, fontweight="bold",
+            transform=ax.transAxes)
+
+    entries = []
+    if fzlvl_min:
+        entries.append(f"Nível de gelo mínimo (FZLVL): {fzlvl_min} ft AMSL")
+    if qnh_min:
+        entries.append(f"QNH mínimo: {qnh_min} hPa")
+
+    y = 0.85
+    for entry in entries:
+        ax.text(0.1, y, entry, va="top", fontsize=11,
+                transform=ax.transAxes)
+        y -= 0.06
+
+    pdf.savefig(fig, bbox_inches="tight")
+    plt.close(fig)
+
+
+def generate_pdf(results, gamet_text, fzlvl_min, qnh_min, validity_label) -> bytes:
+    """Gera um PDF completo (briefing + mapa + secção II) e devolve os bytes."""
+    buf = io.BytesIO()
+    with PdfPages(buf) as pdf:
+        _pdf_briefing_page(pdf, results, gamet_text, validity_label)
+        _pdf_map_page(pdf, results)
+        if fzlvl_min or qnh_min:
+            _pdf_secn2_page(pdf, fzlvl_min, qnh_min)
+        # Metadados
+        d = pdf.infodict()
+        d["Title"]   = "LPPC GAMET Briefing VFR"
+        d["Author"]  = "GAMET Decoder v13.0"
+        d["Subject"] = "Briefing meteorológico VFR – FIR LPPC"
+    buf.seek(0)
+    return buf.getvalue()
+
+
+# -------------------------------------------------
 # EXECUÇÃO
 # -------------------------------------------------
 
 if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     # ---- Validade ----
+    validity_label = ""
     start_dt, end_dt, active = parse_validity(gamet_text)
     if start_dt and end_dt:
         fmt = "%d/%H%MZ"
-        label = f"⏱️ Válido: {start_dt.strftime(fmt)} – {end_dt.strftime(fmt)}"
+        validity_label = f"Válido: {start_dt.strftime(fmt)} – {end_dt.strftime(fmt)}"
+        label = f"⏱️ {validity_label}"
         if active:
             st.success(label + " ✅ Em vigor")
         else:
@@ -680,6 +885,18 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 **QNH mínimo:**
 - Pressão atmosférica mínima prevista na área. Usa este valor para calibrar o altímetro se voares para o ponto mais baixo da FIR.
 """)
+
+    # ---- Exportar PDF ----
+    st.subheader("📄 Exportar Briefing")
+    with st.spinner("A gerar PDF..."):
+        pdf_bytes = generate_pdf(results, gamet_text, fzlvl_min, qnh_min, validity_label)
+    fname = f"briefing_lppc_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%MZ')}.pdf"
+    st.download_button(
+        label="⬇️ Descarregar Briefing PDF",
+        data=pdf_bytes,
+        file_name=fname,
+        mime="application/pdf",
+    )
 
     # ---- Mapa ----
     st.subheader("🌍 Mapa")
