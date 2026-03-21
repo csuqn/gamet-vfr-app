@@ -1086,6 +1086,9 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         st.warning("Folium não instalado — mapa estático disponível no PDF.")
 
     # ---- Vento por níveis ----
+    # DEBUG temporário — remover após confirmação
+    st.caption(f"🔧 Debug: wind_data tem {len(wind_data)} estações")
+
     if wind_data:
         st.subheader("💨 Vento e Temperatura por Níveis")
         levels = _WIND_LEVELS
