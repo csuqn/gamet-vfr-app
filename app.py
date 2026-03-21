@@ -660,7 +660,8 @@ def _pdf_briefing_page(pdf, results, gamet_text, validity_label):
 
     # Rodapé com texto bruto
     y_raw = 0.38
-    ax.axhline(y_raw + 0.02, color="#ccc", linewidth=0.5, transform=ax.transAxes)
+    ax.plot([0.05, 0.95], [y_raw + 0.02, y_raw + 0.02],
+            color="#ccc", linewidth=0.5, transform=ax.transAxes)
     ax.text(0.05, y_raw, "Texto GAMET original:", va="top", fontsize=7,
             fontweight="bold", color="#555", transform=ax.transAxes)
     raw_lines = [gamet_text[i:i+100] for i in range(0, min(len(gamet_text), 600), 100)]
