@@ -610,11 +610,11 @@ def _pdf_briefing_page(pdf, results, gamet_text, validity_label):
         cx = col_x[idx]
         color = colors.get(dec, "#888")
 
-        # Cabeçalho do sector
-        ax.text(cx, y, z, va="top", fontsize=11, fontweight="bold",
+        # Cabeçalho do sector — nome e decisão em linhas separadas
+        ax.text(cx, y, z, va="top", fontsize=10, fontweight="bold",
                 transform=ax.transAxes)
-        ax.text(cx + 0.28, y, dec, va="top", fontsize=11, fontweight="bold",
-                color=color, ha="right", transform=ax.transAxes)
+        ax.text(cx, y - 0.030, dec, va="top", fontsize=10, fontweight="bold",
+                color=color, transform=ax.transAxes)
 
         dy = 0.038
         entries = [
@@ -641,7 +641,7 @@ def _pdf_briefing_page(pdf, results, gamet_text, validity_label):
         else:
             entries.append("ICE:  —")
 
-        row_y = y - dy
+        row_y = y - 0.068  # abaixo das 2 linhas do cabeçalho
         for entry in entries:
             ax.text(cx, row_y, entry, va="top", fontsize=8,
                     fontfamily="monospace", transform=ax.transAxes)
