@@ -188,6 +188,11 @@ def parse_validity(text):
 # GEO
 # -------------------------------------------------
 
+def _lon(deg, minn, hemi):
+    """Converte graus+minutos numa longitude com sinal (W negativo, E positivo)."""
+    val = int(deg) + int(minn) / 60
+    return -val if hemi == "W" else val
+
 def extract_polygon(line):
     poly = FIR_POLYGON
     geo_found = False
@@ -239,11 +244,6 @@ def extract_polygon(line):
 # Palavras-chave que NÃO devem ser confundidas com visibilidade ou altitude
 _FL_PATTERN = re.compile(r"FL\d{2,3}")          # FL050, FL100, FL150 …
 _HPA_PATTERN = re.compile(r"\d+\s*HPA")         # 986HPA, 1005HPA …
-
-def _lon(deg, minn, hemi):
-    """Converte graus+minutos numa longitude com sinal (W negativo, E positivo)."""
-    val = int(deg) + int(minn) / 60
-    return -val if hemi == "W" else val
 
 _TS_DISPLAY = {
     "ISOL_EMBD": "ISOL/EMBD",
@@ -578,7 +578,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
             st.write(f"☁️ BASE: {base} ft AGL"       if base is not None else "☁️ BASE: —")
             st.write(f"⛈️ TS: {', '.join(_ts_label(v) for v in ts)}"   if ts   else "⛈️ TS: —")
             st.write(f"🌪 TURB: {', '.join(turb)}"   if turb else "🌪 TURB: —")
-            st.write(f"❄ ICE: {', '.join(ice)}"      if ice  else "❄ ICE: —")
+            st.write(f"❄️ ICE: {', '.join(ice)}"      if ice  else "❄️ ICE: —")
 
             if reasons:
                 with st.expander("ℹ️ Motivos da decisão", expanded=True):
@@ -599,21 +599,62 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     # ---- Legenda ----
     with st.expander("📖 Legenda do Briefing", expanded=False):
         st.markdown("""
+### 📐 Referência técnica
+
 **Decisão VFR:**
 - 🟢 GO – Condições VFR aceitáveis
 - 🟠 MARGINAL – Próximo dos mínimos (precaução)
 - 🔴 NO-GO – Abaixo dos mínimos ou TS de risco alto
 
 **Campos:**
-- 👁️ VIS – Visibilidade (m); LCA = condição localizada
-- ☁️ BASE – Base de nuvens significativas (ft AGL)
-- ⛈️ TS – Trovoadas: ISOL (isolada) / OCNL / FRQ / EMBD (embutida)
-- 🌪 TURB – Turbulência: MOD / SEV
-- ❄ ICE – Gelo: MOD / SEV
+- 👁️ VIS – Visibilidade horizontal em metros. LCA = condição localizada (não cobre toda a área)
+- ☁️ BASE – Base das nuvens convectivas significativas em ft AGL (acima do solo)
+- ⛈️ TS – Trovoadas: ISOL / OCNL / FRQ / EMBD
+- 🌪 TURB – Turbulência: MOD (moderada) / SEV (severa)
+- ❄️ ICE – Gelo em voo: MOD (moderado) / SEV (severo)
 
 **Regras de decisão TS:**
 - ISOL → MARGINAL
 - OCNL / GEN / ISOL/EMBD / EMBD / FRQ → NO-GO
+
+---
+
+### 🧑‍✈️ O que significa para mim?
+
+**Decisão:**
+- 🟢 GO – As condições estão dentro dos mínimos. Voo VFR possível com atenção normal.
+- 🟠 MARGINAL – As condições estão no limite. Voa apenas se tiveres experiência e alternativas claras. Monitoriza a meteorologia em voo.
+- 🔴 NO-GO – Não descolares em VFR. As condições estão abaixo dos mínimos legais ou há trovoadas significativas.
+
+**Visibilidade (VIS):**
+- Abaixo de 3000m começas a ter dificuldade em ver e evitar obstáculos e outro tráfego.
+- Abaixo de 1500m o voo VFR é ilegal na maioria das classes de espaço aéreo.
+- LCA significa que a má visibilidade é localizada — pode ser nevoeiro numa zona específica, não em toda a rota.
+
+**Base das nuvens (BASE):**
+- Indica a que altitude as nuvens convectivas (trovoadas ou cumulus) começam.
+- Abaixo de 500ft AGL tens muito pouco espaço para voar por baixo das nuvens.
+- Abaixo de 300ft AGL o voo VFR é praticamente impossível em segurança.
+
+**Trovoadas (TS):**
+- ISOL (isoladas) – Menos de 25% da área afetada. Visíveis e evitáveis, mas requerem desvio.
+- OCNL (ocasionais) – Entre 25% e 50% da área. Difíceis de evitar completamente.
+- FRQ (frequentes) – Mais de 50% da área. Praticamente impossível voar sem atravessar áreas perigosas.
+- EMBD (embutidas) – Trovoadas escondidas dentro de nuvens. Não as consegues ver. Extremamente perigosas — evitar sempre.
+- ISOL/EMBD – Isoladas mas embutidas em nuvens. Invisíveis ao piloto — tratar como OCNL.
+
+**Turbulência (TURB):**
+- MOD (moderada) – Dificulta o controlo da aeronave. Objetos soltos podem mover-se na cabine. Reduz o conforto e aumenta a fadiga.
+- SEV (severa) – Pode causar perda temporária de controlo. Objetos podem ser projetados. Evitar esta área.
+
+**Gelo em voo (ICE):**
+- Forma-se quando a aeronave voa através de nuvens com temperatura abaixo de 0°C.
+- MOD (moderado) – Acumulação significativa. Perigoso para aeronaves sem sistema anti-gelo.
+- SEV (severo) – Acumulação rápida e intensa. Perigoso mesmo com sistema anti-gelo. Evitar.
+- O FZLVL (nível de gelo) indica a altitude a partir da qual a temperatura desce abaixo de 0°C.
+
+**QNH mínimo:**
+- Pressão atmosférica mínima prevista na área. Usa este valor para calibrar o altímetro se voares para o ponto mais baixo da FIR.
 """)
 
     # ---- Mapa ----
