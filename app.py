@@ -3,7 +3,17 @@ import re
 import io
 import time
 import requests
+try:
+    import folium
+    _FOLIUM_OK = True
+except ImportError:
+    _FOLIUM_OK = False
 import matplotlib.pyplot as plt
+try:
+    import pandas as pd
+    _PANDAS_OK = True
+except ImportError:
+    _PANDAS_OK = False
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
@@ -17,7 +27,7 @@ from datetime import datetime, timezone, timedelta
 # -------------------------------------------------
 
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v13.0")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v14.0")
 
 # -------------------------------------------------
 # IPMA SELF-BRIEFING — fetch automático
@@ -280,6 +290,133 @@ def extract_polygon(line):
     return poly if geo_found else None
 
 # -------------------------------------------------
+# WIND PARSER — v14
+# -------------------------------------------------
+
+# Níveis do GAMET na ordem de emissão
+_WIND_LEVELS = ["1000FT AGL", "2000FT AGL", "5000FT AGL", "FL100", "FL150"]
+
+def parse_wind(secn2: str) -> list:
+    """
+    Extrai tabela de vento/temperatura da Secção II.
+    Devolve lista de dicts:
+      [{"station": str, "lat": float, "lon": float,
+        "levels": {"1000FT AGL": {"dir":..,"spd":..,"temp":..}, ...}}, ...]
+    """
+    if not secn2:
+        return []
+
+    # Isolar bloco WIND/T
+    wm = re.search(r"WIND/T\s*:(.*?)(?:FZLVL|MNM\s+QNH|$)", secn2, re.DOTALL)
+    if not wm:
+        return []
+    wind_block = wm.group(1)
+
+    # Dividir em grupos de 3 estações separados por FZLVL
+    # Cada grupo: NOMES / COORDENADAS / 5 linhas de vento
+    stations = []
+
+    # Encontrar todos os nomes de estações (palavras maiúsculas sem dígitos)
+    name_matches = list(re.finditer(
+        r"\b([A-Z]{3,}(?:\s+[A-Z]{2,})?)\b(?=\s+[A-Z]{3,}|\s+N\d{4})",
+        wind_block
+    ))
+
+    # Abordagem mais robusta: tokenizar linha a linha
+    lines = [l.strip() for l in wind_block.splitlines() if l.strip()]
+
+    # Identificar blocos de estações
+    # Cada bloco começa com linha de nomes, depois coords, depois 5 linhas de vento
+    i = 0
+    current_names  = []
+    current_coords = []
+    level_lines    = []
+
+    def _parse_coord_line(line):
+        """Extrai pares (lat, lon) de uma linha de coordenadas."""
+        coords = []
+        for m in re.finditer(r"N(\d{2})(\d{2})\s+W(\d{2,3})(\d{2})", line):
+            lat = int(m.group(1)) + int(m.group(2)) / 60
+            lon = -(int(m.group(3)) + int(m.group(4)) / 60)
+            coords.append((lat, lon))
+        return coords
+
+    def _parse_wind_entry(token):
+        """Extrai dir/spd/temp de um token tipo '170/007KT PS11'."""
+        m = re.match(r"(\d{3})/(\d{3})KT\s+(PS|MS)(\d+)", token)
+        if m:
+            sign = 1 if m.group(3) == "PS" else -1
+            return {
+                "dir":  int(m.group(1)),
+                "spd":  int(m.group(2)),
+                "temp": sign * int(m.group(4)),
+            }
+        return None
+
+    def _is_station_name_line(line):
+        """True se a linha contém só nomes de estações (sem dígitos)."""
+        return bool(re.match(r"^[A-Z][A-Z\s]+$", line)) and not re.search(r"\d", line)
+
+    def _is_coord_line(line):
+        return bool(re.search(r"N\d{4}\s+W\d{4,5}", line))
+
+    def _is_level_line(line):
+        return bool(re.match(r"(\d{4}FT\s+AGL|FL\d{3})", line))
+
+    def flush_group(names, coords, lvl_lines):
+        """Cria entradas de estação a partir de um grupo recolhido."""
+        n = min(len(names), len(coords))
+        entries = []
+        for k in range(n):
+            entry = {
+                "station": names[k],
+                "lat": coords[k][0],
+                "lon": coords[k][1],
+                "levels": {},
+            }
+            for lvl_line in lvl_lines:
+                # Extrair nível e os n tokens de vento
+                lm = re.match(r"(\d{4}FT\s+AGL|FL\d{3})\s+(.*)", lvl_line)
+                if not lm:
+                    continue
+                level_key = lm.group(1)
+                rest = lm.group(2)
+                # Cada estação tem: DDD/DDDKT PSxx ou MSxx
+                tokens = re.findall(r"\d{3}/\d{3}KT\s+(?:PS|MS)\d+", rest)
+                if k < len(tokens):
+                    parsed = _parse_wind_entry(tokens[k])
+                    if parsed:
+                        entry["levels"][level_key] = parsed
+            entries.append(entry)
+        return entries
+
+    # Parse linha a linha
+    cur_names  = []
+    cur_coords = []
+    cur_levels = []
+
+    for line in lines:
+        if _is_station_name_line(line):
+            # Novo grupo — flush anterior se existir
+            if cur_names and cur_coords and cur_levels:
+                stations.extend(flush_group(cur_names, cur_coords, cur_levels))
+            cur_names  = line.split()
+            cur_coords = []
+            cur_levels = []
+        elif _is_coord_line(line):
+            cur_coords = _parse_coord_line(line)
+        elif _is_level_line(line):
+            cur_levels.append(line)
+
+    # Flush último grupo
+    if cur_names and cur_coords and cur_levels:
+        stations.extend(flush_group(cur_names, cur_coords, cur_levels))
+
+    return stations
+
+
+
+# -------------------------------------------------
 # PARSER — v12
 # -------------------------------------------------
 
@@ -476,14 +613,16 @@ def parse_gamet(text):
             if severity:
                 blocks.append(MetBlock("ICE", poly, severity, qualifier, layer))
 
-    # ---- Extração Secção II: FZLVL e QNH mínimo ----
+    # ---- Extração Secção II: FZLVL, QNH e vento ----
     fzlvl_values = [int(m) for m in re.findall(r"(\d{4,5})FT\s+AMSL", secn2)]
     fzlvl_min = min(fzlvl_values) if fzlvl_values else None
 
     qnh_m = re.search(r"MNM\s+QNH\s*:?\s*(\d{3,4})\s*HPA", secn2)
     qnh_min = int(qnh_m.group(1)) if qnh_m else None
 
-    return blocks, fzlvl_min, qnh_min
+    wind_data = parse_wind(secn2)
+
+    return blocks, fzlvl_min, qnh_min, wind_data
 
 # -------------------------------------------------
 # BUILD
@@ -584,7 +723,7 @@ def decision(events):
     return decision_level, vis, base, ts_vals, turb_vals, turb_layers, ice_vals, ice_layers, reasons
 
 # -------------------------------------------------
-# PDF EXPORT — v13
+# PDF EXPORT — v14
 # -------------------------------------------------
 
 def _pdf_briefing_page(pdf, results, gamet_text, validity_label):
@@ -743,7 +882,7 @@ def generate_pdf(results, gamet_text, fzlvl_min, qnh_min, validity_label) -> byt
         # Metadados
         d = pdf.infodict()
         d["Title"]   = "LPPC GAMET Briefing VFR"
-        d["Author"]  = "GAMET Decoder v13.0"
+        d["Author"]  = "GAMET Decoder v14.0"
         d["Subject"] = "Briefing meteorológico VFR – FIR LPPC"
     buf.seek(0)
     return buf.getvalue()
@@ -767,9 +906,22 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         else:
             st.warning(label + " ⚠️ FORA DO PERÍODO DE VALIDADE — dados podem estar desatualizados")
 
-    blocks, fzlvl_min, qnh_min = parse_gamet(gamet_text)
+    blocks, fzlvl_min, qnh_min, wind_data = parse_gamet(gamet_text)
     zone_data  = build_zone_data(blocks)
     results    = {z: decision(zone_data[z]) for z in ZONES}
+
+    # ---- Histórico (últimos 5) ----
+    if "gamet_history" not in st.session_state:
+        st.session_state["gamet_history"] = []
+    history = st.session_state["gamet_history"]
+    # Evitar duplicados consecutivos
+    if not history or history[0]["text"] != gamet_text.strip():
+        history.insert(0, {
+            "text":      gamet_text.strip(),
+            "timestamp": datetime.now(timezone.utc).strftime("%d/%m %H:%MZ"),
+            "label":     validity_label or datetime.now(timezone.utc).strftime("%d/%m %H:%MZ"),
+        })
+        st.session_state["gamet_history"] = history[:5]
 
     # ---- Briefing ----
     st.subheader("📋 Briefing")
@@ -927,3 +1079,82 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
 
     st.pyplot(fig)
     plt.close(fig)
+
+    # ---- Mapa Interativo (Folium) ----
+    st.subheader("🗺️ Mapa Interativo")
+    fcolors = {"GO": "#2ecc71", "MARGINAL": "#e67e22", "NO-GO": "#e74c3c"}
+
+    if _FOLIUM_OK:
+        fmap = folium.Map(location=[39.5, -8.5], zoom_start=6, tiles="CartoDB positron")
+        for z, poly in ZONES.items():
+            dec = results[z][0]
+            color = fcolors.get(dec, "#888")
+            geoms = poly.geoms if isinstance(poly, MultiPolygon) else [poly]
+            for g in geoms:
+                coords = [[lat, lon] for lon, lat in zip(*g.exterior.xy)]
+                folium.Polygon(
+                    locations=coords,
+                    color=color,
+                    fill=True,
+                    fill_color=color,
+                    fill_opacity=0.3,
+                    weight=2,
+                    tooltip=f"{z}: {dec}",
+                ).add_to(fmap)
+        for name, (lat, lon) in CITIES.items():
+            folium.CircleMarker(
+                location=[lat, lon],
+                radius=4,
+                color="black",
+                fill=True,
+                fill_color="black",
+                fill_opacity=0.8,
+                tooltip=name,
+            ).add_to(fmap)
+        st.components.v1.html(fmap._repr_html_(), height=500)
+    else:
+        st.warning("Folium não instalado — mapa estático disponível no PDF.")
+
+    # ---- Vento por níveis ----
+    if wind_data:
+        st.subheader("💨 Vento e Temperatura por Níveis")
+        levels = _WIND_LEVELS
+        header = ["Nível"] + [s["station"] for s in wind_data]
+        rows = []
+        for lvl in levels:
+            row = [lvl]
+            for s in wind_data:
+                entry = s["levels"].get(lvl)
+                if entry:
+                    sign = "+" if entry["temp"] >= 0 else ""
+                    row.append(
+                        f"{entry['dir']:03d}°/{entry['spd']:03d}kt "
+                        f"{sign}{entry['temp']}°C"
+                    )
+                else:
+                    row.append("—")
+            rows.append(row)
+        if _PANDAS_OK:
+            import pandas as pd
+            df = pd.DataFrame(rows, columns=header)
+            st.dataframe(df, use_container_width=True, hide_index=True)
+        else:
+            md = "| " + " | ".join(header) + " |\n"
+            md += "| " + " | ".join(["---"] * len(header)) + " |\n"
+            for row in rows:
+                md += "| " + " | ".join(row) + " |\n"
+            st.markdown(md)
+
+# ---- Histórico de GAMETs ----
+st.divider()
+if st.session_state.get("gamet_history"):
+    with st.expander("🕐 Histórico de GAMETs analisados", expanded=False):
+        history = st.session_state["gamet_history"]
+        for idx, entry in enumerate(history):
+            col_lbl, col_btn = st.columns([4, 1])
+            with col_lbl:
+                st.write(f"**{idx+1}.** {entry['label']} _(analisado {entry['timestamp']})_")
+            with col_btn:
+                if st.button("Carregar", key=f"hist_{idx}"):
+                    st.session_state["gamet_loaded"] = entry["text"]
+                    st.rerun()
