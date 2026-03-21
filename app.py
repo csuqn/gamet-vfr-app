@@ -68,7 +68,7 @@ def fetch_gamet_ipma() -> tuple:
         resp = requests.get(
             _SIGMET_URL,
             params={"_": ts},
-            headers={"User-Agent": "Mozilla/5.0 (compatible; GAMET-Decoder/12.0)"},
+            headers={"User-Agent": "Mozilla/5.0 (compatible; GAMET-Decoder/15.0)"},
             timeout=10,
         )
         resp.raise_for_status()
@@ -297,7 +297,7 @@ def extract_polygon(line):
     return poly if geo_found else None
 
 # -------------------------------------------------
-# WIND PARSER — v14
+# WIND PARSER — v15
 # -------------------------------------------------
 
 # Níveis do GAMET na ordem de emissão
