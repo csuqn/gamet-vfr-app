@@ -64,9 +64,13 @@ with st.expander("📡 Carregar GAMET do IPMA", expanded=False):
             ok, result = fetch_gamet_ipma()
         if ok:
             st.session_state["gamet_loaded"] = result
+            st.session_state["gamet_loaded_at"] = datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%MZ")
             st.success("✅ GAMET carregado com sucesso!")
         else:
             st.error(f"❌ {result}")
+
+    if "gamet_loaded_at" in st.session_state:
+        st.caption(f"⏱️ Carregado às {st.session_state['gamet_loaded_at']}")
 
 # Preencher text_area com GAMET carregado (ou vazio para input manual)
 _default = st.session_state.get("gamet_loaded", "")
@@ -238,7 +242,7 @@ def extract_polygon(line):
     return poly if geo_found else None
 
 # -------------------------------------------------
-# PARSER — v11 (corrigido)
+# PARSER — v12
 # -------------------------------------------------
 
 # Palavras-chave que NÃO devem ser confundidas com visibilidade ou altitude
@@ -468,7 +472,7 @@ def build_zone_data(blocks, threshold=0.15):
     return zone_data
 
 # -------------------------------------------------
-# DECISION — v11 (TS penalizado, LCA contextualizado)
+# DECISION — v12
 # -------------------------------------------------
 
 # Hierarquia de risco TS (do mais grave para o menos grave)
@@ -487,6 +491,10 @@ def decision(events):
     ts_vals   = [v for t, v, *_ in events if t == "TS"]
     turb_vals = [v for t, v, *_ in events if t == "TURB"]
     ice_vals  = [v for t, v, *_ in events if t == "ICE"]
+
+    # Camadas verticais de TURB e ICE (para mostrar no briefing)
+    turb_layers = [layer for t, v, q, layer in events if t == "TURB" and layer]
+    ice_layers  = [layer for t, v, q, layer in events if t == "ICE"  and layer]
 
     # Separar LCA (local) do geral
     vis_lca  = [v for t, v, q, *_ in events if t == "VIS" and q == "LCA"]
@@ -526,7 +534,7 @@ def decision(events):
             decision_level = "MARGINAL"
         reasons.append(f"BASE {base}ft < 500ft")
 
-    # ---- Trovoadas — FIX CRÍTICO ----
+    # ---- Trovoadas ----
     if ts_max_risk >= 2:
         decision_level = "NO-GO"
         reasons.append(f"TS {'/'.join(_ts_label(v) for v in ts_vals)} (risco alto)")
@@ -535,7 +543,7 @@ def decision(events):
             decision_level = "MARGINAL"
         reasons.append(f"TS {'/'.join(_ts_label(v) for v in ts_vals)}")
 
-    return decision_level, vis, base, ts_vals, turb_vals, ice_vals, reasons
+    return decision_level, vis, base, ts_vals, turb_vals, turb_layers, ice_vals, ice_layers, reasons
 
 # -------------------------------------------------
 # EXECUÇÃO
@@ -562,7 +570,7 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     cols = st.columns(3)
 
     for i, z in enumerate(ZONES):
-        dec, vis, base, ts, turb, ice, reasons = results[z]
+        dec, vis, base, ts, turb, turb_layers, ice, ice_layers, reasons = results[z]
 
         with cols[i]:
             st.markdown(f"### {z}")
@@ -574,11 +582,27 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
             else:
                 st.success("✅ GO")
 
-            st.write(f"👁️ VIS: {vis} m"             if vis  is not None else "👁️ VIS: —")
-            st.write(f"☁️ BASE: {base} ft AGL"       if base is not None else "☁️ BASE: —")
-            st.write(f"⛈️ TS: {', '.join(_ts_label(v) for v in ts)}"   if ts   else "⛈️ TS: —")
-            st.write(f"🌪 TURB: {', '.join(turb)}"   if turb else "🌪 TURB: —")
-            st.write(f"❄️ ICE: {', '.join(ice)}"      if ice  else "❄️ ICE: —")
+            st.write(f"👁️ VIS: {vis} m"       if vis  is not None else "👁️ VIS: —")
+            st.write(f"☁️ BASE: {base} ft AGL" if base is not None else "☁️ BASE: —")
+            st.write(f"⛈️ TS: {', '.join(_ts_label(v) for v in ts)}" if ts else "⛈️ TS: —")
+
+            if turb:
+                turb_str = ", ".join(
+                    f"{v} ({turb_layers[idx]})" if idx < len(turb_layers) and turb_layers[idx] else v
+                    for idx, v in enumerate(turb)
+                )
+                st.write(f"🌪 TURB: {turb_str}")
+            else:
+                st.write("🌪 TURB: —")
+
+            if ice:
+                ice_str = ", ".join(
+                    f"{v} ({ice_layers[idx]})" if idx < len(ice_layers) and ice_layers[idx] else v
+                    for idx, v in enumerate(ice)
+                )
+                st.write(f"❄️ ICE: {ice_str}")
+            else:
+                st.write("❄️ ICE: —")
 
             if reasons:
                 with st.expander("ℹ️ Motivos da decisão", expanded=True):
