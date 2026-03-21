@@ -312,25 +312,9 @@ def parse_wind(secn2: str) -> list:
         return []
     wind_block = wm.group(1)
 
-    # Dividir em grupos de 3 estações separados por FZLVL
-    # Cada grupo: NOMES / COORDENADAS / 5 linhas de vento
+    # Tokenizar linha a linha — cada grupo: nomes / coords / 5 linhas de vento
     stations = []
-
-    # Encontrar todos os nomes de estações (palavras maiúsculas sem dígitos)
-    name_matches = list(re.finditer(
-        r"\b([A-Z]{3,}(?:\s+[A-Z]{2,})?)\b(?=\s+[A-Z]{3,}|\s+N\d{4})",
-        wind_block
-    ))
-
-    # Abordagem mais robusta: tokenizar linha a linha
     lines = [l.strip() for l in wind_block.splitlines() if l.strip()]
-
-    # Identificar blocos de estações
-    # Cada bloco começa com linha de nomes, depois coords, depois 5 linhas de vento
-    i = 0
-    current_names  = []
-    current_coords = []
-    level_lines    = []
 
     def _parse_coord_line(line):
         """Extrai pares (lat, lon) de uma linha de coordenadas."""
@@ -1106,7 +1090,6 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
                     row.append("—")
             rows.append(row)
         if _PANDAS_OK:
-            import pandas as pd
             df = pd.DataFrame(rows, columns=header)
             st.dataframe(df, use_container_width=True, hide_index=True)
         else:
