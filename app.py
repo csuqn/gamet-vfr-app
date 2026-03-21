@@ -306,8 +306,23 @@ def parse_wind(secn2: str) -> list:
     if not secn2:
         return []
 
-    # Isolar bloco WIND/T
-    wm = re.search(r"WIND/T\s*:(.*?)(?:FZLVL|MNM\s+QNH|$)", secn2, re.DOTALL)
+    # Injectar quebras de linha antes de tokens-chave
+    # (necessário quando o texto vem numa única linha do fetch IPMA)
+    secn2 = re.sub(r"(?<!\n)(WIND/T\s*:)", r"\n\1", secn2)
+    secn2 = re.sub(r"(?<!\n)(FZLVL\s*:)", r"\n\1", secn2)
+    secn2 = re.sub(r"(?<!\n)(MNM\s+QNH)", r"\n\1", secn2)
+    # Injectar quebra antes de cada nível de vento
+    secn2 = re.sub(r"(?<!\n)(\d{4}FT\s+AGL)", r"\n\1", secn2)
+    secn2 = re.sub(r"(?<!\n)(FL\d{3})\s+(\d{3}/\d{3}KT)", r"\n\1 \2", secn2)
+    # Injectar quebra onde nome de estação segue imediatamente valor AMSL do FZLVL
+    # ex: "7800FT AMSL LISBOA EVORA FARO" → "7800FT AMSL\nLISBOA EVORA FARO"
+    secn2 = re.sub(r"(AMSL)\s+([A-Z]{4,})", r"\1\n\2", secn2)
+    # Injectar quebra onde nome de estação (letra maiúscula) cola directamente
+    # com coordenada latitude (N3x ou N4x) — ex: "FARON3845" → "FARO\nN3845"
+    secn2 = re.sub(r"(?<=[A-Z])(N[34]\d{3}\s+W)", r"\n\1", secn2)
+
+    # Isolar bloco WIND/T — vai até MNM QNH (captura ambos os grupos de estações)
+    wm = re.search(r"WIND/T\s*:(.*?)(?:MNM\s+QNH|$)", secn2, re.DOTALL)
     if not wm:
         return []
     wind_block = wm.group(1)
@@ -388,7 +403,7 @@ def parse_wind(secn2: str) -> list:
             cur_coords = []
             cur_levels = []
         elif _is_coord_line(line):
-            cur_coords = _parse_coord_line(line)
+            cur_coords.extend(_parse_coord_line(line))
         elif _is_level_line(line):
             cur_levels.append(line)
 
