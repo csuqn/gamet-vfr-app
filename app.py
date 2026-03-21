@@ -316,7 +316,7 @@ def parse_wind(secn2: str) -> list:
     secn2 = re.sub(r"(?<!\n)(FL\d{3})\s+(\d{3}/\d{3}KT)", r"\n\1 \2", secn2)
     # Injectar quebra onde nome de estação segue imediatamente valor AMSL do FZLVL
     # ex: "7800FT AMSL LISBOA EVORA FARO" → "7800FT AMSL\nLISBOA EVORA FARO"
-    secn2 = re.sub(r"(AMSL)\s+([A-Z]{4,})", r"\1\n\2", secn2)
+    secn2 = re.sub(r"(AMSL)\s*([A-Z]{4,})", r"\1\n\2", secn2)
     # Injectar quebra onde nome de estação (letra maiúscula) cola directamente
     # com coordenada latitude (N3x ou N4x) — ex: "FARON3845" → "FARO\nN3845"
     secn2 = re.sub(r"(?<=[A-Z])(N[34]\d{3}\s+W)", r"\n\1", secn2)
