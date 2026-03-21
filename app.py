@@ -1051,35 +1051,6 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
         mime="application/pdf",
     )
 
-    # ---- Mapa ----
-    st.subheader("🌍 Mapa")
-    fig, ax = plt.subplots(figsize=(7, 10))
-    colors = {"GO": "green", "MARGINAL": "orange", "NO-GO": "red"}
-
-    for z, poly in ZONES.items():
-        dec = results[z][0]
-        geoms = poly.geoms if isinstance(poly, MultiPolygon) else [poly]
-        for g in geoms:
-            x, y = g.exterior.xy
-            ax.fill(x, y, alpha=0.3, color=colors[dec])
-            ax.plot(x, y, color=colors[dec], linewidth=1)
-
-    for name, (lat, lon) in CITIES.items():
-        ax.plot(lon, lat, "ko", markersize=4)
-        ax.text(lon + 0.05, lat, name, fontsize=8)
-
-    ax.set_aspect("equal")
-    ax.grid(True, linestyle="--", alpha=0.4)
-    ax.legend(handles=[
-        Patch(facecolor="green",  alpha=0.3, label="GO"),
-        Patch(facecolor="orange", alpha=0.3, label="MARGINAL"),
-        Patch(facecolor="red",    alpha=0.3, label="NO-GO"),
-        Line2D([0], [0], marker="o", color="black", linestyle="None", label="Cidade"),
-    ])
-
-    st.pyplot(fig)
-    plt.close(fig)
-
     # ---- Mapa Interativo (Folium) ----
     st.subheader("🗺️ Mapa Interativo")
     fcolors = {"GO": "#2ecc71", "MARGINAL": "#e67e22", "NO-GO": "#e74c3c"}
