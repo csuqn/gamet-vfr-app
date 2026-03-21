@@ -1088,6 +1088,13 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     # ---- Vento por níveis ----
     # DEBUG temporário — remover após confirmação
     st.caption(f"🔧 Debug: wind_data tem {len(wind_data)} estações")
+    if not wind_data:
+        import re as _re
+        _secn = re.split(r"SECN\s+II", gamet_text.upper(), maxsplit=1)
+        _s2 = _secn[1][:300] if len(_secn) > 1 else "SECN II não encontrada"
+        st.caption(f"🔧 secn2 início: `{_s2}`")
+        _wm = _re.search(r"WIND/T", _s2)
+        st.caption(f"🔧 WIND/T encontrado: {bool(_wm)}")
 
     if wind_data:
         st.subheader("💨 Vento e Temperatura por Níveis")
