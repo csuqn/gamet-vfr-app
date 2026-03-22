@@ -459,6 +459,15 @@ def parse_gamet(text):
     secn1 = re.sub(r"(\bVA\b\s*:?)", r"\n\1", secn1)
     secn1 = re.sub(r"(SIGMET\s+APPLICABLE)", r"\n\1", secn1)
 
+    # Injetar quebras antes de qualificadores geográficos secundários na mesma linha
+    # ex: "...010HFT AGL S OF N3845 ISOL..." → "...010HFT AGL\nS OF N3845 ISOL..."
+    # Aplica-se a N OF, S OF, E OF, W OF, BTN quando precedidos de conteúdo meteorológico
+    secn1 = re.sub(r"(\w)\s+(N\s+OF\s+N\d{4})", r"\1\n\2", secn1)
+    secn1 = re.sub(r"(\w)\s+(S\s+OF\s+N\d{4})", r"\1\n\2", secn1)
+    secn1 = re.sub(r"(\w)\s+(E\s+OF\s+[WE]\d{4,5})", r"\1\n\2", secn1)
+    secn1 = re.sub(r"(\w)\s+(W\s+OF\s+[WE]\d{4,5})", r"\1\n\2", secn1)
+    secn1 = re.sub(r"(\w)\s+(BTN\s+N\d{4})", r"\1\n\2", secn1)
+
     lines = [l.strip() for l in secn1.splitlines() if l.strip()]
 
     state = "IDLE"
