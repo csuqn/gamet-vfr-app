@@ -450,7 +450,7 @@ def parse_gamet(text):
 
     # ---- Injetar quebras antes de campos conhecidos ----
     secn1 = re.sub(r"(SECN\s+I\b)", r"\n\1\n", secn1)
-    secn1 = re.sub(r"(\bSFC\s+VIS\b|\bVIS\s*:)", r"\n\1", secn1)
+    secn1 = re.sub(r"(\bSFC\s+VIS\b|\bSIG\s+VIS\b|\bVIS\s*:)", r"\n\1", secn1)
     secn1 = re.sub(r"(\bSIG\s+CLD\b|\bCLD\s*:)", r"\n\1", secn1)
     secn1 = re.sub(r"(\bSIGWX\b\s*:?)", r"\n\1", secn1)
     secn1 = re.sub(r"(\bTURB\b\s*:?)", r"\n\1", secn1)
@@ -478,7 +478,7 @@ def parse_gamet(text):
 
         # ---- Detetar mudança de estado ----
         new_state = None
-        if re.match(r"SFC\s+VIS|VIS\s*:", line):
+        if re.match(r"SFC\s+VIS|SIG\s+VIS|VIS\s*:", line):
             new_state = "VIS"
         elif re.match(r"SIG\s+CLD|CLD\s*:", line):
             new_state = "CLD"
@@ -502,7 +502,7 @@ def parse_gamet(text):
             current_polygon = FIR_POLYGON  # reset geo ao mudar de campo
             # Remover a keyword da linha para processar só o conteúdo
             content = re.sub(
-                r"^(SFC\s+VIS\s*:?|VIS\s*:|SIG\s+CLD\s*:?|CLD\s*:|SIGWX\s*:?|TURB\s*:?|ICE\s*:?|MT\s+OBSC\s*:?|VA\s*:?)\s*",
+                r"^(SFC\s+VIS\s*:?|SIG\s+VIS\s*:?|VIS\s*:|SIG\s+CLD\s*:?|CLD\s*:|SIGWX\s*:?|TURB\s*:?|ICE\s*:?|MT\s+OBSC\s*:?|VA\s*:?)\s*",
                 "", line
             ).strip()
         else:
@@ -565,7 +565,7 @@ def parse_gamet(text):
             # Suporta "015-030/XXXHFT AGL", "015HFT AGL" e "035HFT AMSL"
             # Range HFT AGL
             for m in re.finditer(
-                r"\b(\d{3})-(\d{3})(?:/[A-Z]+)?HFT\s+AGL\b",
+                r"\b(\d{3})-(\d{3})(?:/[A-Z0-9]+)?HFT\s+AGL\b",
                 content
             ):
                 base_ft = int(m.group(1)) * 100
