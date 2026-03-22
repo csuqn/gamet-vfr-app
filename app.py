@@ -482,8 +482,9 @@ def parse_gamet(text):
 
         # Ignorar linha SIGMET APPLICABLE
         if line.startswith("SIGMET"):
-            state = "IDLE"
-            continue
+            # SIGMET APPLICABLE é sempre o último campo da Secção I
+            # Tudo o que vier depois é inválido — parar o parsing aqui
+            break
 
         # ---- Detetar mudança de estado ----
         new_state = None
@@ -580,23 +581,26 @@ def parse_gamet(text):
                 base_ft = int(m.group(1)) * 100
                 blocks.append(MetBlock("BASE_AGL", poly, base_ft, qualifier))
 
-            # Base única HFT AGL
+            # Base única HFT AGL — excluir apenas se o dígito é precedido directamente por / ou -
+            # ex: "004/020HFT" → skip (020 é topo do range)
+            # ex: "TCU/CB 020HFT" → manter (/ pertence a TCU/CB, não ao número)
             for m in re.finditer(r"\b(\d{3})HFT\s+AGL\b", content):
                 pos = m.start()
-                before = content[max(0, pos-4):pos]
-                if "-" not in before:
-                    base_ft = int(m.group(1)) * 100
-                    blocks.append(MetBlock("BASE_AGL", poly, base_ft, qualifier))
+                # Verificar char imediatamente antes do número (ignorando espaços)
+                pre = content[:pos].rstrip()
+                if pre and pre[-1] in "-/":
+                    continue
+                base_ft = int(m.group(1)) * 100
+                blocks.append(MetBlock("BASE_AGL", poly, base_ft, qualifier))
 
             # AMSL — converter para AGL usando elevação máxima do sector (conservador)
-            # Usa ZONE_ELEVATION se disponível, senão assume 0ft
             for m in re.finditer(r"\b(\d{3})HFT\s+AMSL\b", content):
                 pos = m.start()
-                before = content[max(0, pos-4):pos]
-                if "-" not in before:
-                    amsl_ft = int(m.group(1)) * 100
-                    # Sem info de sector aqui — guardar como BASE_AMSL para tratamento no build
-                    blocks.append(MetBlock("BASE_AMSL", poly, amsl_ft, qualifier))
+                pre = content[:pos].rstrip()
+                if pre and pre[-1] in "-/":
+                    continue
+                amsl_ft = int(m.group(1)) * 100
+                blocks.append(MetBlock("BASE_AMSL", poly, amsl_ft, qualifier))
 
         elif state == "SIGWX":
             # FIX: EMBD tratado separadamente e eleva risco
@@ -674,11 +678,14 @@ def parse_gamet(text):
 
         elif state == "MT_OBSC":
             # Montanhas obscurecidas — sempre NO-GO para VFR
-            blocks.append(MetBlock("MT_OBSC", poly, "MT OBSC", qualifier))
+            # Só appenda quando a linha activa o estado (new_state presente)
+            if new_state == "MT_OBSC":
+                blocks.append(MetBlock("MT_OBSC", poly, "MT OBSC", qualifier))
 
         elif state == "VA":
             # Cinzas vulcânicas — sempre NO-GO
-            blocks.append(MetBlock("VA", poly, "VA", qualifier))
+            if new_state == "VA":
+                blocks.append(MetBlock("VA", poly, "VA", qualifier))
 
     # ---- Extração Secção II: FZLVL, QNH e vento ----
     fzlvl_values = [int(m) for m in re.findall(r"(\d{4,5})FT\s+AMSL", secn2)]
