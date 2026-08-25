@@ -18,7 +18,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
 from shapely.geometry import box, Polygon, MultiPolygon
-from shapely.ops import unary_union
+from shapely.ops import unary_union, polygonize
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 
@@ -27,7 +27,7 @@ from datetime import datetime, timezone, timedelta
 # -------------------------------------------------
 
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v15.0")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v16.0")
 
 # -------------------------------------------------
 # IPMA SELF-BRIEFING — fetch automático
@@ -68,7 +68,7 @@ def fetch_gamet_ipma() -> tuple:
         resp = requests.get(
             _SIGMET_URL,
             params={"_": ts},
-            headers={"User-Agent": "Mozilla/5.0 (compatible; GAMET-Decoder/15.0)"},
+            headers={"User-Agent": "Mozilla/5.0 (compatible; GAMET-Decoder/16.0)"},
             timeout=10,
         )
         resp.raise_for_status()
@@ -297,7 +297,7 @@ def extract_polygon(line):
     return poly if geo_found else None
 
 # -------------------------------------------------
-# WIND PARSER — v15
+# WIND PARSER — v16
 # -------------------------------------------------
 
 # Níveis do GAMET na ordem de emissão
@@ -424,7 +424,7 @@ def parse_wind(secn2: str) -> list:
 
 
 # -------------------------------------------------
-# PARSER — v15
+# PARSER — v16
 # -------------------------------------------------
 
 # Palavras-chave que NÃO devem ser confundidas com visibilidade ou altitude
@@ -727,8 +727,77 @@ def build_zone_data(blocks, threshold=0.15):
 
     return zone_data
 
+def compute_dynamic_regions(blocks):
+    """
+    Constrói regiões de decisão dinâmica com base na geometria REAL de cada
+    fenómeno do GAMET (não nos 3 sectores fixos).
+
+    Método: junta as fronteiras de todos os polígonos activos + fronteira da
+    FIR, usa polygonize() para particionar a FIR em células atómicas (as
+    intersecções reais entre todos os fenómenos), calcula a decisão para cada
+    célula com a mesma lógica decision(), e funde células com a mesma decisão.
+
+    Devolve lista de tuplos (multipolygon, decision_level, reasons).
+    """
+    relevant = [b for b in blocks
+                if b.polygon is not None and not b.polygon.is_empty
+                and b.phenomenon in ("VIS", "BASE_AGL", "BASE_AMSL", "TS",
+                                       "TURB", "ICE", "MT_OBSC", "VA")]
+
+    if not relevant:
+        dec, *_ = decision([])
+        return [(FIR_POLYGON, dec, [])]
+
+    # 1. Fronteiras de todos os polígonos relevantes + fronteira da FIR
+    boundaries = [FIR_POLYGON.boundary]
+    for b in relevant:
+        boundaries.append(b.polygon.boundary)
+    merged_lines = unary_union(boundaries)
+
+    # 2. Particionar em células atómicas
+    atomic_cells = [c for c in polygonize(merged_lines) if not c.is_empty and c.area > 1e-9]
+    if not atomic_cells:
+        dec, *_ = decision([])
+        return [(FIR_POLYGON, dec, [])]
+
+    # 3. Calcular decisão por célula (com base no ponto representativo)
+    cell_results = []  # (cell, decision_level, reasons)
+    for cell in atomic_cells:
+        centroid = cell.representative_point()
+        events = []
+        for b in relevant:
+            if not b.polygon.contains(centroid):
+                continue
+            if b.phenomenon == "BASE_AMSL":
+                # Sem sector específico aqui — usar elevação média genérica
+                agl_ft = max(0, b.value - 1000)
+                events.append(("BASE", agl_ft, b.qualifier, b.layer))
+            elif b.phenomenon == "BASE_AGL":
+                events.append(("BASE", b.value, b.qualifier, b.layer))
+            else:
+                events.append((b.phenomenon, b.value, b.qualifier, b.layer))
+
+        dec_level, *_rest, reasons = decision(events)
+        cell_results.append((cell, dec_level, reasons))
+
+    # 4. Fundir células com a mesma decisão
+    from collections import defaultdict
+    grouped = defaultdict(list)
+    reasons_by_level = defaultdict(set)
+    for cell, dec_level, reasons in cell_results:
+        grouped[dec_level].append(cell)
+        for r in reasons:
+            reasons_by_level[dec_level].add(r)
+
+    merged_regions = []
+    for dec_level, cells in grouped.items():
+        merged_poly = unary_union(cells)
+        merged_regions.append((merged_poly, dec_level, sorted(reasons_by_level[dec_level])))
+
+    return merged_regions
+
 # -------------------------------------------------
-# DECISION — v15
+# DECISION — v16
 # -------------------------------------------------
 
 # Hierarquia de risco TS (do mais grave para o menos grave)
@@ -977,7 +1046,7 @@ def generate_pdf(results, gamet_text, fzlvl_min, qnh_min, validity_label) -> byt
         # Metadados
         d = pdf.infodict()
         d["Title"]   = "LPPC GAMET Briefing VFR"
-        d["Author"]  = "GAMET Decoder v15.0"
+        d["Author"]  = "GAMET Decoder v16.0"
         d["Subject"] = "Briefing meteorológico VFR – FIR LPPC"
     buf.seek(0)
     return buf.getvalue()
@@ -1164,23 +1233,53 @@ if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     st.subheader("🗺️ Mapa Interativo")
     fcolors = {"GO": "#2ecc71", "MARGINAL": "#e67e22", "NO-GO": "#e74c3c"}
 
+    show_dynamic = st.toggle(
+        "🌐 Mostrar zonas dinâmicas (geometria real do GAMET)",
+        value=False,
+        help="Em vez dos 3 sectores fixos, desenha as regiões de decisão "
+             "exactamente como o GAMET as define — as fronteiras seguem os "
+             "qualificadores geográficos (N OF, S OF, BTN...) de cada fenómeno."
+    )
+
     if _FOLIUM_OK:
         fmap = folium.Map(location=[39.5, -8.5], zoom_start=6, tiles="CartoDB positron")
-        for z, poly in ZONES.items():
-            dec = results[z][0]
-            color = fcolors.get(dec, "#888")
-            geoms = poly.geoms if isinstance(poly, MultiPolygon) else [poly]
-            for g in geoms:
-                coords = [[lat, lon] for lon, lat in zip(*g.exterior.xy)]
-                folium.Polygon(
-                    locations=coords,
-                    color=color,
-                    fill=True,
-                    fill_color=color,
-                    fill_opacity=0.3,
-                    weight=2,
-                    tooltip=f"{z}: {dec}",
-                ).add_to(fmap)
+
+        if show_dynamic:
+            regions = compute_dynamic_regions(blocks)
+            for poly, dec, reasons in regions:
+                color = fcolors.get(dec, "#888")
+                geoms = poly.geoms if isinstance(poly, MultiPolygon) else [poly]
+                tooltip = dec + (f" — {'; '.join(reasons)}" if reasons else "")
+                for g in geoms:
+                    if g.is_empty or not hasattr(g, "exterior") or g.exterior is None:
+                        continue
+                    coords = [[lat, lon] for lon, lat in zip(*g.exterior.xy)]
+                    folium.Polygon(
+                        locations=coords,
+                        color=color,
+                        fill=True,
+                        fill_color=color,
+                        fill_opacity=0.35,
+                        weight=2,
+                        tooltip=tooltip,
+                    ).add_to(fmap)
+        else:
+            for z, poly in ZONES.items():
+                dec = results[z][0]
+                color = fcolors.get(dec, "#888")
+                geoms = poly.geoms if isinstance(poly, MultiPolygon) else [poly]
+                for g in geoms:
+                    coords = [[lat, lon] for lon, lat in zip(*g.exterior.xy)]
+                    folium.Polygon(
+                        locations=coords,
+                        color=color,
+                        fill=True,
+                        fill_color=color,
+                        fill_opacity=0.3,
+                        weight=2,
+                        tooltip=f"{z}: {dec}",
+                    ).add_to(fmap)
+
         for name, (lat, lon) in CITIES.items():
             folium.CircleMarker(
                 location=[lat, lon],
