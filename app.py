@@ -252,6 +252,32 @@ def _lon(deg, minn, hemi):
     val = int(deg) + int(minn) / 60
     return -val if hemi == "W" else val
 
+def _clean_poly(geom):
+    """
+    Garante que o resultado de uma intersecção geométrica é sempre um
+    Polygon ou MultiPolygon limpo — nunca uma GeometryCollection.
+
+    Intersecções entre polígonos cujas fronteiras quase coincidem podem
+    produzir GeometryCollection com componentes degenerados (LineString,
+    Point) além do Polygon esperado. Sem esta limpeza, geom.boundary
+    devolve None para essas GeometryCollections, o que faz com que a
+    fronteira desapareça silenciosamente do cálculo de zonas dinâmicas
+    (compute_dynamic_regions) — um fenómeno inteiro pode ficar "invisível".
+    """
+    if geom.is_empty:
+        return geom
+    if geom.geom_type in ("Polygon", "MultiPolygon"):
+        return geom
+    if geom.geom_type == "GeometryCollection":
+        polys = [g for g in geom.geoms if g.geom_type in ("Polygon", "MultiPolygon") and not g.is_empty]
+        if not polys:
+            return Polygon()  # polígono vazio — nenhuma área válida
+        if len(polys) == 1:
+            return polys[0]
+        return unary_union(polys)
+    # Outro tipo (LineString, Point, etc.) — sem área válida
+    return Polygon()
+
 def extract_polygon(line):
     poly = FIR_POLYGON
     geo_found = False
@@ -261,38 +287,38 @@ def extract_polygon(line):
         geo_found = True
         lat1 = int(m[0]) + int(m[1]) / 60
         lat2 = int(m[2]) + int(m[3]) / 60
-        poly = poly.intersection(box(FIR_MINX, min(lat1, lat2), FIR_MAXX, max(lat1, lat2)))
+        poly = _clean_poly(poly.intersection(box(FIR_MINX, min(lat1, lat2), FIR_MAXX, max(lat1, lat2))))
 
     # BTN W/E\d\d\d\d AND W/E\d\d\d\d  (longitude)
     for m in re.findall(r"BTN\s+([WE])(\d{2,3})(\d{2})\s+AND\s+([WE])(\d{2,3})(\d{2})", line):
         geo_found = True
         lon1 = _lon(m[1], m[2], m[0])
         lon2 = _lon(m[4], m[5], m[3])
-        poly = poly.intersection(box(min(lon1, lon2), FIR_MINY, max(lon1, lon2), FIR_MAXY))
+        poly = _clean_poly(poly.intersection(box(min(lon1, lon2), FIR_MINY, max(lon1, lon2), FIR_MAXY)))
 
     # N OF N\d\d\d\d
     for m in re.findall(r"N\s+OF\s+N(\d{2})(\d{2})", line):
         geo_found = True
         lat = int(m[0]) + int(m[1]) / 60
-        poly = poly.intersection(box(FIR_MINX, lat, FIR_MAXX, FIR_MAXY))
+        poly = _clean_poly(poly.intersection(box(FIR_MINX, lat, FIR_MAXX, FIR_MAXY)))
 
     # S OF N\d\d\d\d
     for m in re.findall(r"S\s+OF\s+N(\d{2})(\d{2})", line):
         geo_found = True
         lat = int(m[0]) + int(m[1]) / 60
-        poly = poly.intersection(box(FIR_MINX, FIR_MINY, FIR_MAXX, lat))
+        poly = _clean_poly(poly.intersection(box(FIR_MINX, FIR_MINY, FIR_MAXX, lat)))
 
     # E OF W/E\d\d\d\d
     for m in re.findall(r"E\s+OF\s+([WE])(\d{2,3})(\d{2})", line):
         geo_found = True
         lon = _lon(m[1], m[2], m[0])
-        poly = poly.intersection(box(lon, FIR_MINY, FIR_MAXX, FIR_MAXY))
+        poly = _clean_poly(poly.intersection(box(lon, FIR_MINY, FIR_MAXX, FIR_MAXY)))
 
     # W OF W/E\d\d\d\d
     for m in re.findall(r"W\s+OF\s+([WE])(\d{2,3})(\d{2})", line):
         geo_found = True
         lon = _lon(m[1], m[2], m[0])
-        poly = poly.intersection(box(FIR_MINX, FIR_MINY, lon, FIR_MAXY))
+        poly = _clean_poly(poly.intersection(box(FIR_MINX, FIR_MINY, lon, FIR_MAXY)))
 
     return poly if geo_found else None
 
@@ -741,6 +767,7 @@ def compute_dynamic_regions(blocks):
     """
     relevant = [b for b in blocks
                 if b.polygon is not None and not b.polygon.is_empty
+                and b.polygon.geom_type in ("Polygon", "MultiPolygon")
                 and b.phenomenon in ("VIS", "BASE_AGL", "BASE_AMSL", "TS",
                                        "TURB", "ICE", "MT_OBSC", "VA")]
 
