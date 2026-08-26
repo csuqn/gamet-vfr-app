@@ -1084,6 +1084,10 @@ def generate_pdf(results, gamet_text, fzlvl_min, qnh_min, validity_label) -> byt
 # -------------------------------------------------
 
 if st.button("🔍 Analisar GAMET") and gamet_text.strip():
+    st.session_state["_active_gamet_text"] = gamet_text.strip()
+
+if st.session_state.get("_active_gamet_text"):
+    gamet_text = st.session_state["_active_gamet_text"]
 
     # ---- Validade ----
     validity_label = ""
