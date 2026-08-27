@@ -1361,7 +1361,13 @@ if st.session_state.get("_active_gamet_text"):
     fcolors = {"GO": "#2ecc71", "MARGINAL": "#e67e22", "NO-GO": "#e74c3c"}
 
     if _FOLIUM_OK:
-        fmap = folium.Map(location=[39.5, -8.5], zoom_start=6, tiles="CartoDB positron")
+        fmap = folium.Map(
+            location=[39.5, -8.5],
+            zoom_start=6,
+            tiles="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+            attr='&copy; <a href="https://carto.com/attributions">CARTO</a> '
+                 '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+        )
 
         for region in dynamic_regions:
             poly = region["polygon"]
