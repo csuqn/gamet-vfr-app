@@ -27,7 +27,7 @@ from datetime import datetime, timezone, timedelta
 # -------------------------------------------------
 
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v17.0")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v18.0")
 
 # -------------------------------------------------
 # IPMA SELF-BRIEFING — fetch automático
@@ -162,12 +162,41 @@ ZONES = {
 FIR_POLYGON = unary_union(list(ZONES.values()))
 FIR_MINX, FIR_MINY, FIR_MAXX, FIR_MAXY = FIR_POLYGON.bounds
 
-# Elevação máxima aproximada por sector (ft) — para conversão AMSL→AGL
-ZONE_ELEVATION = {
-    "SECTOR NORTE": 1700,   # Serra da Estrela ~6500ft mas usamos máximo de terreno comum
-    "SECTOR CENTRO": 900,
-    "SECTOR SUL":    250,
-}
+# Pontos de referência de elevação de terreno (lat, lon, ft) — usados para
+# interpolar a elevação aproximada em qualquer ponto da FIR (IDW), na
+# conversão AMSL→AGL. Substituem a antiga aproximação fixa por sector,
+# agora que a decisão é calculada por geometria dinâmica, não por sectores.
+_TERRAIN_REF_POINTS = [
+    (41.80, -7.00, 1700),   # Trás-os-Montes
+    (41.70, -8.30, 300),    # Minho / litoral Norte
+    (40.90, -7.90, 1200),   # Douro / Beira Alta
+    (40.33, -7.60, 3500),   # Serra da Estrela
+    (40.20, -8.40, 300),    # Beira Litoral / Coimbra
+    (39.60, -8.90, 150),    # Oeste / litoral Centro
+    (39.00, -7.50, 500),    # Alto Alentejo
+    (38.90, -9.30, 100),    # Litoral Oeste (Peniche/Ericeira)
+    (38.72, -9.14, 100),    # Lisboa
+    (37.90, -7.90, 250),    # Baixo Alentejo
+    (37.10, -8.20, 150),    # Algarve
+]
+
+def _terrain_elevation_ft(lon, lat):
+    """
+    Estima a elevação do terreno (ft) num ponto, por interpolação de
+    distância inversa (IDW) sobre pontos de referência conhecidos.
+    Aproximação suficiente para a conversão AMSL→AGL — não substitui um
+    modelo digital de elevação real.
+    """
+    total_w = 0.0
+    total_v = 0.0
+    for ref_lat, ref_lon, elev in _TERRAIN_REF_POINTS:
+        d2 = (lat - ref_lat) ** 2 + (lon - ref_lon) ** 2
+        if d2 < 1e-6:
+            return elev  # praticamente no ponto de referência
+        w = 1.0 / d2
+        total_w += w
+        total_v += w * elev
+    return total_v / total_w if total_w else 500
 
 # -------------------------------------------------
 # CIDADES
@@ -214,6 +243,26 @@ def normalize(text):
     text = text.upper()
     text = text.replace("–", "-").replace("\r\n", "\n").replace("\r", "\n")
     return text
+
+def looks_unparseable(text):
+    """
+    Detecta texto que provavelmente não é um GAMET válido/completo — para
+    distinguir "GAMET genuinamente calmo" (todos os campos NIL, mas
+    presentes) de "texto incompleto ou mal colado" (parser não encontra
+    nenhum campo reconhecível, e por omissão mostraria GO em toda a FIR,
+    dando uma falsa sensação de segurança).
+
+    Devolve True se nenhum marcador de secção nem nenhum campo meteorológico
+    conhecido foi encontrado no texto.
+    """
+    t = normalize(text)
+    has_section = bool(re.search(r"SECN\s+I\b", t))
+    field_pattern = re.compile(
+        r"\bSFC\s+VIS\b|\bSIG\s+VIS\b|\bVIS\s*:|\bSIGWX\b|\bSIG\s+CLD\b|"
+        r"\bCLD\s*:|\bTURB\b|\bICE\b|\bMT\s+OBSC\b|\bVA\s*:|\bSIGMET\b"
+    )
+    has_field = bool(field_pattern.search(t))
+    return not (has_section and has_field)
 
 # -------------------------------------------------
 # VALIDADE
@@ -323,7 +372,7 @@ def extract_polygon(line):
     return poly if geo_found else None
 
 # -------------------------------------------------
-# WIND PARSER — v17
+# WIND PARSER — v18
 # -------------------------------------------------
 
 # Níveis do GAMET na ordem de emissão
@@ -450,7 +499,7 @@ def parse_wind(secn2: str) -> list:
 
 
 # -------------------------------------------------
-# PARSER — v17
+# PARSER — v18
 # -------------------------------------------------
 
 # Palavras-chave que NÃO devem ser confundidas com visibilidade ou altitude
@@ -819,7 +868,8 @@ def compute_dynamic_regions(blocks):
             if not b.polygon.contains(centroid):
                 continue
             if b.phenomenon == "BASE_AMSL":
-                agl_ft = max(0, b.value - 1000)
+                elev_ft = _terrain_elevation_ft(centroid.x, centroid.y)
+                agl_ft = max(0, round(b.value - elev_ft))
                 events.append(("BASE", agl_ft, b.qualifier, b.layer))
             elif b.phenomenon == "BASE_AGL":
                 events.append(("BASE", b.value, b.qualifier, b.layer))
@@ -882,8 +932,25 @@ def compute_dynamic_regions(blocks):
     regions.sort(key=lambda r: _order.get(r["decision"], 3))
     return regions
 
+
+def find_region_for_point(regions, lat, lon):
+    """
+    Devolve a região dinâmica que contém o ponto (lat, lon), ou None se
+    nenhuma o contiver (não deveria acontecer, já que as regiões cobrem
+    100% da FIR — mas o ponto pode estar fora da FIR).
+    """
+    pt = Point(lon, lat)
+    for region in regions:
+        if region["polygon"].contains(pt):
+            return region
+    # Fallback: tolerância para pontos mesmo na fronteira
+    for region in regions:
+        if region["polygon"].distance(pt) < 0.01:
+            return region
+    return None
+
 # -------------------------------------------------
-# DECISION — v17
+# DECISION — v18
 # -------------------------------------------------
 
 # Hierarquia de risco TS (do mais grave para o menos grave)
@@ -1150,7 +1217,7 @@ def generate_pdf(regions, gamet_text, fzlvl_min, qnh_min, validity_label) -> byt
         # Metadados
         d = pdf.infodict()
         d["Title"]   = "LPPC GAMET Briefing VFR"
-        d["Author"]  = "GAMET Decoder v17.0"
+        d["Author"]  = "GAMET Decoder v18.0"
         d["Subject"] = "Briefing meteorológico VFR – FIR LPPC"
     buf.seek(0)
     return buf.getvalue()
@@ -1181,6 +1248,14 @@ if st.session_state.get("_active_gamet_text"):
     blocks, fzlvl_min, qnh_min, wind_data = parse_gamet(gamet_text)
     dynamic_regions = compute_dynamic_regions(blocks)
 
+    if looks_unparseable(gamet_text):
+        st.error(
+            "⚠️ **Nenhum campo meteorológico reconhecido no texto.** "
+            "Isto pode significar que o GAMET está incompleto, mal colado, "
+            "ou num formato não suportado — **não** que as condições estão "
+            "calmas. Confirma o texto antes de confiar na decisão abaixo."
+        )
+
     # ---- Histórico (últimos 5) ----
     if "gamet_history" not in st.session_state:
         st.session_state["gamet_history"] = []
@@ -1193,6 +1268,32 @@ if st.session_state.get("_active_gamet_text"):
             "label":     validity_label or datetime.now(timezone.utc).strftime("%d/%m %H:%MZ"),
         })
         st.session_state["gamet_history"] = history[:5]
+
+    # ---- Consulta rápida por localidade ----
+    st.subheader("✈️ Consulta Rápida")
+    airport_options = ["— Seleccionar —"] + sorted(CITIES.keys())
+    selected_airport = st.selectbox(
+        "Vou voar de/para:",
+        options=airport_options,
+        help="Mostra a decisão VFR exacta para essa localidade, com base na "
+             "geometria real do GAMET — não numa aproximação por sector.",
+    )
+    if selected_airport != "— Seleccionar —":
+        lat, lon = CITIES[selected_airport]
+        found = find_region_for_point(dynamic_regions, lat, lon)
+        if found:
+            dec = found["decision"]
+            icon = {"GO": "✅", "MARGINAL": "⚠️", "NO-GO": "🔴"}.get(dec, "❔")
+            if dec == "NO-GO":
+                st.error(f"{icon} **{selected_airport}: {dec}**")
+            elif dec == "MARGINAL":
+                st.warning(f"{icon} **{selected_airport}: {dec}**")
+            else:
+                st.success(f"{icon} **{selected_airport}: {dec}**")
+            if found["reasons"]:
+                st.caption("Motivos: " + "; ".join(found["reasons"]))
+        else:
+            st.info(f"{selected_airport} está fora da FIR LPPC coberta por este GAMET.")
 
     # ---- Briefing (zonas dinâmicas — geometria real do GAMET) ----
     st.subheader("📋 Briefing")
