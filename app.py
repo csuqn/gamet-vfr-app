@@ -17,7 +17,7 @@ except ImportError:
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
-from shapely.geometry import box, Polygon, MultiPolygon
+from shapely.geometry import box, Polygon, MultiPolygon, Point
 from shapely.ops import unary_union, polygonize
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
@@ -27,7 +27,7 @@ from datetime import datetime, timezone, timedelta
 # -------------------------------------------------
 
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v16.0")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v17.0")
 
 # -------------------------------------------------
 # IPMA SELF-BRIEFING — fetch automático
@@ -68,7 +68,7 @@ def fetch_gamet_ipma() -> tuple:
         resp = requests.get(
             _SIGMET_URL,
             params={"_": ts},
-            headers={"User-Agent": "Mozilla/5.0 (compatible; GAMET-Decoder/16.0)"},
+            headers={"User-Agent": "Mozilla/5.0 (compatible; GAMET-Decoder/17.0)"},
             timeout=10,
         )
         resp.raise_for_status()
@@ -323,7 +323,7 @@ def extract_polygon(line):
     return poly if geo_found else None
 
 # -------------------------------------------------
-# WIND PARSER — v16
+# WIND PARSER — v17
 # -------------------------------------------------
 
 # Níveis do GAMET na ordem de emissão
@@ -450,7 +450,7 @@ def parse_wind(secn2: str) -> list:
 
 
 # -------------------------------------------------
-# PARSER — v16
+# PARSER — v17
 # -------------------------------------------------
 
 # Palavras-chave que NÃO devem ser confundidas com visibilidade ou altitude
@@ -725,45 +725,60 @@ def parse_gamet(text):
     return blocks, fzlvl_min, qnh_min, wind_data
 
 # -------------------------------------------------
-# BUILD
+# ZONAS DINÂMICAS
 # -------------------------------------------------
+# A app evoluiu de "3 sectores fixos" para geometria dinâmica pura: a
+# decisão é calculada directamente sobre a forma real de cada fenómeno do
+# GAMET, não sobre regiões pré-definidas. ZONES / SECTOR_* mantêm-se apenas
+# como definição da fronteira geográfica da FIR (FIR_POLYGON).
 
-def build_zone_data(blocks, threshold=0.15):
-    zone_data = {z: [] for z in ZONES}
-
-    for block in blocks:
-        if block.polygon is None or block.polygon.is_empty:
+def label_region(poly, max_names=3):
+    """
+    Devolve um rótulo legível para uma região dinâmica, baseado nas
+    localidades de referência (CITIES) que caem dentro dela. Se nenhuma
+    localidade cair dentro, usa uma descrição geográfica aproximada a
+    partir do centróide (relativo ao centro da FIR).
+    """
+    contained = []
+    for name, (lat, lon) in CITIES.items():
+        try:
+            if poly.contains(Point(lon, lat)):
+                contained.append(name)
+        except Exception:
             continue
-        for zone, poly in ZONES.items():
-            inter = poly.intersection(block.polygon)
-            if inter.is_empty:
-                continue
-            coverage = inter.area / poly.area
-            if coverage < threshold:
-                continue
-            if block.phenomenon == "BASE_AGL":
-                zone_data[zone].append(("BASE", block.value, block.qualifier, block.layer))
-            elif block.phenomenon == "BASE_AMSL":
-                # Converter AMSL → AGL usando elevação máxima do sector (conservador)
-                elev = ZONE_ELEVATION.get(zone, 0)
-                agl_ft = max(0, block.value - elev)
-                zone_data[zone].append(("BASE", agl_ft, block.qualifier, block.layer))
-            else:
-                zone_data[zone].append((block.phenomenon, block.value, block.qualifier, block.layer))
 
-    return zone_data
+    if contained:
+        contained.sort()
+        if len(contained) > max_names:
+            return f"{', '.join(contained[:max_names])} +{len(contained) - max_names}"
+        return ", ".join(contained)
+
+    # Fallback: descrição geográfica aproximada
+    centroid = poly.representative_point()
+    lat, lon = centroid.y, centroid.x
+    fir_cx = (FIR_MINX + FIR_MAXX) / 2
+    fir_cy = (FIR_MINY + FIR_MAXY) / 2
+    ns = "Norte" if lat > fir_cy else "Sul"
+    ew = "Interior" if lon > fir_cx else "Litoral"
+    return f"Zona {ns}/{ew}"
+
 
 def compute_dynamic_regions(blocks):
     """
     Constrói regiões de decisão dinâmica com base na geometria REAL de cada
-    fenómeno do GAMET (não nos 3 sectores fixos).
+    fenómeno do GAMET (não em sectores fixos).
 
     Método: junta as fronteiras de todos os polígonos activos + fronteira da
     FIR, usa polygonize() para particionar a FIR em células atómicas (as
-    intersecções reais entre todos os fenómenos), calcula a decisão para cada
-    célula com a mesma lógica decision(), e funde células com a mesma decisão.
+    intersecções reais entre todos os fenómenos), calcula a decisão completa
+    para cada célula com a mesma lógica decision(), e funde células com a
+    mesma decisão — agregando também os campos (VIS, BASE, TS, TURB, ICE,
+    MT_OBSC, VA) para que cada região mostre o mesmo detalhe que um sector
+    fixo mostrava.
 
-    Devolve lista de tuplos (multipolygon, decision_level, reasons).
+    Devolve lista de dicts:
+      {"polygon", "label", "decision", "vis", "base", "ts", "turb",
+       "turb_layers", "ice", "ice_layers", "mt_obsc", "va", "reasons"}
     """
     relevant = [b for b in blocks
                 if b.polygon is not None and not b.polygon.is_empty
@@ -771,9 +786,18 @@ def compute_dynamic_regions(blocks):
                 and b.phenomenon in ("VIS", "BASE_AGL", "BASE_AMSL", "TS",
                                        "TURB", "ICE", "MT_OBSC", "VA")]
 
+    def _empty_region():
+        dec, vis, base, ts, turb, turb_layers, ice, ice_layers, mt_obsc, va, reasons = decision([])
+        return [{
+            "polygon": FIR_POLYGON, "label": label_region(FIR_POLYGON),
+            "decision": dec, "vis": vis, "base": base, "ts": ts,
+            "turb": turb, "turb_layers": turb_layers, "ice": ice,
+            "ice_layers": ice_layers, "mt_obsc": mt_obsc, "va": va,
+            "reasons": reasons,
+        }]
+
     if not relevant:
-        dec, *_ = decision([])
-        return [(FIR_POLYGON, dec, [])]
+        return _empty_region()
 
     # 1. Fronteiras de todos os polígonos relevantes + fronteira da FIR
     boundaries = [FIR_POLYGON.boundary]
@@ -784,11 +808,10 @@ def compute_dynamic_regions(blocks):
     # 2. Particionar em células atómicas
     atomic_cells = [c for c in polygonize(merged_lines) if not c.is_empty and c.area > 1e-9]
     if not atomic_cells:
-        dec, *_ = decision([])
-        return [(FIR_POLYGON, dec, [])]
+        return _empty_region()
 
-    # 3. Calcular decisão por célula (com base no ponto representativo)
-    cell_results = []  # (cell, decision_level, reasons)
+    # 3. Calcular decisão completa por célula (com base no ponto representativo)
+    cell_results = []
     for cell in atomic_cells:
         centroid = cell.representative_point()
         events = []
@@ -796,7 +819,6 @@ def compute_dynamic_regions(blocks):
             if not b.polygon.contains(centroid):
                 continue
             if b.phenomenon == "BASE_AMSL":
-                # Sem sector específico aqui — usar elevação média genérica
                 agl_ft = max(0, b.value - 1000)
                 events.append(("BASE", agl_ft, b.qualifier, b.layer))
             elif b.phenomenon == "BASE_AGL":
@@ -804,27 +826,64 @@ def compute_dynamic_regions(blocks):
             else:
                 events.append((b.phenomenon, b.value, b.qualifier, b.layer))
 
-        dec_level, *_rest, reasons = decision(events)
-        cell_results.append((cell, dec_level, reasons))
+        dec_result = decision(events)
+        cell_results.append((cell, dec_result))
 
-    # 4. Fundir células com a mesma decisão
+    # 4. Fundir células com a mesma decisão, agregando todos os campos
     from collections import defaultdict
-    grouped = defaultdict(list)
-    reasons_by_level = defaultdict(set)
-    for cell, dec_level, reasons in cell_results:
-        grouped[dec_level].append(cell)
-        for r in reasons:
-            reasons_by_level[dec_level].add(r)
+    grouped_cells   = defaultdict(list)
+    agg_vis         = defaultdict(list)
+    agg_base        = defaultdict(list)
+    agg_ts          = defaultdict(set)
+    agg_turb        = defaultdict(set)
+    agg_turb_layers = defaultdict(set)
+    agg_ice         = defaultdict(set)
+    agg_ice_layers  = defaultdict(set)
+    agg_mt_obsc     = defaultdict(set)
+    agg_va          = defaultdict(set)
+    agg_reasons     = defaultdict(set)
 
-    merged_regions = []
-    for dec_level, cells in grouped.items():
+    for cell, (dec, vis, base, ts, turb, turb_layers, ice, ice_layers, mt_obsc, va, reasons) in cell_results:
+        grouped_cells[dec].append(cell)
+        if vis is not None:
+            agg_vis[dec].append(vis)
+        if base is not None:
+            agg_base[dec].append(base)
+        agg_ts[dec].update(ts)
+        agg_turb[dec].update(turb)
+        agg_turb_layers[dec].update(l for l in turb_layers if l)
+        agg_ice[dec].update(ice)
+        agg_ice_layers[dec].update(l for l in ice_layers if l)
+        agg_mt_obsc[dec].update(mt_obsc)
+        agg_va[dec].update(va)
+        agg_reasons[dec].update(reasons)
+
+    regions = []
+    for dec_level, cells in grouped_cells.items():
         merged_poly = unary_union(cells)
-        merged_regions.append((merged_poly, dec_level, sorted(reasons_by_level[dec_level])))
+        regions.append({
+            "polygon":     merged_poly,
+            "label":       label_region(merged_poly),
+            "decision":    dec_level,
+            "vis":         min(agg_vis[dec_level]) if agg_vis[dec_level] else None,
+            "base":        min(agg_base[dec_level]) if agg_base[dec_level] else None,
+            "ts":          sorted(agg_ts[dec_level]),
+            "turb":        sorted(agg_turb[dec_level]),
+            "turb_layers": sorted(agg_turb_layers[dec_level]),
+            "ice":         sorted(agg_ice[dec_level]),
+            "ice_layers":  sorted(agg_ice_layers[dec_level]),
+            "mt_obsc":     sorted(agg_mt_obsc[dec_level]),
+            "va":          sorted(agg_va[dec_level]),
+            "reasons":     sorted(agg_reasons[dec_level]),
+        })
 
-    return merged_regions
+    # Ordenar da pior decisão para a melhor (NO-GO primeiro)
+    _order = {"NO-GO": 0, "MARGINAL": 1, "GO": 2}
+    regions.sort(key=lambda r: _order.get(r["decision"], 3))
+    return regions
 
 # -------------------------------------------------
-# DECISION — v16
+# DECISION — v17
 # -------------------------------------------------
 
 # Hierarquia de risco TS (do mais grave para o menos grave)
@@ -913,8 +972,8 @@ def decision(events):
 # PDF EXPORT — v14
 # -------------------------------------------------
 
-def _pdf_briefing_page(pdf, results, gamet_text, validity_label):
-    """Página 1 — Decisão VFR por sector."""
+def _pdf_briefing_page(pdf, regions, gamet_text, validity_label):
+    """Página 1 — Decisão VFR por região dinâmica (empilhadas verticalmente)."""
     fig, ax = plt.subplots(figsize=(8.27, 11.69))  # A4
     ax.axis("off")
     fig.patch.set_facecolor("white")
@@ -924,31 +983,43 @@ def _pdf_briefing_page(pdf, results, gamet_text, validity_label):
 
     ax.text(0.5, y, "LPPC GAMET – Briefing VFR", ha="center", va="top",
             fontsize=16, fontweight="bold", transform=ax.transAxes)
-    y -= 0.04
+    y -= 0.03
     if validity_label:
         ax.text(0.5, y, validity_label, ha="center", va="top",
                 fontsize=9, color="#555", transform=ax.transAxes)
-    y -= 0.04
+    y -= 0.02
+    ax.text(0.5, y, "Zonas calculadas com a geometria real do GAMET",
+            ha="center", va="top", fontsize=7, color="#888",
+            style="italic", transform=ax.transAxes)
+    y -= 0.045
 
-    col_x = [0.05, 0.37, 0.69]
-    for idx, z in enumerate(ZONES):
-        dec, vis, base, ts, turb, turb_layers, ice, ice_layers, mt_obsc, va_vals, reasons = results[z]
-        cx = col_x[idx]
+    for region in regions:
+        dec         = region["decision"]
+        vis         = region["vis"]
+        base        = region["base"]
+        ts          = region["ts"]
+        turb        = region["turb"]
+        turb_layers = region["turb_layers"]
+        ice         = region["ice"]
+        ice_layers  = region["ice_layers"]
+        mt_obsc     = region["mt_obsc"]
+        va_vals     = region["va"]
+        reasons     = region["reasons"]
+        pct         = 100 * region["polygon"].area / FIR_POLYGON.area
         color = colors.get(dec, "#888")
 
-        # Cabeçalho do sector — nome e decisão em linhas separadas
-        ax.text(cx, y, z, va="top", fontsize=10, fontweight="bold",
-                transform=ax.transAxes)
-        ax.text(cx, y - 0.030, dec, va="top", fontsize=10, fontweight="bold",
+        # Cabeçalho da região — label + percentagem + decisão na mesma linha
+        ax.text(0.05, y, f"{region['label']}  ({pct:.0f}% da FIR)", va="top",
+                fontsize=10, fontweight="bold", transform=ax.transAxes)
+        ax.text(0.75, y, dec, va="top", fontsize=10, fontweight="bold",
                 color=color, transform=ax.transAxes)
+        y -= 0.028
 
-        dy = 0.038
         entries = [
             f"VIS:  {vis} m"        if vis  is not None else "VIS:  —",
             f"BASE: {base} ft AGL"  if base is not None else "BASE: —",
             f"TS:   {', '.join(_ts_label(v) for v in ts)}" if ts else "TS:   —",
         ]
-        # TURB com camada
         if turb:
             turb_str = ", ".join(
                 f"{v} ({turb_layers[idx]})" if idx < len(turb_layers) and turb_layers[idx] else v
@@ -957,7 +1028,6 @@ def _pdf_briefing_page(pdf, results, gamet_text, validity_label):
             entries.append(f"TURB: {turb_str}")
         else:
             entries.append("TURB: —")
-        # ICE com camada
         if ice:
             ice_str = ", ".join(
                 f"{v} ({ice_layers[idx]})" if idx < len(ice_layers) and ice_layers[idx] else v
@@ -971,52 +1041,59 @@ def _pdf_briefing_page(pdf, results, gamet_text, validity_label):
         if mt_obsc:
             entries.append("MTOBS: MONT. OBSC.")
 
-        row_y = y - 0.068  # abaixo das 2 linhas do cabeçalho
         for entry in entries:
-            ax.text(cx, row_y, entry, va="top", fontsize=8,
+            ax.text(0.08, y, entry, va="top", fontsize=8,
                     fontfamily="monospace", transform=ax.transAxes)
-            row_y -= dy
+            y -= 0.024
 
-        # Motivos
         if reasons:
-            row_y -= 0.005
-            ax.text(cx, row_y, "Motivos:", va="top", fontsize=7,
-                    color="#555", transform=ax.transAxes)
-            row_y -= dy * 0.8
-            for r in reasons:
-                ax.text(cx, row_y, f"  • {r}", va="top", fontsize=7,
-                        color="#555", transform=ax.transAxes)
-                row_y -= dy * 0.8
+            ax.text(0.08, y, "Motivos: " + "; ".join(reasons), va="top",
+                    fontsize=7, color="#555", transform=ax.transAxes,
+                    wrap=True)
+            y -= 0.024
 
-    # Rodapé com texto bruto
-    y_raw = 0.38
-    ax.plot([0.05, 0.95], [y_raw + 0.02, y_raw + 0.02],
-            color="#ccc", linewidth=0.5, transform=ax.transAxes)
-    ax.text(0.05, y_raw, "Texto GAMET original:", va="top", fontsize=7,
-            fontweight="bold", color="#555", transform=ax.transAxes)
-    raw_lines = [gamet_text[i:i+100] for i in range(0, min(len(gamet_text), 600), 100)]
-    for rl in raw_lines:
-        y_raw -= 0.03
-        ax.text(0.05, y_raw, rl, va="top", fontsize=6,
-                fontfamily="monospace", color="#777", transform=ax.transAxes)
+        # Linha divisória entre regiões
+        y -= 0.006
+        ax.plot([0.05, 0.95], [y, y], color="#ddd", linewidth=0.5, transform=ax.transAxes)
+        y -= 0.018
+
+        if y < 0.15:  # sem espaço para mais — parar (texto bruto fica só com o que couber)
+            break
+
+    # Rodapé com texto bruto (se ainda houver espaço)
+    if y > 0.12:
+        y -= 0.01
+        ax.text(0.05, y, "Texto GAMET original:", va="top", fontsize=7,
+                fontweight="bold", color="#555", transform=ax.transAxes)
+        y -= 0.025
+        raw_lines = [gamet_text[i:i+100] for i in range(0, min(len(gamet_text), 400), 100)]
+        for rl in raw_lines:
+            if y < 0.03:
+                break
+            ax.text(0.05, y, rl, va="top", fontsize=6,
+                    fontfamily="monospace", color="#777", transform=ax.transAxes)
+            y -= 0.022
 
     pdf.savefig(fig, bbox_inches="tight")
     plt.close(fig)
 
 
-def _pdf_map_page(pdf, results):
-    """Página 2 — Mapa por sector."""
+def _pdf_map_page(pdf, regions):
+    """Página 2 — Mapa com zonas dinâmicas (geometria real do GAMET)."""
     fig, ax = plt.subplots(figsize=(8.27, 11.69))
     fig.patch.set_facecolor("white")
     colors = {"GO": "green", "MARGINAL": "orange", "NO-GO": "red"}
 
-    for z, poly in ZONES.items():
-        dec = results[z][0]
+    for region in regions:
+        poly = region["polygon"]
+        dec = region["decision"]
         geoms = poly.geoms if isinstance(poly, MultiPolygon) else [poly]
         for g in geoms:
+            if g.is_empty or not hasattr(g, "exterior") or g.exterior is None:
+                continue
             x, y = g.exterior.xy
-            ax.fill(x, y, alpha=0.35, color=colors[dec])
-            ax.plot(x, y, color=colors[dec], linewidth=1)
+            ax.fill(x, y, alpha=0.35, color=colors.get(dec, "grey"))
+            ax.plot(x, y, color=colors.get(dec, "grey"), linewidth=1)
 
     for name, (lat, lon) in CITIES.items():
         ax.plot(lon, lat, "ko", markersize=3)
@@ -1024,7 +1101,7 @@ def _pdf_map_page(pdf, results):
 
     ax.set_aspect("equal")
     ax.grid(True, linestyle="--", alpha=0.4)
-    ax.set_title("Mapa VFR – FIR LPPC", fontsize=12, fontweight="bold")
+    ax.set_title("Mapa VFR – FIR LPPC (zonas dinâmicas)", fontsize=12, fontweight="bold")
     ax.legend(handles=[
         Patch(facecolor="green",  alpha=0.35, label="GO"),
         Patch(facecolor="orange", alpha=0.35, label="MARGINAL"),
@@ -1062,18 +1139,18 @@ def _pdf_secn2_page(pdf, fzlvl_min, qnh_min):
     plt.close(fig)
 
 
-def generate_pdf(results, gamet_text, fzlvl_min, qnh_min, validity_label) -> bytes:
+def generate_pdf(regions, gamet_text, fzlvl_min, qnh_min, validity_label) -> bytes:
     """Gera um PDF completo (briefing + mapa + secção II) e devolve os bytes."""
     buf = io.BytesIO()
     with PdfPages(buf) as pdf:
-        _pdf_briefing_page(pdf, results, gamet_text, validity_label)
-        _pdf_map_page(pdf, results)
+        _pdf_briefing_page(pdf, regions, gamet_text, validity_label)
+        _pdf_map_page(pdf, regions)
         if fzlvl_min or qnh_min:
             _pdf_secn2_page(pdf, fzlvl_min, qnh_min)
         # Metadados
         d = pdf.infodict()
         d["Title"]   = "LPPC GAMET Briefing VFR"
-        d["Author"]  = "GAMET Decoder v16.0"
+        d["Author"]  = "GAMET Decoder v17.0"
         d["Subject"] = "Briefing meteorológico VFR – FIR LPPC"
     buf.seek(0)
     return buf.getvalue()
@@ -1102,8 +1179,7 @@ if st.session_state.get("_active_gamet_text"):
             st.warning(label + " ⚠️ FORA DO PERÍODO DE VALIDADE — dados podem estar desatualizados")
 
     blocks, fzlvl_min, qnh_min, wind_data = parse_gamet(gamet_text)
-    zone_data  = build_zone_data(blocks)
-    results    = {z: decision(zone_data[z]) for z in ZONES}
+    dynamic_regions = compute_dynamic_regions(blocks)
 
     # ---- Histórico (últimos 5) ----
     if "gamet_history" not in st.session_state:
@@ -1118,15 +1194,34 @@ if st.session_state.get("_active_gamet_text"):
         })
         st.session_state["gamet_history"] = history[:5]
 
-    # ---- Briefing ----
+    # ---- Briefing (zonas dinâmicas — geometria real do GAMET) ----
     st.subheader("📋 Briefing")
-    cols = st.columns(3)
+    st.caption(
+        "As zonas são calculadas a partir da geometria real do GAMET "
+        "(não de sectores fixos) — cada região reflecte exactamente a área "
+        "coberta pelos fenómenos meteorológicos reportados."
+    )
+    n_regions = len(dynamic_regions)
+    cols = st.columns(min(n_regions, 3)) if n_regions > 0 else []
 
-    for i, z in enumerate(ZONES):
-        dec, vis, base, ts, turb, turb_layers, ice, ice_layers, mt_obsc, va_vals, reasons = results[z]
+    for i, region in enumerate(dynamic_regions):
+        dec         = region["decision"]
+        vis         = region["vis"]
+        base        = region["base"]
+        ts          = region["ts"]
+        turb        = region["turb"]
+        turb_layers = region["turb_layers"]
+        ice         = region["ice"]
+        ice_layers  = region["ice_layers"]
+        mt_obsc     = region["mt_obsc"]
+        va_vals     = region["va"]
+        reasons     = region["reasons"]
+        pct         = 100 * region["polygon"].area / FIR_POLYGON.area
 
-        with cols[i]:
-            st.markdown(f"### {z}")
+        col = cols[i % len(cols)]
+        with col:
+            st.markdown(f"### {region['label']}")
+            st.caption(f"{pct:.0f}% da FIR")
 
             if dec == "NO-GO":
                 st.error("🔴 NO-GO")
@@ -1251,7 +1346,7 @@ if st.session_state.get("_active_gamet_text"):
     # ---- Exportar PDF ----
     st.subheader("📄 Exportar Briefing")
     with st.spinner("A gerar PDF..."):
-        pdf_bytes = generate_pdf(results, gamet_text, fzlvl_min, qnh_min, validity_label)
+        pdf_bytes = generate_pdf(dynamic_regions, gamet_text, fzlvl_min, qnh_min, validity_label)
     fname = f"briefing_lppc_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%MZ')}.pdf"
     st.download_button(
         label="⬇️ Descarregar Briefing PDF",
@@ -1262,54 +1357,31 @@ if st.session_state.get("_active_gamet_text"):
 
     # ---- Mapa Interativo (Folium) ----
     st.subheader("🗺️ Mapa Interativo")
+    st.caption("Zonas desenhadas com a geometria real do GAMET.")
     fcolors = {"GO": "#2ecc71", "MARGINAL": "#e67e22", "NO-GO": "#e74c3c"}
-
-    show_dynamic = st.toggle(
-        "🌐 Mostrar zonas dinâmicas (geometria real do GAMET)",
-        value=False,
-        help="Em vez dos 3 sectores fixos, desenha as regiões de decisão "
-             "exactamente como o GAMET as define — as fronteiras seguem os "
-             "qualificadores geográficos (N OF, S OF, BTN...) de cada fenómeno."
-    )
 
     if _FOLIUM_OK:
         fmap = folium.Map(location=[39.5, -8.5], zoom_start=6, tiles="CartoDB positron")
 
-        if show_dynamic:
-            regions = compute_dynamic_regions(blocks)
-            for poly, dec, reasons in regions:
-                color = fcolors.get(dec, "#888")
-                geoms = poly.geoms if isinstance(poly, MultiPolygon) else [poly]
-                tooltip = dec + (f" — {'; '.join(reasons)}" if reasons else "")
-                for g in geoms:
-                    if g.is_empty or not hasattr(g, "exterior") or g.exterior is None:
-                        continue
-                    coords = [[lat, lon] for lon, lat in zip(*g.exterior.xy)]
-                    folium.Polygon(
-                        locations=coords,
-                        color=color,
-                        fill=True,
-                        fill_color=color,
-                        fill_opacity=0.35,
-                        weight=2,
-                        tooltip=tooltip,
-                    ).add_to(fmap)
-        else:
-            for z, poly in ZONES.items():
-                dec = results[z][0]
-                color = fcolors.get(dec, "#888")
-                geoms = poly.geoms if isinstance(poly, MultiPolygon) else [poly]
-                for g in geoms:
-                    coords = [[lat, lon] for lon, lat in zip(*g.exterior.xy)]
-                    folium.Polygon(
-                        locations=coords,
-                        color=color,
-                        fill=True,
-                        fill_color=color,
-                        fill_opacity=0.3,
-                        weight=2,
-                        tooltip=f"{z}: {dec}",
-                    ).add_to(fmap)
+        for region in dynamic_regions:
+            poly = region["polygon"]
+            dec  = region["decision"]
+            color = fcolors.get(dec, "#888")
+            geoms = poly.geoms if isinstance(poly, MultiPolygon) else [poly]
+            tooltip = f"{region['label']}: {dec}" + (f" — {'; '.join(region['reasons'])}" if region["reasons"] else "")
+            for g in geoms:
+                if g.is_empty or not hasattr(g, "exterior") or g.exterior is None:
+                    continue
+                coords = [[lat, lon] for lon, lat in zip(*g.exterior.xy)]
+                folium.Polygon(
+                    locations=coords,
+                    color=color,
+                    fill=True,
+                    fill_color=color,
+                    fill_opacity=0.35,
+                    weight=2,
+                    tooltip=tooltip,
+                ).add_to(fmap)
 
         for name, (lat, lon) in CITIES.items():
             folium.CircleMarker(
