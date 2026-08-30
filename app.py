@@ -27,7 +27,7 @@ from datetime import datetime, timezone, timedelta
 # -------------------------------------------------
 
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v22.0")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v23.0")
 
 # -------------------------------------------------
 # IPMA SELF-BRIEFING — fetch automático
@@ -423,7 +423,7 @@ def extract_polygon(line):
     return poly if geo_found else None
 
 # -------------------------------------------------
-# WIND PARSER — v22
+# WIND PARSER — v23
 # -------------------------------------------------
 
 # Níveis do GAMET na ordem de emissão
@@ -550,7 +550,7 @@ def parse_wind(secn2: str) -> list:
 
 
 # -------------------------------------------------
-# PARSER — v22
+# PARSER — v23
 # -------------------------------------------------
 
 # Palavras-chave que NÃO devem ser confundidas com visibilidade ou altitude
@@ -563,6 +563,32 @@ _TS_DISPLAY = {
 
 def _ts_label(val):
     return _TS_DISPLAY.get(val, val)
+
+def _trend_icon(layer_str):
+    """
+    Devolve um ícone de tendência para uma string de camada que pode
+    conter INTSF (intensificação) ou WKN (enfraquecimento) — ajuda a
+    destacar visualmente fenómenos que estão a piorar, mesmo quando o
+    valor de severidade reportado (MOD/SEV) ainda não reflecte isso.
+    """
+    if not layer_str:
+        return ""
+    if "INTSF" in layer_str:
+        return " 📈"
+    if "WKN" in layer_str:
+        return " 📉"
+    return ""
+
+def _trend_text(layer_str):
+    """Variante em texto simples de _trend_icon, para uso no PDF (matplotlib
+    não renderiza emoji de forma fiável sem fontes específicas)."""
+    if not layer_str:
+        return ""
+    if "INTSF" in layer_str:
+        return " [A INTENSIFICAR]"
+    if "WKN" in layer_str:
+        return " [A ENFRAQUECER]"
+    return ""
 
 def parse_gamet(text):
 
@@ -1004,8 +1030,28 @@ def find_region_for_point(regions, lat, lon):
         return closest
     return None
 
+
+def check_strong_wind(wind_data, threshold_kt=20, level="1000FT AGL"):
+    """
+    Verifica se algum dos vento reportados na Secção II excede um limiar de
+    velocidade a baixa altitude — relevante para ultraleves, que têm
+    limites de vento cruzado tipicamente mais apertados que aviação geral
+    convencional. Isto é um AVISO GERAL informativo — não é geometricamente
+    atribuído a nenhuma região dinâmica (o vento é reportado por estação
+    pontual, não por área), e não altera a decisão GO/MARGINAL/NO-GO.
+
+    Devolve lista de strings de aviso, ou [] se nada de relevante.
+    """
+    warnings = []
+    for station in wind_data:
+        levels = station.get("levels", {})
+        entry = levels.get(level)
+        if entry and entry.get("spd") is not None and entry["spd"] >= threshold_kt:
+            warnings.append(f"{station['station']}: {entry['spd']}KT a {level}")
+    return warnings
+
 # -------------------------------------------------
-# DECISION — v22
+# DECISION — v23
 # -------------------------------------------------
 
 # Hierarquia de risco TS (do mais grave para o menos grave)
@@ -1088,6 +1134,20 @@ def decision(events):
             decision_level = "MARGINAL"
         reasons.append(f"TS {'/'.join(_ts_label(v) for v in ts_vals)}")
 
+    # ---- Turbulência severa — NO-GO (risco de perda de controlo/estrutural,
+    # especialmente crítico em ultraleves) ----
+    if "SEV" in turb_vals:
+        decision_level = "NO-GO"
+        layer_note = f" {'/'.join(turb_layers)}" if turb_layers else ""
+        reasons.append(f"TURB SEV{layer_note} — risco severo")
+
+    # ---- Gelo severo — NO-GO (a generalidade dos ultraleves não tem
+    # sistemas de degelo) ----
+    if "SEV" in ice_vals:
+        decision_level = "NO-GO"
+        layer_note = f" {'/'.join(ice_layers)}" if ice_layers else ""
+        reasons.append(f"ICE SEV{layer_note} — risco severo")
+
     return decision_level, vis, base, ts_vals, turb_vals, turb_layers, ice_vals, ice_layers, mt_obsc, va_vals, reasons
 
 # -------------------------------------------------
@@ -1144,7 +1204,7 @@ def _pdf_briefing_page(pdf, regions, gamet_text, validity_label):
         ]
         if turb:
             turb_str = ", ".join(
-                f"{v} ({turb_layers[idx]})" if idx < len(turb_layers) and turb_layers[idx] else v
+                f"{v} ({turb_layers[idx]}){_trend_text(turb_layers[idx])}" if idx < len(turb_layers) and turb_layers[idx] else v
                 for idx, v in enumerate(turb)
             )
             entries.append(f"TURB: {turb_str}")
@@ -1152,7 +1212,7 @@ def _pdf_briefing_page(pdf, regions, gamet_text, validity_label):
             entries.append("TURB: —")
         if ice:
             ice_str = ", ".join(
-                f"{v} ({ice_layers[idx]})" if idx < len(ice_layers) and ice_layers[idx] else v
+                f"{v} ({ice_layers[idx]}){_trend_text(ice_layers[idx])}" if idx < len(ice_layers) and ice_layers[idx] else v
                 for idx, v in enumerate(ice)
             )
             entries.append(f"ICE:  {ice_str}")
@@ -1272,7 +1332,7 @@ def generate_pdf(regions, gamet_text, fzlvl_min, qnh_min, validity_label) -> byt
         # Metadados
         d = pdf.infodict()
         d["Title"]   = "LPPC GAMET Briefing VFR"
-        d["Author"]  = "GAMET Decoder v22.0"
+        d["Author"]  = "GAMET Decoder v23.0"
         d["Subject"] = "Briefing meteorológico VFR – FIR LPPC"
     buf.seek(0)
     return buf.getvalue()
@@ -1309,6 +1369,16 @@ if st.session_state.get("_active_gamet_text"):
             "Isto pode significar que o GAMET está incompleto, mal colado, "
             "ou num formato não suportado — **não** que as condições estão "
             "calmas. Confirma o texto antes de confiar na decisão abaixo."
+        )
+
+    wind_warnings = check_strong_wind(wind_data)
+    if wind_warnings:
+        st.warning(
+            "💨 **Vento forte reportado a 1000ft AGL** (aviso geral — não "
+            "afecta a decisão GO/MARGINAL/NO-GO nem está atribuído a uma "
+            "região específica, já que o vento é reportado por estação "
+            "pontual, não por área). Confirma os limites de vento cruzado "
+            "da tua aeronave:\n\n" + "\n".join(f"- {w}" for w in wind_warnings)
         )
 
     # ---- Histórico (últimos 5) ----
@@ -1393,7 +1463,7 @@ if st.session_state.get("_active_gamet_text"):
 
             if turb:
                 turb_str = ", ".join(
-                    f"{v} ({turb_layers[idx]})" if idx < len(turb_layers) and turb_layers[idx] else v
+                    f"{v} ({turb_layers[idx]}){_trend_icon(turb_layers[idx])}" if idx < len(turb_layers) and turb_layers[idx] else v
                     for idx, v in enumerate(turb)
                 )
                 st.write(f"🌪 TURB: {turb_str}")
@@ -1402,7 +1472,7 @@ if st.session_state.get("_active_gamet_text"):
 
             if ice:
                 ice_str = ", ".join(
-                    f"{v} ({ice_layers[idx]})" if idx < len(ice_layers) and ice_layers[idx] else v
+                    f"{v} ({ice_layers[idx]}){_trend_icon(ice_layers[idx])}" if idx < len(ice_layers) and ice_layers[idx] else v
                     for idx, v in enumerate(ice)
                 )
                 st.write(f"❄️ ICE: {ice_str}")
