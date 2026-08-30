@@ -27,7 +27,7 @@ from datetime import datetime, timezone, timedelta
 # -------------------------------------------------
 
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v18.0")
+st.title("✈️ LPPC GAMET – Motor Cartográfico v22.0")
 
 # -------------------------------------------------
 # IPMA SELF-BRIEFING — fetch automático
@@ -202,26 +202,77 @@ def _terrain_elevation_ft(lon, lat):
 # CIDADES
 # -------------------------------------------------
 
-CITIES = {
-    "Bragança":          (41.806, -6.756),
-    "Viana do Castelo":  (41.693, -8.832),
-    "Braga":             (41.545, -8.426),
-    "Vila Real":         (41.300, -7.744),
-    "Porto":             (41.149, -8.610),
-    "Viseu":             (40.661, -7.909),
-    "Aveiro":            (40.640, -8.653),
-    "Guarda":            (40.537, -7.267),
-    "Coimbra":           (40.203, -8.410),
-    "Leiria":            (39.744, -8.807),
-    "Castelo Branco":    (39.823, -7.493),
-    "Santarém":          (39.236, -8.686),
-    "Portalegre":        (39.292, -7.428),
-    "Lisboa":            (38.722, -9.139),
-    "Setúbal":           (38.524, -8.888),
-    "Évora":             (38.571, -7.913),
-    "Beja":              (38.015, -7.863),
-    "Faro":              (37.019, -7.930),
+AERODROMES = {
+    # Aeródromos civis nacionais de Portugal Continental (código ICAO) —
+    # coordenadas oficiais do Manual VFR / eVFR (NAV Portugal), ponto de
+    # referência do aeródromo (ARP), AD 2.2. Fonte fornecida directamente
+    # pelo utilizador a partir da publicação em vigor.
+    "Lisboa (LPPT)":                       (38.7742, -9.1342),
+    "Porto (LPPR)":                        (41.2356, -8.6781),
+    "Faro (LPFR)":                         (37.0144, -7.9658),
+    "Beja (LPBJ)":                         (38.0789, -7.9325),
+    "Cascais (LPCS)":                      (38.7256, -9.3553),
+    "Évora (LPEV)":                        (38.5297, -7.8919),
+    "Vila Real (LPVR)":                    (41.2756, -7.7200),
+    "Ponte de Sor (LPSO)":                 (39.2117, -8.0578),
+    "Bragança (LPBG)":                     (41.8567, -6.7075),
+    "Braga (LPBR)":                        (41.5869, -8.4450),
+    "Castelo Branco (LPCB)":               (39.8483, -7.4417),
+    "Chaves (LPCH)":                       (41.7219, -7.4628),
+    "Coimbra (LPCO)":                      (40.1561, -8.4692),
+    "Ferreira do Alentejo (LPFA)":         (38.0392, -8.1042),
+    "Figueira dos Cavaleiros (LPFC)":      (38.0775, -8.2358),
+    "Espinho (LPIN)":                      (40.9725, -8.6450),
+    "Leiria (LPJF)":                       (39.7822, -8.8197),
+    "Lousã (LPLZ)":                        (40.1422, -8.2400),
+    "Mirandela (LPMI)":                    (41.4703, -7.2278),
+    "Amendoeira - Montemor-o-Novo (LPMN)": (38.7092, -8.2753),
+    "Mogadouro (LPMU)":                    (41.3944, -6.6844),
+    "Portimão (LPPM)":                     (37.1494, -8.5839),
+    "Proença-a-Nova (LPPN)":               (39.7311, -7.8747),
+    "Santa Cruz (LPSC)":                   (39.1236, -9.3800),
+    "Seia (LPSE)":                         (40.4533, -7.6917),
+    "Santarém (LPSR)":                     (39.2086, -8.6886),
+    "Vilar de Luz/Maia (LPVL)":            (41.2792, -8.5172),
+    "Viseu (LPVZ)":                        (40.7256, -7.8892),
 }
+
+# Pistas de ultraleves (código LPxx, Manual VFR / eVFR — NAV Portugal, AD 4).
+# Coordenadas: ponto de referência (AD 4.2, item 1), convertidas de
+# DDMMSSH/DDDMMSSH para decimal. Fonte: eVFR fornecido directamente pelo
+# utilizador a partir da publicação oficial em vigor.
+ULTRALIGHT_STRIPS = {
+    "Alqueidão (LP48)":                   (39.0675, -8.8061),
+    "Atouguia da Baleia (LP49)":          (39.3481, -9.3200),
+    "Azambuja (LP50)":                    (39.0592, -8.8264),
+    "Beja UL (LP51)":                     (38.0603, -7.8775),
+    "Benavente (LP52)":                   (38.9133, -8.7858),
+    "Cabeceiras de Basto (LP53)":         (41.5553, -7.9878),
+    "Campinho (LP54)":                    (38.3592, -7.4658),
+    "Cerval (LP55)":                      (41.9750, -8.6733),
+    "Herdade da Lameira (LP57)":          (39.2778, -7.7725),
+    "Herdade da Zambujeira (LP58)":       (37.6708, -8.1239),
+    "Lagos (LP59)":                       (37.1219, -8.6789),
+    "Palma (LP61)":                       (38.5147, -8.5761),
+    "S. Miguel de Laúndos (LP62)":        (41.4486, -8.7086),
+    "Tojeira (LP63)":                     (38.8833, -9.4275),
+    "Valdonas (LP64)":                    (39.5908, -8.3714),
+    "Cabeço da Vaca (LP66)":              (40.3444, -6.9800),
+    "Herdade do Pontal - Pegões (LP68)":  (38.7114, -8.6100),
+    "Casalinho Pombal (LP69)":            (39.8864, -8.6489),
+    "Valadas - Ferreira do Zêzere (LP71)": (39.6819, -8.2531),
+    "Lezírias (LP75)":                    (38.9025, -8.9369),
+    "Casarão (LP76)":                     (40.5492, -8.4061),
+    "Alentejo Air Park (LP78)":           (37.4656, -8.7372),
+    "Faias (LP79)":                       (38.6878, -8.7450),
+    "Pias Longas (LP80)":                 (39.5978, -8.5672),
+}
+
+# Todos os pontos de referência disponíveis para consulta rápida e mapa —
+# aeródromos civis + pistas de ultraleves
+AERODROMES = {**AERODROMES, **ULTRALIGHT_STRIPS}
+# Compatibilidade — usado por label_region() e marcadores do mapa
+CITIES = AERODROMES
 
 # -------------------------------------------------
 # DATA MODEL
@@ -372,7 +423,7 @@ def extract_polygon(line):
     return poly if geo_found else None
 
 # -------------------------------------------------
-# WIND PARSER — v18
+# WIND PARSER — v22
 # -------------------------------------------------
 
 # Níveis do GAMET na ordem de emissão
@@ -499,7 +550,7 @@ def parse_wind(secn2: str) -> list:
 
 
 # -------------------------------------------------
-# PARSER — v18
+# PARSER — v22
 # -------------------------------------------------
 
 # Palavras-chave que NÃO devem ser confundidas com visibilidade ou altitude
@@ -935,22 +986,26 @@ def compute_dynamic_regions(blocks):
 
 def find_region_for_point(regions, lat, lon):
     """
-    Devolve a região dinâmica que contém o ponto (lat, lon), ou None se
-    nenhuma o contiver (não deveria acontecer, já que as regiões cobrem
-    100% da FIR — mas o ponto pode estar fora da FIR).
+    Devolve a região dinâmica que contém o ponto (lat, lon). Se o ponto
+    cair fora de todas as regiões — o que só deve acontecer perto da
+    fronteira aproximada da FIR (ex.: aeródromos no extremo do território,
+    como Bragança) — devolve a região geometricamente mais próxima, desde
+    que a distância seja pequena (< 0.2°, ~20km). Só devolve None se o
+    ponto estiver claramente fora da área coberta pelo GAMET.
     """
     pt = Point(lon, lat)
     for region in regions:
         if region["polygon"].contains(pt):
             return region
-    # Fallback: tolerância para pontos mesmo na fronteira
-    for region in regions:
-        if region["polygon"].distance(pt) < 0.01:
-            return region
+    # Fallback: região mais próxima, com tolerância para folgas na
+    # fronteira aproximada da FIR
+    closest = min(regions, key=lambda r: r["polygon"].distance(pt), default=None)
+    if closest is not None and closest["polygon"].distance(pt) < 0.2:
+        return closest
     return None
 
 # -------------------------------------------------
-# DECISION — v18
+# DECISION — v22
 # -------------------------------------------------
 
 # Hierarquia de risco TS (do mais grave para o menos grave)
@@ -1217,7 +1272,7 @@ def generate_pdf(regions, gamet_text, fzlvl_min, qnh_min, validity_label) -> byt
         # Metadados
         d = pdf.infodict()
         d["Title"]   = "LPPC GAMET Briefing VFR"
-        d["Author"]  = "GAMET Decoder v18.0"
+        d["Author"]  = "GAMET Decoder v22.0"
         d["Subject"] = "Briefing meteorológico VFR – FIR LPPC"
     buf.seek(0)
     return buf.getvalue()
@@ -1269,17 +1324,18 @@ if st.session_state.get("_active_gamet_text"):
         })
         st.session_state["gamet_history"] = history[:5]
 
-    # ---- Consulta rápida por localidade ----
+    # ---- Consulta rápida por aeródromo ----
     st.subheader("✈️ Consulta Rápida")
-    airport_options = ["— Seleccionar —"] + sorted(CITIES.keys())
+    airport_options = ["— Seleccionar —"] + sorted(AERODROMES.keys())
     selected_airport = st.selectbox(
-        "Vou voar de/para:",
+        "Aeródromo de partida/chegada:",
         options=airport_options,
-        help="Mostra a decisão VFR exacta para essa localidade, com base na "
-             "geometria real do GAMET — não numa aproximação por sector.",
+        help="Mostra a decisão VFR exacta para esse aeródromo, com base na "
+             "geometria real do GAMET — não numa aproximação por sector. "
+             "Coordenadas aproximadas — confirma sempre na AIP Portugal em vigor.",
     )
     if selected_airport != "— Seleccionar —":
-        lat, lon = CITIES[selected_airport]
+        lat, lon = AERODROMES[selected_airport]
         found = find_region_for_point(dynamic_regions, lat, lon)
         if found:
             dec = found["decision"]
