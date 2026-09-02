@@ -26,8 +26,10 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
+APP_VERSION = "25.0"
+
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title("✈️ LPPC GAMET – Motor Cartográfico v23.0")
+st.title(f"✈️ LPPC GAMET – Motor Cartográfico v{APP_VERSION}")
 
 # -------------------------------------------------
 # IPMA SELF-BRIEFING — fetch automático
@@ -68,7 +70,7 @@ def fetch_gamet_ipma() -> tuple:
         resp = requests.get(
             _SIGMET_URL,
             params={"_": ts},
-            headers={"User-Agent": "Mozilla/5.0 (compatible; GAMET-Decoder/17.0)"},
+            headers={"User-Agent": f"Mozilla/5.0 (compatible; GAMET-Decoder/{APP_VERSION})"},
             timeout=10,
         )
         resp.raise_for_status()
@@ -81,7 +83,7 @@ def fetch_gamet_ipma() -> tuple:
     text = re.sub(r"\s+", " ", text).strip()
 
     # Isolar bloco LPPC GAMET ... =
-    m = re.search(r"(LPPC\s+GAMET\s+VALID\s+.+?=)", text, re.DOTALL)
+    m = re.search(r"(LPPC\s+GAMET\s+(?:AMD\s+|COR\s+)?VALID\s+.+?=)", text, re.DOTALL)
     if not m:
         return False, "GAMET do LPPC não encontrado. Pode não estar emitido ainda."
 
@@ -308,9 +310,14 @@ def looks_unparseable(text):
     """
     t = normalize(text)
     has_section = bool(re.search(r"SECN\s+I\b", t))
+    # NOTA: SIGMET APPLICABLE não conta como campo meteorológico. Um texto
+    # com apenas "SECN I SIGMET APPLICABLE: NIL" não tem nenhum fenómeno
+    # legível — se contasse, passaria como parseável e a app mostraria GO
+    # em toda a FIR, que é exactamente o falso conforto que esta função
+    # existe para evitar.
     field_pattern = re.compile(
         r"\bSFC\s+VIS\b|\bSIG\s+VIS\b|\bVIS\s*:|\bSIGWX\b|\bSIG\s+CLD\b|"
-        r"\bCLD\s*:|\bTURB\b|\bICE\b|\bMT\s+OBSC\b|\bVA\s*:|\bSIGMET\b"
+        r"\bCLD\s*:|\bTURB\b|\bICE\b|\bMT\s+OBSC\b|\bVA\s*:"
     )
     has_field = bool(field_pattern.search(t))
     return not (has_section and has_field)
@@ -318,6 +325,38 @@ def looks_unparseable(text):
 # -------------------------------------------------
 # VALIDADE
 # -------------------------------------------------
+
+def _build_utc_date(day, hour, minute, ref):
+    """
+    Constrói um datetime UTC para o dia/hora indicados, procurando o mês
+    correcto à volta da data de referência.
+
+    O GAMET só indica o DIA (não o mês), pelo que um GAMET emitido a 31 de
+    Março e lido a 1 de Abril tem de ser resolvido para Março — usar
+    ref.replace(day=31) levantaria ValueError, porque Abril não tem dia 31.
+
+    Devolve o candidato mais próximo de `ref`, ou None se o dia não existir
+    em nenhum dos meses considerados.
+    """
+    candidates = []
+    for month_offset in (-1, 0, 1):
+        month = ref.month + month_offset
+        year  = ref.year
+        if month < 1:
+            month += 12
+            year  -= 1
+        elif month > 12:
+            month -= 12
+            year  += 1
+        try:
+            candidates.append(datetime(year, month, day, hour, minute,
+                                        tzinfo=timezone.utc))
+        except ValueError:
+            continue  # dia não existe nesse mês (ex.: 31 de Abril)
+    if not candidates:
+        return None
+    return min(candidates, key=lambda d: abs((d - ref).total_seconds()))
+
 
 def parse_validity(text):
     """Extrai período de validade e verifica se está ativo."""
@@ -328,20 +367,68 @@ def parse_validity(text):
     day_s, hh_s, mm_s = int(m.group(1)), int(m.group(2)), int(m.group(3))
     day_e, hh_e, mm_e = int(m.group(4)), int(m.group(5)), int(m.group(6))
     now = datetime.now(timezone.utc)
-    try:
-        start = now.replace(day=day_s, hour=hh_s, minute=mm_s, second=0, microsecond=0)
-        end   = now.replace(day=day_e, hour=hh_e, minute=mm_e, second=0, microsecond=0)
-        # Se end ficou antes de start, o GAMET cruza a fronteira do mês — avançar end 1 mês
-        if end < start:
-            # Incrementar mês manualmente (sem dependência de dateutil)
-            month = end.month + 1
-            year  = end.year + (1 if month > 12 else 0)
-            month = 1 if month > 12 else month
-            end = end.replace(year=year, month=month)
-        active = start <= now <= end
-        return start, end, active
-    except Exception:
+
+    start = _build_utc_date(day_s, hh_s, mm_s, now)
+    if start is None:
         return None, None, False
+
+    # O fim é sempre depois do início e o GAMET dura poucas horas — procurar
+    # o candidato para o dia final que fique logo a seguir ao início
+    end = _build_utc_date(day_e, hh_e, mm_e, start)
+    if end is None:
+        return None, None, False
+    if end <= start:
+        # Cruza fronteira de mês/ano — avançar um mês e reconstruir
+        month = start.month + 1
+        year  = start.year
+        if month > 12:
+            month = 1
+            year += 1
+        try:
+            end = datetime(year, month, day_e, hh_e, mm_e, tzinfo=timezone.utc)
+        except ValueError:
+            return None, None, False
+
+    active = start <= now <= end
+    return start, end, active
+
+def extract_sigmet_applicable(text):
+    """
+    Extrai o conteúdo do campo SIGMET APPLICABLE, em vez de o descartar
+    silenciosamente. Este campo indica se existe um SIGMET activo que se
+    sobrepõe à área/período do GAMET — SIGMETs são emitidos para fenómenos
+    que justificam alerta acima do que um GAMET rotineiro cobre (turbulência
+    severa, gelo severo, cinzas vulcânicas, ondas de montanha severas, etc.),
+    pelo que nunca devem ser ignorados silenciosamente.
+
+    Isola primeiro a linha do SIGMET, e só depois corta conteúdo de campos
+    que apareçam a seguir — preserva o texto completo do SIGMET (que pode
+    legitimamente conter palavras como TURB ou ICE) sem capturar campos
+    subsequentes.
+
+    Devolve (has_active_sigmet: bool, raw_text: str).
+    """
+    t = normalize(text)
+    t = re.sub(r"(SIGMET\s+APPLICABLE)", r"\n\1", t)
+    for raw_line in t.splitlines():
+        line = raw_line.strip()
+        if not line.startswith("SIGMET"):
+            continue
+        content = re.sub(r"^SIGMET\s+APPLICABLE\s*:?\s*", "", line).strip()
+        # Cortar em qualquer campo do GAMET que venha depois (o SIGMET é
+        # sempre o último campo da Secção I — o que vier a seguir é outro
+        # campo, não parte do texto do SIGMET)
+        cut = re.split(
+            r"\bSECN\s+II\b|\bSFC\s+VIS\b|\bSIG\s+VIS\b|\bSIG\s+CLD\b|"
+            r"\bSIGWX\b|\bMT\s+OBSC\b|\bVIS\s*:|\bCLD\s*:",
+            content, maxsplit=1
+        )[0]
+        content = cut.strip().rstrip("=").strip()
+        cleaned = re.sub(r"\bAT\s+TIME\s+OF\s+ISSUE\b", "", content).strip()
+        if cleaned in ("", "NIL"):
+            return False, content
+        return True, content
+    return False, ""
 
 # -------------------------------------------------
 # GEO
@@ -423,7 +510,7 @@ def extract_polygon(line):
     return poly if geo_found else None
 
 # -------------------------------------------------
-# WIND PARSER — v23
+# WIND PARSER — v25
 # -------------------------------------------------
 
 # Níveis do GAMET na ordem de emissão
@@ -487,8 +574,17 @@ def parse_wind(secn2: str) -> list:
         return None
 
     def _is_station_name_line(line):
-        """True se a linha contém só nomes de estações (sem dígitos)."""
-        return bool(re.match(r"^[A-Z][A-Z\s]+$", line)) and not re.search(r"\d", line)
+        """
+        True se a linha contém só nomes de estações (sem dígitos).
+        Aceita acentos e pontos (ex.: BRAGANÇA, S. MIGUEL) — o critério
+        real é "não tem dígitos e é maioritariamente maiúsculas".
+        """
+        if re.search(r"\d", line):
+            return False
+        letters = [c for c in line if c.isalpha()]
+        if not letters:
+            return False
+        return all(c.isupper() for c in letters)
 
     def _is_coord_line(line):
         return bool(re.search(r"N\d{4}\s+W\d{4,5}", line))
@@ -496,8 +592,34 @@ def parse_wind(secn2: str) -> list:
     def _is_level_line(line):
         return bool(re.match(r"(\d{4}FT\s+AGL|FL\d{3})", line))
 
-    def flush_group(names, coords, lvl_lines):
+    def _split_names(names_line, n_expected):
+        """
+        Divide a linha de nomes em exactamente n_expected estações.
+
+        O número de estações é dado pelas COORDENADAS (inequívocas), não
+        pela contagem de palavras — nomes como "VILA REAL" ou "S. MIGUEL
+        DE LAUNDOS" têm espaços e partiriam o alinhamento se se usasse
+        simplesmente .split(). Quando há mais palavras do que estações,
+        as palavras excedentes são agrupadas da esquerda para a direita.
+        """
+        words = names_line.split()
+        if n_expected <= 0:
+            return []
+        if len(words) == n_expected:
+            return words
+        if len(words) < n_expected:
+            # Menos palavras do que coordenadas — devolver o que há
+            return words
+        # Mais palavras do que estações: agrupar o excedente no início,
+        # mantendo as últimas estações com uma palavra cada
+        extra = len(words) - n_expected
+        grouped = [" ".join(words[:extra + 1])]
+        grouped.extend(words[extra + 1:])
+        return grouped
+
+    def flush_group(names_line, coords, lvl_lines):
         """Cria entradas de estação a partir de um grupo recolhido."""
+        names = _split_names(names_line, len(coords))
         n = min(len(names), len(coords))
         entries = []
         for k in range(n):
@@ -524,7 +646,7 @@ def parse_wind(secn2: str) -> list:
         return entries
 
     # Parse linha a linha
-    cur_names  = []
+    cur_names  = ""
     cur_coords = []
     cur_levels = []
 
@@ -533,7 +655,7 @@ def parse_wind(secn2: str) -> list:
             # Novo grupo — flush anterior se existir
             if cur_names and cur_coords and cur_levels:
                 stations.extend(flush_group(cur_names, cur_coords, cur_levels))
-            cur_names  = line.split()
+            cur_names  = line
             cur_coords = []
             cur_levels = []
         elif _is_coord_line(line):
@@ -550,7 +672,7 @@ def parse_wind(secn2: str) -> list:
 
 
 # -------------------------------------------------
-# PARSER — v23
+# PARSER — v25
 # -------------------------------------------------
 
 # Palavras-chave que NÃO devem ser confundidas com visibilidade ou altitude
@@ -691,37 +813,56 @@ def parse_gamet(text):
             vis_content = _FL_PATTERN.sub("", content)
             vis_content = _HPA_PATTERN.sub("", vis_content)
 
-            # BLW/ABV: usar valor conservador (BLW X → X-1, ABV X → X+1)
-            blw_m = re.search(r"\bBLW\s+(\d{3,4})M\b", vis_content)
-            abv_m = re.search(r"\bABV\s+(\d{3,4})M\b", vis_content)
-            if blw_m:
-                val = int(blw_m.group(1)) - 1
+            # Recolher TODOS os valores presentes na linha. Antes usava-se
+            # if/elif entre BLW/ABV e os restantes padrões, o que fazia com
+            # que "LCA 2000-5000M RA ABV 8000M" reportasse só 8001m e
+            # descartasse os 2000m — um erro no sentido optimista (perigoso).
+            # A decisão usa depois o mínimo, que é a leitura conservadora.
+            consumed_spans = []
+
+            # BLW X → X-1 (conservador)
+            for m in re.finditer(r"\bBLW\s+(\d{3,4})M\b", vis_content):
+                val = int(m.group(1)) - 1
+                consumed_spans.append(m.span())
                 if 100 <= val <= 9999:
                     blocks.append(MetBlock("VIS", poly, val, qualifier))
-            elif abv_m:
-                val = int(abv_m.group(1)) + 1
+
+            # ABV X → X+1
+            for m in re.finditer(r"\bABV\s+(\d{3,4})M\b", vis_content):
+                val = int(m.group(1)) + 1
+                consumed_spans.append(m.span())
                 if 100 <= val <= 9999:
                     blocks.append(MetBlock("VIS", poly, val, qualifier))
-            else:
-                # Captura KM
-                for m in re.finditer(r"\b(\d+(?:\.\d+)?)\s*KM\b", vis_content):
-                    val = int(float(m.group(1)) * 1000)
+
+            def _already_consumed(pos):
+                return any(s <= pos < e for s, e in consumed_spans)
+
+            # Captura KM
+            for m in re.finditer(r"\b(\d+(?:\.\d+)?)\s*KM\b", vis_content):
+                if _already_consumed(m.start()):
+                    continue
+                val = int(float(m.group(1)) * 1000)
+                blocks.append(MetBlock("VIS", poly, val, qualifier))
+
+            # Intervalo: 2000-5000M → mínimo
+            for m in re.finditer(r"\b(\d{3,4})-(\d{3,4})M\b", vis_content):
+                if _already_consumed(m.start()):
+                    continue
+                val = min(int(m.group(1)), int(m.group(2)))
+                consumed_spans.append(m.span())
+                if 100 <= val <= 9999:
                     blocks.append(MetBlock("VIS", poly, val, qualifier))
 
-                # Intervalo: 2000-5000M → mínimo
-                for m in re.finditer(r"\b(\d{3,4})-(\d{3,4})M\b", vis_content):
-                    val = min(int(m.group(1)), int(m.group(2)))
-                    if 100 <= val <= 9999:
-                        blocks.append(MetBlock("VIS", poly, val, qualifier))
-
-                # Valor simples
-                for m in re.finditer(r"(?<!\d)(\d{3,4})M\b", vis_content):
-                    pos = m.start()
-                    if vis_content[max(0, pos - 5):pos].rstrip().endswith("-"):
-                        continue
-                    val = int(m.group(1))
-                    if 100 <= val <= 9999:
-                        blocks.append(MetBlock("VIS", poly, val, qualifier))
+            # Valor simples
+            for m in re.finditer(r"(?<!\d)(\d{3,4})M\b", vis_content):
+                pos = m.start()
+                if _already_consumed(pos):
+                    continue
+                if vis_content[max(0, pos - 5):pos].rstrip().endswith("-"):
+                    continue
+                val = int(m.group(1))
+                if 100 <= val <= 9999:
+                    blocks.append(MetBlock("VIS", poly, val, qualifier))
 
         elif state == "CLD":
             # Suporta "015-030/XXXHFT AGL", "015HFT AGL" e "035HFT AMSL"
@@ -778,7 +919,7 @@ def parse_gamet(text):
 
         elif state == "TURB":
             layer = ""
-            layer_m = re.search(r"(SFC/FL\d+|FL\d+/FL\d+|SFC/\d+FT|ABV\s+FL\d+)", content)
+            layer_m = re.search(r"(SFC/FL\d+|FL\d+/FL\d+|SFC/\d+FT|ABV\s+FL\d+|BLW\s+FL\d+)", content)
             if layer_m:
                 layer = layer_m.group(1)
             # HVY eleva para SEV
@@ -809,7 +950,7 @@ def parse_gamet(text):
 
         elif state == "ICE":
             layer = ""
-            layer_m = re.search(r"(ABV\s+FL\d+|FL\d+/FL\d+|SFC/FL\d+)", content)
+            layer_m = re.search(r"(ABV\s+FL\d+|FL\d+/FL\d+|SFC/FL\d+|BLW\s+FL\d+)", content)
             if layer_m:
                 layer = layer_m.group(1)
             # HVY eleva SEV
@@ -1010,6 +1151,22 @@ def compute_dynamic_regions(blocks):
     return regions
 
 
+def apply_sigmet_override(regions, sigmet_text):
+    """
+    Quando existe um SIGMET activo aplicável ao GAMET, força NO-GO em todas
+    as regiões dinâmicas. Não temos a geometria exacta do SIGMET (o campo
+    SIGMET APPLICABLE no GAMET não descreve fronteiras), pelo que a postura
+    mais segura é tratá-lo como aplicável a toda a área coberta, em vez de
+    tentar (erradamente) restringi-lo a uma parte da FIR.
+    """
+    reason = f"SIGMET activo aplicável — {sigmet_text[:120]}"
+    for region in regions:
+        region["decision"] = "NO-GO"
+        if reason not in region["reasons"]:
+            region["reasons"] = sorted(set(region["reasons"]) | {reason})
+    return regions
+
+
 def find_region_for_point(regions, lat, lon):
     """
     Devolve a região dinâmica que contém o ponto (lat, lon). Se o ponto
@@ -1051,7 +1208,7 @@ def check_strong_wind(wind_data, threshold_kt=20, level="1000FT AGL"):
     return warnings
 
 # -------------------------------------------------
-# DECISION — v23
+# DECISION — v25
 # -------------------------------------------------
 
 # Hierarquia de risco TS (do mais grave para o menos grave)
@@ -1332,7 +1489,7 @@ def generate_pdf(regions, gamet_text, fzlvl_min, qnh_min, validity_label) -> byt
         # Metadados
         d = pdf.infodict()
         d["Title"]   = "LPPC GAMET Briefing VFR"
-        d["Author"]  = "GAMET Decoder v23.0"
+        d["Author"]  = f"GAMET Decoder v{APP_VERSION}"
         d["Subject"] = "Briefing meteorológico VFR – FIR LPPC"
     buf.seek(0)
     return buf.getvalue()
@@ -1362,6 +1519,18 @@ if st.session_state.get("_active_gamet_text"):
 
     blocks, fzlvl_min, qnh_min, wind_data = parse_gamet(gamet_text)
     dynamic_regions = compute_dynamic_regions(blocks)
+
+    has_sigmet, sigmet_text = extract_sigmet_applicable(gamet_text)
+    if has_sigmet:
+        dynamic_regions = apply_sigmet_override(dynamic_regions, sigmet_text)
+        st.error(
+            "🚨 **SIGMET ACTIVO APLICÁVEL A ESTE GAMET.** "
+            "Um SIGMET indica fenómenos que justificam alerta acima do que "
+            "um GAMET rotineiro cobre. A decisão foi forçada a NO-GO em "
+            "toda a área — consulta o SIGMET completo antes de voar; esta "
+            "app não o substitui.\n\n"
+            f"Texto reportado: {sigmet_text}"
+        )
 
     if looks_unparseable(gamet_text):
         st.error(
