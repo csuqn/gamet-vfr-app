@@ -26,7 +26,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "25.0"
+APP_VERSION = "26.0"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
 st.title(f"✈️ LPPC GAMET – Motor Cartográfico v{APP_VERSION}")
@@ -35,7 +35,32 @@ st.title(f"✈️ LPPC GAMET – Motor Cartográfico v{APP_VERSION}")
 # IPMA SELF-BRIEFING — fetch automático
 # -------------------------------------------------
 
-_SIGMET_URL = "https://brief-ng.ipma.pt/showsigmet.php"
+_IPMA_BASE = "https://brief-ng.ipma.pt"
+
+# Candidatos de endpoint, por ordem de tentativa. O IPMA já mudou o caminho
+# pelo menos uma vez (showsigmet.php deixou de existir → 404), pelo que a
+# app tenta vários em vez de depender de um só. Podes acrescentar aqui o
+# endpoint correcto se descobrires um novo.
+_GAMET_ENDPOINTS = [
+    # O IPMA migrou o Self-Briefing para uma single-page app
+    # (brief-ng.ipma.pt/#showSIGMET). Os antigos .php na raiz deixaram de
+    # existir; o conteúdo passou a ser servido a partir de /pages/actuals/.
+    "/pages/actuals/sigmet.php",
+    "/pages/actuals/gamet.php",
+    "/api/sigmet",
+    "/api/gamet",
+    "/api/bulletins/sigmet",
+    # Legado — mantidos por segurança caso o IPMA reverta
+    "/showsigmet.php",
+    "/showgamet.php",
+]
+
+# Parâmetros extra que a SPA envia. Não parecem ser obrigatórios, mas
+# imitar o pedido real reduz o risco de o servidor recusar.
+_GAMET_PARAMS = {
+    "hash_link":  "#showSIGMET",
+    "_page_hash": "showSIGMET",
+}
 
 # Horas UTC de emissão do GAMET (0300, 0900, 1500, 2100Z)
 _GAMET_HOURS = [3, 9, 15, 21]
@@ -59,35 +84,91 @@ def format_countdown(dt: datetime) -> str:
     m, s   = divmod(rem, 60)
     return f"{h:02d}:{m:02d}:{s:02d}"
 
-def fetch_gamet_ipma() -> tuple:
+def extract_gamet_from_html(raw: str) -> str:
     """
-    Carrega o GAMET do LPPC directamente do Self-Briefing IPMA.
-    O endpoint é público — não requer autenticação.
+    Isola o bloco 'LPPC GAMET ... =' de uma resposta do IPMA.
+
+    Funciona com HTML (páginas antigas) e com JSON (API da nova
+    single-page app), porque em ambos os casos o texto do GAMET aparece
+    literalmente na resposta — basta remover marcação, escapes e ruído
+    antes de o procurar.
+
+    Devolve o texto do GAMET, ou "" se não encontrar.
+    """
+    text = raw
+    # Escapes típicos de JSON
+    text = text.replace("\\n", " ").replace("\\r", " ").replace('\\"', '"')
+    text = text.replace("\\/", "/")
+    # Marcação HTML e entidades
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = text.replace("&nbsp;", " ").replace("&amp;", "&")
+    text = re.sub(r"\s+", " ", text).strip()
+    m = re.search(r"(LPPC\s+GAMET\s+(?:AMD\s+|COR\s+)?VALID\s+.+?=)", text, re.DOTALL)
+    return m.group(1).strip() if m else ""
+
+def fetch_gamet_ipma(custom_url: str = "") -> tuple:
+    """
+    Carrega o GAMET do LPPC do Self-Briefing IPMA (endpoint público).
+
+    Tenta vários endpoints conhecidos, porque o IPMA já alterou o caminho no
+    passado. Se `custom_url` for indicado, é usado em exclusivo.
+
     Devolve (sucesso: bool, texto_ou_erro: str).
     """
-    try:
-        ts = int(time.time() * 1000)
-        resp = requests.get(
-            _SIGMET_URL,
-            params={"_": ts},
-            headers={"User-Agent": f"Mozilla/5.0 (compatible; GAMET-Decoder/{APP_VERSION})"},
-            timeout=10,
+    urls = [custom_url] if custom_url else [_IPMA_BASE + p for p in _GAMET_ENDPOINTS]
+
+    attempts = []       # diagnóstico por URL
+    reached_ok = False  # algum endpoint respondeu 200?
+
+    for url in urls:
+        # Se o URL já traz query string própria (ex.: colado do browser),
+        # não impomos os nossos parâmetros — só acrescentamos o
+        # cache-buster, que é inofensivo.
+        if "?" in url:
+            params = {"_": int(time.time() * 1000)}
+        else:
+            params = dict(_GAMET_PARAMS, _=int(time.time() * 1000))
+        try:
+            resp = requests.get(
+                url,
+                params=params,
+                headers={
+                    "User-Agent": f"Mozilla/5.0 (compatible; GAMET-Decoder/{APP_VERSION})",
+                    # A SPA envia estes — alguns servidores recusam pedidos
+                    # que não pareçam vir da própria página
+                    "Referer": f"{_IPMA_BASE}/",
+                    "X-Requested-With": "XMLHttpRequest",
+                    "Accept": "text/html, */*; q=0.01",
+                },
+                timeout=10,
+            )
+        except requests.RequestException as e:
+            attempts.append(f"{url} → erro de ligação ({type(e).__name__})")
+            continue
+
+        if resp.status_code != 200:
+            attempts.append(f"{url} → HTTP {resp.status_code}")
+            continue
+
+        reached_ok = True
+        gamet = extract_gamet_from_html(resp.text)
+        if gamet:
+            return True, gamet
+        attempts.append(f"{url} → respondeu, mas sem GAMET do LPPC no conteúdo")
+
+    detail = "\n".join(f"• {a}" for a in attempts)
+    if reached_ok:
+        return False, (
+            "O IPMA respondeu, mas não foi encontrado nenhum GAMET do LPPC no "
+            "conteúdo. O GAMET pode ainda não estar emitido, ou o formato da "
+            "página mudou.\n\n" + detail
         )
-        resp.raise_for_status()
-    except requests.RequestException as e:
-        return False, f"Erro de ligação ao IPMA: {e}"
-
-    # Remover tags HTML e normalizar espaços
-    text = re.sub(r"<[^>]+>", " ", resp.text)
-    text = re.sub(r"&nbsp;", " ", text)
-    text = re.sub(r"\s+", " ", text).strip()
-
-    # Isolar bloco LPPC GAMET ... =
-    m = re.search(r"(LPPC\s+GAMET\s+(?:AMD\s+|COR\s+)?VALID\s+.+?=)", text, re.DOTALL)
-    if not m:
-        return False, "GAMET do LPPC não encontrado. Pode não estar emitido ainda."
-
-    return True, m.group(1).strip()
+    return False, (
+        "Não foi possível obter o GAMET de nenhum endpoint conhecido do IPMA. "
+        "O endereço do serviço pode ter mudado — usa o campo de texto abaixo "
+        "para colar o GAMET manualmente, ou indica o novo URL nas opções "
+        "avançadas.\n\n" + detail
+    )
 
 
 # -------------------------------------------------
@@ -97,30 +178,56 @@ def fetch_gamet_ipma() -> tuple:
 # Auto-fetch ao arrancar se não há GAMET em sessão
 if "gamet_loaded" not in st.session_state:
     with st.spinner("A carregar GAMET do Self-Briefing IPMA..."):
-        ok, result = fetch_gamet_ipma()
+        ok, result = fetch_gamet_ipma(st.session_state.get("ipma_custom_url", ""))
     if ok:
         st.session_state["gamet_loaded"]    = result
         st.session_state["gamet_loaded_at"] = datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%MZ")
+    else:
+        # Guardar o erro para o mostrar no expander — antes falhava em
+        # silêncio e o utilizador só via a caixa de texto vazia
+        st.session_state["gamet_fetch_error"] = result
 
-with st.expander("📡 GAMET do IPMA", expanded=False):
+with st.expander("📡 GAMET do IPMA", expanded=bool(st.session_state.get("gamet_fetch_error"))):
     col_btn, col_next = st.columns([1, 2])
     with col_btn:
         if st.button("🔄 Recarregar GAMET"):
             with st.spinner("A carregar..."):
-                ok, result = fetch_gamet_ipma()
+                ok, result = fetch_gamet_ipma(st.session_state.get("ipma_custom_url", ""))
             if ok:
                 st.session_state["gamet_loaded"]    = result
                 st.session_state["gamet_loaded_at"] = datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%MZ")
+                st.session_state.pop("gamet_fetch_error", None)
                 st.success("✅ GAMET actualizado!")
             else:
-                st.error(f"❌ {result}")
+                st.session_state["gamet_fetch_error"] = result
+                st.error(result)
     with col_next:
         nxt = next_gamet_time()
         st.info(f"⏭️ Próximo GAMET esperado: **{nxt.strftime('%H:%MZ')}** "
                 f"(em {format_countdown(nxt)})")
 
+    if st.session_state.get("gamet_fetch_error"):
+        st.error(st.session_state["gamet_fetch_error"])
+
     if "gamet_loaded_at" in st.session_state:
         st.caption(f"⏱️ Carregado às {st.session_state['gamet_loaded_at']}")
+
+    # Permite apontar para um endpoint novo sem editar o código — útil
+    # quando o IPMA muda o caminho do serviço
+    custom = st.text_input(
+        "🔧 URL alternativo do IPMA (opcional)",
+        value=st.session_state.get("ipma_custom_url", ""),
+        placeholder=f"{_IPMA_BASE}/novo_endpoint.php",
+        help="Se o IPMA mudar o endereço do serviço, cola aqui o URL correcto. "
+             "Deixa vazio para tentar os endpoints conhecidos.",
+    )
+    if custom != st.session_state.get("ipma_custom_url", ""):
+        st.session_state["ipma_custom_url"] = custom
+
+    st.caption(
+        "Se o carregamento automático falhar, podes sempre colar o texto do "
+        "GAMET manualmente na caixa abaixo — a app funciona na mesma."
+    )
 
 # Preencher text_area com GAMET carregado (ou vazio para input manual)
 _default = st.session_state.get("gamet_loaded", "")
