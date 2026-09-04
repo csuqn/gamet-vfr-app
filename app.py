@@ -26,7 +26,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "27.0"
+APP_VERSION = "28.0"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
 st.title(f"✈️ LPPC GAMET – Motor Cartográfico v{APP_VERSION}")
@@ -1183,9 +1183,9 @@ def compute_dynamic_regions(blocks):
         return [{
             "polygon": FIR_POLYGON, "label": label_region(FIR_POLYGON),
             "decision": dec, "vis": vis, "base": base, "ts": ts,
-            "turb": turb, "turb_layers": turb_layers, "ice": ice,
-            "ice_layers": ice_layers, "mt_obsc": mt_obsc, "va": va,
-            "reasons": reasons,
+            "turb": turb, "turb_layers": turb_layers, "turb_parcial": False,
+            "ice": ice, "ice_layers": ice_layers, "ice_parcial": False,
+            "mt_obsc": mt_obsc, "va": va, "reasons": reasons,
         }]
 
     if not relevant:
@@ -1222,54 +1222,83 @@ def compute_dynamic_regions(blocks):
         dec_result = decision(events)
         cell_results.append((cell, dec_result))
 
-    # 4. Agrupar células por decisão. A agregação de valores é feita mais
-    # abaixo, por componente conexo, e não globalmente por decisão.
+    # 4. Agrupar células por (decisão + conjunto de causas).
+    #
+    # Agrupar só por decisão fazia com que faixas ADJACENTES com causas
+    # diferentes — nevoeiro no Minho, gelo no Algarve, ambos NO-GO —
+    # formassem um único cartão a listar todas as causas em todo o lado.
+    # Um piloto no Algarve via "VIS 1000m FG" que estava a 500 km dele.
+    #
+    # Incluir a assinatura de causas no agrupamento garante que cada região
+    # só mostra o que de facto se aplica à sua área.
     from collections import defaultdict
-    grouped_cells = defaultdict(list)
-    for cell, res in cell_results:
-        grouped_cells[res[0]].append(cell)
 
-    # Agrupar por decisão E por componente conexo. Antes, todas as células
-    # com a mesma decisão eram fundidas numa única região — o que juntava
-    # zonas fisicamente separadas (ex.: nevoeiro no norte + turbulência no
-    # sul) num só cartão, com motivos e valores de umas atribuídos às
-    # outras. Agora cada bolsa geográfica é uma região independente.
+    def _cause_signature(res):
+        """
+        Identidade das causas de uma célula, para agrupamento.
+
+        Usa apenas os MOTIVOS da decisão — não todos os fenómenos
+        presentes. Fenómenos informativos (ICE ou TURB moderados) não
+        alteram a decisão e, se entrassem na assinatura, partiriam zonas
+        com o mesmo risco real em vários cartões: um GAMET típico passava
+        de 3 para 8 regiões sem acrescentar informação útil.
+        """
+        return tuple(sorted(res[-1]))   # reasons
+
+    grouped_cells = defaultdict(list)   # (decisão, assinatura) -> células
+    group_results = defaultdict(list)   # (decisão, assinatura) -> resultados
+    for cell, res in cell_results:
+        key = (res[0], _cause_signature(res))
+        grouped_cells[key].append(cell)
+        group_results[key].append(res)
+
+    # 5. Dentro de cada grupo, separar por componente conexo — duas bolsas
+    # geograficamente distintas com as mesmas causas continuam a ser
+    # regiões independentes.
     regions = []
-    for dec_level, cells in grouped_cells.items():
+    for key, cells in grouped_cells.items():
+        dec_level = key[0]
         merged = unary_union(cells)
         components = list(merged.geoms) if isinstance(merged, MultiPolygon) else [merged]
+
+        # Os fenómenos informativos (ICE/TURB moderados) já não fazem parte
+        # da assinatura, pelo que podem variar dentro do grupo — agregar
+        # todos, usando o valor mais conservador para VIS e base.
+        #
+        # Como podem existir só em parte da região, regista-se se são
+        # parciais, para o briefing poder assinalá-lo em vez de dar a
+        # entender que se aplicam a toda a área.
+        vis_vals, base_vals = [], []
+        ts_s, turb_s, turb_l = set(), set(), set()
+        ice_s, ice_l, mt_s, va_s, reasons_s = set(), set(), set(), set(), set()
+        n_com_ice = n_com_turb = 0
+        resultados = group_results[key]
+        for res in resultados:
+            (_d, vis, base, ts, turb, turb_layers,
+             ice, ice_layers, mt_obsc, va, reasons) = res
+            if vis is not None:
+                vis_vals.append(vis)
+            if base is not None:
+                base_vals.append(base)
+            ts_s.update(ts)
+            turb_s.update(turb)
+            turb_l.update(l for l in turb_layers if l)
+            ice_s.update(ice)
+            ice_l.update(l for l in ice_layers if l)
+            mt_s.update(mt_obsc)
+            va_s.update(va)
+            reasons_s.update(reasons)
+            if ice:
+                n_com_ice += 1
+            if turb:
+                n_com_turb += 1
+
+        ice_parcial  = bool(ice_s)  and n_com_ice  < len(resultados)
+        turb_parcial = bool(turb_s) and n_com_turb < len(resultados)
 
         for comp in components:
             if comp.is_empty or comp.area <= 1e-9:
                 continue
-
-            # Recolher apenas as células deste componente, para que os
-            # valores e motivos reflictam só esta área
-            vis_vals, base_vals = [], []
-            ts_s, turb_s, turb_l = set(), set(), set()
-            ice_s, ice_l = set(), set()
-            mt_s, va_s, reasons_s = set(), set(), set()
-
-            for cell, res in cell_results:
-                if res[0] != dec_level:
-                    continue
-                if not comp.contains(cell.representative_point()):
-                    continue
-                (_d, vis, base, ts, turb, turb_layers,
-                 ice, ice_layers, mt_obsc, va, reasons) = res
-                if vis is not None:
-                    vis_vals.append(vis)
-                if base is not None:
-                    base_vals.append(base)
-                ts_s.update(ts)
-                turb_s.update(turb)
-                turb_l.update(l for l in turb_layers if l)
-                ice_s.update(ice)
-                ice_l.update(l for l in ice_layers if l)
-                mt_s.update(mt_obsc)
-                va_s.update(va)
-                reasons_s.update(reasons)
-
             regions.append({
                 "polygon":     comp,
                 "label":       label_region(comp),
@@ -1279,18 +1308,83 @@ def compute_dynamic_regions(blocks):
                 "ts":          sorted(ts_s),
                 "turb":        sorted(turb_s),
                 "turb_layers": sorted(turb_l),
+                "turb_parcial": turb_parcial,
                 "ice":         sorted(ice_s),
                 "ice_layers":  sorted(ice_l),
+                "ice_parcial": ice_parcial,
                 "mt_obsc":     sorted(mt_s),
                 "va":          sorted(va_s),
                 "reasons":     sorted(reasons_s),
             })
+
+    # 6. Fundir fragmentos residuais.
+    #
+    # A partição em células atómicas pode gerar slivers — fatias muito
+    # finas nas fronteiras entre fenómenos, sem significado operacional.
+    # São absorvidos pela região vizinha compatível de maior área, para
+    # não poluírem o briefing com cartões de 0,3% da FIR.
+    regions = _merge_slivers(regions)
 
     # Ordenar da pior decisão para a melhor e, dentro da mesma decisão,
     # da maior área para a menor (as zonas mais relevantes primeiro)
     _order = {"NO-GO": 0, "MARGINAL": 1, "GO": 2}
     regions.sort(key=lambda r: (_order.get(r["decision"], 3), -r["polygon"].area))
     return regions
+
+
+def _merge_slivers(regions, min_area_frac=0.015):
+    """
+    Absorve regiões residuais (< 1,5% da FIR) na vizinha compatível.
+
+    A prioridade é uma região da MESMA decisão e com as MESMAS causas, para
+    não misturar motivos. Se não houver, funde-se com a vizinha da mesma
+    decisão de maior área — a decisão nunca muda, pelo que não há risco de
+    um NO-GO desaparecer. Uma região pequena que seja a única com aquela
+    decisão é sempre preservada.
+    """
+    if len(regions) <= 1:
+        return regions
+
+    limite = min_area_frac * FIR_POLYGON.area
+    grandes = [r for r in regions if r["polygon"].area >= limite]
+    pequenas = [r for r in regions if r["polygon"].area < limite]
+    if not pequenas or not grandes:
+        return regions
+
+    def _assinatura(r):
+        return (r["decision"], r["vis"], r["base"], tuple(r["ts"]),
+                tuple(r["turb"]), tuple(r["ice"]),
+                tuple(r["mt_obsc"]), tuple(r["va"]))
+
+    orfas = []
+    for peq in pequenas:
+        # 1ª escolha: mesma decisão e mesmas causas
+        candidatos = [g for g in grandes if _assinatura(g) == _assinatura(peq)]
+        # 2ª escolha: mesma decisão (motivos podem diferir, decisão não)
+        if not candidatos:
+            candidatos = [g for g in grandes if g["decision"] == peq["decision"]]
+        if not candidatos:
+            orfas.append(peq)   # única com esta decisão — preservar
+            continue
+
+        # Preferir uma que toque a região pequena; senão, a mais próxima
+        tocam = [c for c in candidatos if c["polygon"].intersects(peq["polygon"])]
+        alvo = (max(tocam, key=lambda c: c["polygon"].area) if tocam
+                else min(candidatos, key=lambda c: c["polygon"].distance(peq["polygon"])))
+
+        fundido = unary_union([alvo["polygon"], peq["polygon"]])
+        if isinstance(fundido, MultiPolygon):
+            # Não são contíguos — fundir perderia área da FIR. Preservar o
+            # fragmento como região autónoma; é preferível um cartão extra
+            # a um buraco no mapa.
+            orfas.append(peq)
+            continue
+        alvo["polygon"] = fundido
+        alvo["label"] = label_region(fundido)
+        if peq["reasons"]:
+            alvo["reasons"] = sorted(set(alvo["reasons"]) | set(peq["reasons"]))
+
+    return grandes + orfas
 
 
 def apply_sigmet_override(regions, sigmet_text):
@@ -1506,6 +1600,8 @@ def _pdf_briefing_page(pdf, regions, gamet_text, validity_label):
                 f"{v} ({turb_layers[idx]}){_trend_text(turb_layers[idx])}" if idx < len(turb_layers) and turb_layers[idx] else v
                 for idx, v in enumerate(turb)
             )
+            if region.get("turb_parcial"):
+                turb_str += " (parte)"
             entries.append(f"TURB: {turb_str}")
         else:
             entries.append("TURB: —")
@@ -1514,6 +1610,8 @@ def _pdf_briefing_page(pdf, regions, gamet_text, validity_label):
                 f"{v} ({ice_layers[idx]}){_trend_text(ice_layers[idx])}" if idx < len(ice_layers) and ice_layers[idx] else v
                 for idx, v in enumerate(ice)
             )
+            if region.get("ice_parcial"):
+                ice_str += " (parte)"
             entries.append(f"ICE:  {ice_str}")
         else:
             entries.append("ICE:  —")
@@ -1655,7 +1753,17 @@ if st.session_state.get("_active_gamet_text"):
         validity_label = f"Válido: {start_dt.strftime(fmt)} – {end_dt.strftime(fmt)}"
         label = f"⏱️ {validity_label}"
         if active:
-            st.success(label + " ✅ Em vigor")
+            # Mostrar quanto tempo falta — ajuda a decidir se vale a pena
+            # esperar pelo próximo GAMET antes de planear o voo
+            restante = end_dt - datetime.now(timezone.utc)
+            minutos = max(0, int(restante.total_seconds() // 60))
+            horas, mins = divmod(minutos, 60)
+            tempo = f"{horas}h{mins:02d}m" if horas else f"{mins} min"
+            if minutos <= 30:
+                st.warning(f"{label} ⏳ Expira em **{tempo}** — o próximo "
+                           f"GAMET está prestes a ser emitido")
+            else:
+                st.success(f"{label} ✅ Em vigor · expira em {tempo}")
         else:
             st.warning(label + " ⚠️ FORA DO PERÍODO DE VALIDADE — dados podem estar desatualizados")
 
@@ -1777,6 +1885,8 @@ if st.session_state.get("_active_gamet_text"):
                     f"{v} ({turb_layers[idx]}){_trend_icon(turb_layers[idx])}" if idx < len(turb_layers) and turb_layers[idx] else v
                     for idx, v in enumerate(turb)
                 )
+                if region.get("turb_parcial"):
+                    turb_str += " *(parte da zona)*"
                 st.write(f"🌪 TURB: {turb_str}")
             else:
                 st.write("🌪 TURB: —")
@@ -1786,6 +1896,8 @@ if st.session_state.get("_active_gamet_text"):
                     f"{v} ({ice_layers[idx]}){_trend_icon(ice_layers[idx])}" if idx < len(ice_layers) and ice_layers[idx] else v
                     for idx, v in enumerate(ice)
                 )
+                if region.get("ice_parcial"):
+                    ice_str += " *(parte da zona)*"
                 st.write(f"❄️ ICE: {ice_str}")
             else:
                 st.write("❄️ ICE: —")
