@@ -26,7 +26,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "26.0"
+APP_VERSION = "27.0"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
 st.title(f"✈️ LPPC GAMET – Motor Cartográfico v{APP_VERSION}")
@@ -903,11 +903,19 @@ def parse_gamet(text):
             continue
 
         # ---- Contexto geográfico ----
+        # Um qualificador geográfico que caia fora dos limites da FIR
+        # (ex.: "N OF N4200", quando a FIR termina em N41°54') produz um
+        # polígono vazio. Nesse caso o fenómeno não se aplica a lado
+        # nenhum — mas manter o polígono anterior faria com que passasse
+        # a cobrir a FIR inteira, transformando área nula em cobertura
+        # total. Marca-se a área como vazia e o bloco é descartado.
         new_poly = extract_polygon(line)
-        if new_poly is not None and not new_poly.is_empty:
+        if new_poly is not None:
             current_polygon = new_poly
 
         poly = current_polygon
+        if poly is not None and poly.is_empty:
+            continue  # fenómeno sem área aplicável dentro da FIR
 
         # ---- Qualificador local ----
         qualifier = ""
@@ -1108,24 +1116,34 @@ def parse_gamet(text):
 
 def label_region(poly, max_names=3):
     """
-    Devolve um rótulo legível para uma região dinâmica, baseado nas
-    localidades de referência (CITIES) que caem dentro dela. Se nenhuma
-    localidade cair dentro, usa uma descrição geográfica aproximada a
-    partir do centróide (relativo ao centro da FIR).
+    Devolve um rótulo legível para uma região dinâmica, baseado nos
+    aeródromos e pistas que caem dentro dela.
+
+    Escolhe os pontos mais próximos do centro da região — e não os
+    primeiros por ordem alfabética — para que o rótulo descreva de facto
+    onde a região fica. Numa região que cobre o norte do país, "Braga,
+    Porto, Vila Real" é informativo; "Alqueidão, Atouguia, Azambuja"
+    (alfabético) não diz nada sobre a localização.
+
+    Se nenhum ponto cair dentro, usa uma descrição geográfica aproximada.
     """
-    contained = []
+    contidos = []
     for name, (lat, lon) in CITIES.items():
         try:
             if poly.contains(Point(lon, lat)):
-                contained.append(name)
+                contidos.append((name, lat, lon))
         except Exception:
             continue
 
-    if contained:
-        contained.sort()
-        if len(contained) > max_names:
-            return f"{', '.join(contained[:max_names])} +{len(contained) - max_names}"
-        return ", ".join(contained)
+    if contidos:
+        centro = poly.representative_point()
+        # Ordenar por distância ao centro da região
+        contidos.sort(key=lambda t: (t[2] - centro.x) ** 2 + (t[1] - centro.y) ** 2)
+        nomes = [t[0] for t in contidos[:max_names]]
+        nomes.sort()  # apresentar por ordem alfabética, já filtrados
+        if len(contidos) > max_names:
+            return f"{', '.join(nomes)} +{len(contidos) - max_names}"
+        return ", ".join(nomes)
 
     # Fallback: descrição geográfica aproximada
     centroid = poly.representative_point()
@@ -1204,57 +1222,74 @@ def compute_dynamic_regions(blocks):
         dec_result = decision(events)
         cell_results.append((cell, dec_result))
 
-    # 4. Fundir células com a mesma decisão, agregando todos os campos
+    # 4. Agrupar células por decisão. A agregação de valores é feita mais
+    # abaixo, por componente conexo, e não globalmente por decisão.
     from collections import defaultdict
-    grouped_cells   = defaultdict(list)
-    agg_vis         = defaultdict(list)
-    agg_base        = defaultdict(list)
-    agg_ts          = defaultdict(set)
-    agg_turb        = defaultdict(set)
-    agg_turb_layers = defaultdict(set)
-    agg_ice         = defaultdict(set)
-    agg_ice_layers  = defaultdict(set)
-    agg_mt_obsc     = defaultdict(set)
-    agg_va          = defaultdict(set)
-    agg_reasons     = defaultdict(set)
+    grouped_cells = defaultdict(list)
+    for cell, res in cell_results:
+        grouped_cells[res[0]].append(cell)
 
-    for cell, (dec, vis, base, ts, turb, turb_layers, ice, ice_layers, mt_obsc, va, reasons) in cell_results:
-        grouped_cells[dec].append(cell)
-        if vis is not None:
-            agg_vis[dec].append(vis)
-        if base is not None:
-            agg_base[dec].append(base)
-        agg_ts[dec].update(ts)
-        agg_turb[dec].update(turb)
-        agg_turb_layers[dec].update(l for l in turb_layers if l)
-        agg_ice[dec].update(ice)
-        agg_ice_layers[dec].update(l for l in ice_layers if l)
-        agg_mt_obsc[dec].update(mt_obsc)
-        agg_va[dec].update(va)
-        agg_reasons[dec].update(reasons)
-
+    # Agrupar por decisão E por componente conexo. Antes, todas as células
+    # com a mesma decisão eram fundidas numa única região — o que juntava
+    # zonas fisicamente separadas (ex.: nevoeiro no norte + turbulência no
+    # sul) num só cartão, com motivos e valores de umas atribuídos às
+    # outras. Agora cada bolsa geográfica é uma região independente.
     regions = []
     for dec_level, cells in grouped_cells.items():
-        merged_poly = unary_union(cells)
-        regions.append({
-            "polygon":     merged_poly,
-            "label":       label_region(merged_poly),
-            "decision":    dec_level,
-            "vis":         min(agg_vis[dec_level]) if agg_vis[dec_level] else None,
-            "base":        min(agg_base[dec_level]) if agg_base[dec_level] else None,
-            "ts":          sorted(agg_ts[dec_level]),
-            "turb":        sorted(agg_turb[dec_level]),
-            "turb_layers": sorted(agg_turb_layers[dec_level]),
-            "ice":         sorted(agg_ice[dec_level]),
-            "ice_layers":  sorted(agg_ice_layers[dec_level]),
-            "mt_obsc":     sorted(agg_mt_obsc[dec_level]),
-            "va":          sorted(agg_va[dec_level]),
-            "reasons":     sorted(agg_reasons[dec_level]),
-        })
+        merged = unary_union(cells)
+        components = list(merged.geoms) if isinstance(merged, MultiPolygon) else [merged]
 
-    # Ordenar da pior decisão para a melhor (NO-GO primeiro)
+        for comp in components:
+            if comp.is_empty or comp.area <= 1e-9:
+                continue
+
+            # Recolher apenas as células deste componente, para que os
+            # valores e motivos reflictam só esta área
+            vis_vals, base_vals = [], []
+            ts_s, turb_s, turb_l = set(), set(), set()
+            ice_s, ice_l = set(), set()
+            mt_s, va_s, reasons_s = set(), set(), set()
+
+            for cell, res in cell_results:
+                if res[0] != dec_level:
+                    continue
+                if not comp.contains(cell.representative_point()):
+                    continue
+                (_d, vis, base, ts, turb, turb_layers,
+                 ice, ice_layers, mt_obsc, va, reasons) = res
+                if vis is not None:
+                    vis_vals.append(vis)
+                if base is not None:
+                    base_vals.append(base)
+                ts_s.update(ts)
+                turb_s.update(turb)
+                turb_l.update(l for l in turb_layers if l)
+                ice_s.update(ice)
+                ice_l.update(l for l in ice_layers if l)
+                mt_s.update(mt_obsc)
+                va_s.update(va)
+                reasons_s.update(reasons)
+
+            regions.append({
+                "polygon":     comp,
+                "label":       label_region(comp),
+                "decision":    dec_level,
+                "vis":         min(vis_vals) if vis_vals else None,
+                "base":        min(base_vals) if base_vals else None,
+                "ts":          sorted(ts_s),
+                "turb":        sorted(turb_s),
+                "turb_layers": sorted(turb_l),
+                "ice":         sorted(ice_s),
+                "ice_layers":  sorted(ice_l),
+                "mt_obsc":     sorted(mt_s),
+                "va":          sorted(va_s),
+                "reasons":     sorted(reasons_s),
+            })
+
+    # Ordenar da pior decisão para a melhor e, dentro da mesma decisão,
+    # da maior área para a menor (as zonas mais relevantes primeiro)
     _order = {"NO-GO": 0, "MARGINAL": 1, "GO": 2}
-    regions.sort(key=lambda r: _order.get(r["decision"], 3))
+    regions.sort(key=lambda r: (_order.get(r["decision"], 3), -r["polygon"].area))
     return regions
 
 
