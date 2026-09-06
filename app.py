@@ -26,7 +26,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "28.0"
+APP_VERSION = "29.0"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
 st.title(f"✈️ LPPC GAMET – Motor Cartográfico v{APP_VERSION}")
@@ -1813,16 +1813,49 @@ if st.session_state.get("_active_gamet_text"):
         })
         st.session_state["gamet_history"] = history[:5]
 
+    # ---- Veredicto global ----
+    # Responde de imediato à pergunta principal — "posso voar?" — sem
+    # obrigar a interpretar N cartões de região primeiro.
+    _area_fir = FIR_POLYGON.area
+    _area_por_dec = {}
+    for _reg in dynamic_regions:
+        _d = _reg["decision"]
+        _area_por_dec[_d] = _area_por_dec.get(_d, 0) + _reg["polygon"].area
+
+    _pior = next((d for d in ("NO-GO", "MARGINAL", "GO") if d in _area_por_dec), "GO")
+    _pct_pior = 100 * _area_por_dec.get(_pior, 0) / _area_fir
+
+    if _pior == "GO":
+        st.success("### ✅ GO — condições favoráveis em toda a FIR")
+    else:
+        _partes = [
+            f"**{d}** {100 * _area_por_dec[d] / _area_fir:.0f}%"
+            for d in ("NO-GO", "MARGINAL", "GO") if d in _area_por_dec
+        ]
+        _resumo = " · ".join(_partes)
+        if _pior == "NO-GO":
+            st.error(f"### 🔴 NO-GO em {_pct_pior:.0f}% da FIR\n\n{_resumo}")
+        else:
+            st.warning(f"### ⚠️ MARGINAL em {_pct_pior:.0f}% da FIR\n\n{_resumo}")
+
     # ---- Consulta rápida por aeródromo ----
     st.subheader("✈️ Consulta Rápida")
     airport_options = ["— Seleccionar —"] + sorted(AERODROMES.keys())
+    # Manter a escolha entre análises — quem voa sempre do mesmo aeródromo
+    # não tem de o seleccionar de cada vez
+    _guardado = st.session_state.get("aerodromo_preferido", "— Seleccionar —")
+    _idx = airport_options.index(_guardado) if _guardado in airport_options else 0
     selected_airport = st.selectbox(
         "Aeródromo de partida/chegada:",
         options=airport_options,
+        index=_idx,
         help="Mostra a decisão VFR exacta para esse aeródromo, com base na "
              "geometria real do GAMET — não numa aproximação por sector. "
+             "A escolha fica memorizada para as próximas análises. "
              "Coordenadas aproximadas — confirma sempre na AIP Portugal em vigor.",
     )
+    if selected_airport != _guardado:
+        st.session_state["aerodromo_preferido"] = selected_airport
     if selected_airport != "— Seleccionar —":
         lat, lon = AERODROMES[selected_airport]
         found = find_region_for_point(dynamic_regions, lat, lon)
@@ -1845,12 +1878,24 @@ if st.session_state.get("_active_gamet_text"):
     st.caption(
         "As zonas são calculadas a partir da geometria real do GAMET "
         "(não de sectores fixos) — cada região reflecte exactamente a área "
-        "coberta pelos fenómenos meteorológicos reportados."
+        "coberta pelos fenómenos meteorológicos reportados. "
+        "Ordenadas da situação mais grave para a menos grave."
     )
-    n_regions = len(dynamic_regions)
-    cols = st.columns(min(n_regions, 3)) if n_regions > 0 else []
+
+    # Grelha por linhas: cria um novo conjunto de colunas a cada 3 regiões.
+    # Antes usava-se um único st.columns(...) com cols[i % n], o que fazia
+    # a 4.ª região empilhar por baixo da 1.ª — a ordem de leitura deixava
+    # de seguir a gravidade e um NO-GO podia aparecer visualmente abaixo
+    # de um GO.
+    POR_LINHA = 3
+    cols = []
 
     for i, region in enumerate(dynamic_regions):
+        if i % POR_LINHA == 0:
+            restantes = len(dynamic_regions) - i
+            cols = st.columns(min(POR_LINHA, restantes))
+        col = cols[i % POR_LINHA]
+
         dec         = region["decision"]
         vis         = region["vis"]
         base        = region["base"]
@@ -1864,7 +1909,6 @@ if st.session_state.get("_active_gamet_text"):
         reasons     = region["reasons"]
         pct         = 100 * region["polygon"].area / FIR_POLYGON.area
 
-        col = cols[i % len(cols)]
         with col:
             st.markdown(f"### {region['label']}")
             st.caption(f"{pct:.0f}% da FIR")
@@ -1909,6 +1953,52 @@ if st.session_state.get("_active_gamet_text"):
                 with st.expander("ℹ️ Motivos da decisão", expanded=True):
                     for r in reasons:
                         st.write(f"• {r}")
+
+    # ---- Mapa Interativo (Folium) ----
+    st.subheader("🗺️ Mapa Interativo")
+    st.caption("Zonas desenhadas com a geometria real do GAMET.")
+    fcolors = {"GO": "#2ecc71", "MARGINAL": "#e67e22", "NO-GO": "#e74c3c"}
+
+    if _FOLIUM_OK:
+        fmap = folium.Map(
+            location=[39.5, -8.5],
+            zoom_start=6,
+            tiles="OpenStreetMap",
+        )
+
+        for region in dynamic_regions:
+            poly = region["polygon"]
+            dec  = region["decision"]
+            color = fcolors.get(dec, "#888")
+            geoms = poly.geoms if isinstance(poly, MultiPolygon) else [poly]
+            tooltip = f"{region['label']}: {dec}" + (f" — {'; '.join(region['reasons'])}" if region["reasons"] else "")
+            for g in geoms:
+                if g.is_empty or not hasattr(g, "exterior") or g.exterior is None:
+                    continue
+                coords = [[lat, lon] for lon, lat in zip(*g.exterior.xy)]
+                folium.Polygon(
+                    locations=coords,
+                    color=color,
+                    fill=True,
+                    fill_color=color,
+                    fill_opacity=0.35,
+                    weight=2,
+                    tooltip=tooltip,
+                ).add_to(fmap)
+
+        for name, (lat, lon) in CITIES.items():
+            folium.CircleMarker(
+                location=[lat, lon],
+                radius=4,
+                color="black",
+                fill=True,
+                fill_color="black",
+                fill_opacity=0.8,
+                tooltip=name,
+            ).add_to(fmap)
+        st.components.v1.html(fmap._repr_html_(), height=500)
+    else:
+        st.warning("Folium não instalado — mapa estático disponível no PDF.")
 
     # ---- Informação Secção II ----
     if fzlvl_min or qnh_min:
@@ -2004,52 +2094,6 @@ if st.session_state.get("_active_gamet_text"):
         file_name=fname,
         mime="application/pdf",
     )
-
-    # ---- Mapa Interativo (Folium) ----
-    st.subheader("🗺️ Mapa Interativo")
-    st.caption("Zonas desenhadas com a geometria real do GAMET.")
-    fcolors = {"GO": "#2ecc71", "MARGINAL": "#e67e22", "NO-GO": "#e74c3c"}
-
-    if _FOLIUM_OK:
-        fmap = folium.Map(
-            location=[39.5, -8.5],
-            zoom_start=6,
-            tiles="OpenStreetMap",
-        )
-
-        for region in dynamic_regions:
-            poly = region["polygon"]
-            dec  = region["decision"]
-            color = fcolors.get(dec, "#888")
-            geoms = poly.geoms if isinstance(poly, MultiPolygon) else [poly]
-            tooltip = f"{region['label']}: {dec}" + (f" — {'; '.join(region['reasons'])}" if region["reasons"] else "")
-            for g in geoms:
-                if g.is_empty or not hasattr(g, "exterior") or g.exterior is None:
-                    continue
-                coords = [[lat, lon] for lon, lat in zip(*g.exterior.xy)]
-                folium.Polygon(
-                    locations=coords,
-                    color=color,
-                    fill=True,
-                    fill_color=color,
-                    fill_opacity=0.35,
-                    weight=2,
-                    tooltip=tooltip,
-                ).add_to(fmap)
-
-        for name, (lat, lon) in CITIES.items():
-            folium.CircleMarker(
-                location=[lat, lon],
-                radius=4,
-                color="black",
-                fill=True,
-                fill_color="black",
-                fill_opacity=0.8,
-                tooltip=name,
-            ).add_to(fmap)
-        st.components.v1.html(fmap._repr_html_(), height=500)
-    else:
-        st.warning("Folium não instalado — mapa estático disponível no PDF.")
 
     # ---- Vento por níveis ----
     if wind_data:
