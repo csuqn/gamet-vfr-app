@@ -1583,12 +1583,21 @@ def _pdf_briefing_page(pdf, regions, gamet_text, validity_label):
         pct         = 100 * region["polygon"].area / FIR_POLYGON.area
         color = colors.get(dec, "#888")
 
-        # Cabeçalho da região — label + percentagem + decisão na mesma linha
-        ax.text(0.05, y, f"{region['label']}  ({pct:.0f}% da FIR)", va="top",
-                fontsize=10, fontweight="bold", transform=ax.transAxes)
-        ax.text(0.75, y, dec, va="top", fontsize=10, fontweight="bold",
-                color=color, transform=ax.transAxes)
-        y -= 0.028
+        # Cabeçalho da região: decisão em destaque à esquerda, label por
+        # baixo. Antes, label e decisão partilhavam a mesma linha (x=0.05 e
+        # x=0.75) e um label longo escrevia por cima da decisão.
+        ax.text(0.05, y, f"{dec}", va="top", fontsize=11,
+                fontweight="bold", color=color, transform=ax.transAxes)
+        ax.text(0.24, y, f"({pct:.0f}% da FIR)", va="top", fontsize=8,
+                color="#666", transform=ax.transAxes)
+        y -= 0.024
+
+        etiqueta = region["label"]
+        if len(etiqueta) > 78:
+            etiqueta = etiqueta[:75].rstrip(", ") + "…"
+        ax.text(0.05, y, etiqueta, va="top", fontsize=8.5,
+                fontweight="bold", color="#333", transform=ax.transAxes)
+        y -= 0.026
 
         entries = [
             f"VIS:  {vis} m"        if vis  is not None else "VIS:  —",
@@ -1645,13 +1654,27 @@ def _pdf_briefing_page(pdf, regions, gamet_text, validity_label):
         ax.text(0.05, y, "Texto GAMET original:", va="top", fontsize=7,
                 fontweight="bold", color="#555", transform=ax.transAxes)
         y -= 0.025
-        raw_lines = [gamet_text[i:i+100] for i in range(0, min(len(gamet_text), 400), 100)]
+
+        # Quebrar por palavras, não a meio delas. O corte anterior era
+        # fixo em blocos de 100 caracteres, o que partia termos como
+        # "W00835" em "W00" + "835" e tornava o texto difícil de conferir.
+        import textwrap
+        limpo = " ".join(gamet_text.split())
+        raw_lines = textwrap.wrap(limpo, width=105)
+
+        truncado = False
         for rl in raw_lines:
-            if y < 0.03:
+            if y < 0.035:
+                truncado = True
                 break
             ax.text(0.05, y, rl, va="top", fontsize=6,
                     fontfamily="monospace", color="#777", transform=ax.transAxes)
-            y -= 0.022
+            y -= 0.019
+
+        if truncado:
+            ax.text(0.05, y, "[…] texto truncado — ver GAMET completo na app",
+                    va="top", fontsize=6, style="italic", color="#999",
+                    transform=ax.transAxes)
 
     pdf.savefig(fig, bbox_inches="tight")
     plt.close(fig)
@@ -1667,26 +1690,41 @@ def _pdf_map_page(pdf, regions):
         poly = region["polygon"]
         dec = region["decision"]
         geoms = poly.geoms if isinstance(poly, MultiPolygon) else [poly]
+        # Regiões muito estreitas quase desaparecem com o traço fino —
+        # reforçar o contorno para continuarem visíveis no mapa impresso
+        estreita = poly.area < 0.05 * FIR_POLYGON.area
+        lw = 2.0 if estreita else 1.0
         for g in geoms:
             if g.is_empty or not hasattr(g, "exterior") or g.exterior is None:
                 continue
             x, y = g.exterior.xy
             ax.fill(x, y, alpha=0.35, color=colors.get(dec, "grey"))
-            ax.plot(x, y, color=colors.get(dec, "grey"), linewidth=1)
+            ax.plot(x, y, color=colors.get(dec, "grey"), linewidth=lw)
 
+    # Rotular com o código ICAO/LP em vez do nome completo. Os nomes
+    # extensos dos 52 pontos sobrepunham-se e tornavam o mapa ilegível;
+    # o código é curto e é o que um piloto reconhece de imediato.
     for name, (lat, lon) in CITIES.items():
-        ax.plot(lon, lat, "ko", markersize=3)
-        ax.text(lon + 0.05, lat, name, fontsize=7)
+        ax.plot(lon, lat, "ko", markersize=2.5)
+        codigo = name[name.rfind("(") + 1:name.rfind(")")] if "(" in name else name
+        ax.text(lon + 0.04, lat, codigo, fontsize=5.5, color="#333",
+                va="center")
 
     ax.set_aspect("equal")
     ax.grid(True, linestyle="--", alpha=0.4)
+    ax.set_xlabel("Longitude", fontsize=8)
+    ax.set_ylabel("Latitude", fontsize=8)
+    ax.tick_params(labelsize=7)
     ax.set_title("Mapa VFR – FIR LPPC (zonas dinâmicas)", fontsize=12, fontweight="bold")
-    ax.legend(handles=[
-        Patch(facecolor="green",  alpha=0.35, label="GO"),
-        Patch(facecolor="orange", alpha=0.35, label="MARGINAL"),
-        Patch(facecolor="red",    alpha=0.35, label="NO-GO"),
-        Line2D([0],[0], marker="o", color="black", linestyle="None", label="Cidade"),
-    ])
+
+    # Mostrar na legenda apenas as decisões presentes — incluir MARGINAL
+    # quando não existe nenhuma zona marginal induz em erro
+    presentes = {r["decision"] for r in regions}
+    handles = [Patch(facecolor=colors[d], alpha=0.35, label=d)
+               for d in ("GO", "MARGINAL", "NO-GO") if d in presentes]
+    handles.append(Line2D([0], [0], marker="o", color="black",
+                          linestyle="None", label="Aeródromo / pista UL"))
+    ax.legend(handles=handles, fontsize=8, loc="lower left")
 
     pdf.savefig(fig, bbox_inches="tight")
     plt.close(fig)
