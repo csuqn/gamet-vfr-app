@@ -17,7 +17,7 @@ except ImportError:
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
-from shapely.geometry import box, Polygon, MultiPolygon, Point
+from shapely.geometry import box, Polygon, MultiPolygon, Point, LineString
 from shapely.ops import unary_union, polygonize
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
@@ -26,7 +26,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "29.0"
+APP_VERSION = "31.0"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
 st.title(f"✈️ LPPC GAMET – Motor Cartográfico v{APP_VERSION}")
@@ -269,6 +269,85 @@ ZONES = {
 }
 
 FIR_POLYGON = unary_union(list(ZONES.values()))
+
+# -------------------------------------------------
+# LINHA DE COSTA
+# -------------------------------------------------
+# Costa continental portuguesa, do Guadiana (Vila Real de Santo António)
+# ao Minho (Caminha), com 67 pontos e espaçamento médio de ~12 km.
+# Fornecida pelo utilizador a partir de dados aeronáuticos.
+#
+# Permite recortar geograficamente os qualificadores MAR / LAN / COT dos
+# GAMETs, em vez de os tratar apenas como anotação textual.
+_COASTLINE_RAW = (
+    "370943N0072400W 371035N0072708W 370932N0073135W 370741N0073559W "
+    "370431N0074045W 365750N0075207W 365741N0075334W 365804N0075516W "
+    "370133N0080149W 370404N0080623W 370524N0081101W 370421N0081804W "
+    "370550N0082148W 370508N0082555W 370629N0083142W 370712N0083707W "
+    "370448N0084006W 370343N0084728W 370231N0085157W 365943N0085652W "
+    "370119N0085944W 371148N0085508W 371906N0085238W 372654N0084813W "
+    "373600N0084914W 374451N0084849W 375319N0084813W 375704N0085311W "
+    "380925N0084724W 382111N0084736W 382924N0085433W 382439N0091156W "
+    "382451N0091317W 383305N0091139W 383940N0091535W 384026N0091934W "
+    "384128N0092449W 384138N0092752W 384239N0092921W 384630N0093003W "
+    "385344N0092641W 390433N0092526W 391030N0092151W 391622N0092018W "
+    "392109N0092344W 392134N0092440W 392215N0092403W 392313N0092038W "
+    "392415N0091633W 393053N0090911W 393451N0090636W 394552N0090203W "
+    "400044N0085452W 400834N0085233W 401054N0085432W 402639N0084838W "
+    "403837N0084546W 405721N0083932W 410756N0084020W 411433N0084349W "
+    "412217N0084613W 412453N0084734W 413019N0084730W 414033N0085040W "
+    "414508N0085303W 415021N0085241W 415220N0085233W"
+)
+
+def _parse_coastline(raw):
+    """Converte a lista DMS em pares (lon, lat) para shapely."""
+    pontos = []
+    for token in raw.split():
+        m = re.fullmatch(r"(\d{2})(\d{2})(\d{2})N(\d{3})(\d{2})(\d{2})W", token)
+        if not m:
+            continue
+        lat = int(m.group(1)) + int(m.group(2)) / 60 + int(m.group(3)) / 3600
+        lon = -(int(m.group(4)) + int(m.group(5)) / 60 + int(m.group(6)) / 3600)
+        pontos.append((lon, lat))
+    return pontos
+
+_COAST_POINTS = _parse_coastline(_COASTLINE_RAW)
+COASTLINE = LineString(_COAST_POINTS)
+
+# Terra = área da FIR a leste da linha de costa; mar = o restante.
+# O anel fecha-se bem a leste dos limites da FIR e é depois cortado por
+# ela, o que evita depender da forma exacta da fronteira terrestre.
+_fir_maxx = FIR_POLYGON.bounds[2]
+LAND_POLYGON = Polygon(
+    _COAST_POINTS
+    + [(_fir_maxx + 1, _COAST_POINTS[-1][1]), (_fir_maxx + 1, _COAST_POINTS[0][1])]
+).buffer(0).intersection(FIR_POLYGON)
+SEA_POLYGON = FIR_POLYGON.difference(LAND_POLYGON)
+
+# Faixa costeira (COT): banda de ~10 km para cada lado da linha, que é a
+# convenção que adoptámos — a definição OACI não fixa uma largura.
+_COT_KM = 10.0
+COASTAL_POLYGON = COASTLINE.buffer(_COT_KM / 111.0).intersection(FIR_POLYGON)
+
+SURFACE_POLYGONS = {
+    "MAR": SEA_POLYGON,
+    "LAN": LAND_POLYGON,
+    "COT": COASTAL_POLYGON,
+}
+
+def surface_polygon(surface):
+    """
+    Devolve o polígono correspondente a um qualificador de superfície
+    (MAR / LAN / COT, ou combinações como COT/MAR), ou None se não
+    houver qualificador.
+    """
+    if not surface:
+        return None
+    partes = [SURFACE_POLYGONS[s] for s in surface.split("/") if s in SURFACE_POLYGONS]
+    if not partes:
+        return None
+    return unary_union(partes) if len(partes) > 1 else partes[0]
+
 FIR_MINX, FIR_MINY, FIR_MAXX, FIR_MAXY = FIR_POLYGON.bounds
 
 # Pontos de referência de elevação de terreno (lat, lon, ft) — usados para
@@ -394,6 +473,8 @@ class MetBlock:
     value: object
     qualifier: str = ""   # LCA, EMBD, etc.
     layer: str = ""       # SFC/FL050, ABV FL070, etc.
+    surface: str = ""     # MAR, LAN, COT — superfície afectada
+    window: str = ""      # 11–15Z — janela temporal dentro do GAMET
 
 # -------------------------------------------------
 # NORMALIZE
@@ -854,6 +935,7 @@ def parse_gamet(text):
     state = "IDLE"
     blocks = []
     current_polygon = FIR_POLYGON
+    current_window  = ""
 
     for raw_line in lines:
 
@@ -891,6 +973,7 @@ def parse_gamet(text):
         if new_state:
             state = new_state
             current_polygon = FIR_POLYGON  # reset geo ao mudar de campo
+            current_window = ""            # reset janela temporal
             # Remover a keyword da linha para processar só o conteúdo
             content = re.sub(
                 r"^(SFC\s+VIS\s*:?|SIG\s+VIS\s*:?|VIS\s*:|SIG\s+CLD\s*:?|CLD\s*:|SIGWX\s*:?|TURB\s*:?|ICE\s*:?|MT\s+OBSC\s*:?|VA\s*:?)\s*",
@@ -922,6 +1005,40 @@ def parse_gamet(text):
         if re.search(r"\bLCA\b", content):
             qualifier = "LCA"
 
+        # ---- Qualificador de superfície (MAR / LAN / COT) ----
+        # Indicam que o fenómeno só afecta o mar, só terra, ou a faixa
+        # costeira. Com a linha de costa definida (COASTLINE), a área é
+        # recortada de facto — a anotação serve para o piloto perceber
+        # porque é que a zona tem a forma que tem.
+        # Ordem canónica (COT, LAN, MAR) para que "COT AND MAR" e
+        # "MAR AND COT" dêem a mesma chave de tradução
+        superficies = [s for s in ("COT", "LAN", "MAR")
+                       if re.search(rf"\b{s}\b", content)]
+        surface = "/".join(superficies)
+
+        # Recortar a área pelo qualificador de superfície. Antes isto era
+        # apenas anotado no briefing, por falta de linha de costa; com a
+        # costa definida, a geometria passa a ser exacta — um "TURB MAR"
+        # deixa de pintar o interior do país.
+        if surface:
+            sp = surface_polygon(surface)
+            if sp is not None:
+                recortado = _clean_poly(poly.intersection(sp))
+                if recortado.is_empty:
+                    # O fenómeno não tem área aplicável dentro da FIR
+                    continue
+                poly = recortado
+
+        # ---- Janela temporal (HH/HH) ----
+        # Um fenómeno pode aplicar-se só a parte do período do GAMET
+        # (ex.: "TURB:11/15 ..." num GAMET válido 0900/1500).
+        wm = re.search(r"(?:^|\s)(\d{2})/(\d{2})(?=\s|$)", content[:24])
+        if wm:
+            h1, h2 = int(wm.group(1)), int(wm.group(2))
+            if h1 <= 23 and h2 <= 23:
+                current_window = f"{h1:02d}–{h2:02d}Z"
+        window = current_window
+
         # ---- PARSE por estado ----
 
         if state == "VIS":
@@ -940,14 +1057,14 @@ def parse_gamet(text):
                 val = int(m.group(1)) - 1
                 consumed_spans.append(m.span())
                 if 100 <= val <= 9999:
-                    blocks.append(MetBlock("VIS", poly, val, qualifier))
+                    blocks.append(MetBlock("VIS", poly, val, qualifier, surface=surface, window=window))
 
             # ABV X → X+1
             for m in re.finditer(r"\bABV\s+(\d{3,4})M\b", vis_content):
                 val = int(m.group(1)) + 1
                 consumed_spans.append(m.span())
                 if 100 <= val <= 9999:
-                    blocks.append(MetBlock("VIS", poly, val, qualifier))
+                    blocks.append(MetBlock("VIS", poly, val, qualifier, surface=surface, window=window))
 
             def _already_consumed(pos):
                 return any(s <= pos < e for s, e in consumed_spans)
@@ -957,7 +1074,7 @@ def parse_gamet(text):
                 if _already_consumed(m.start()):
                     continue
                 val = int(float(m.group(1)) * 1000)
-                blocks.append(MetBlock("VIS", poly, val, qualifier))
+                blocks.append(MetBlock("VIS", poly, val, qualifier, surface=surface, window=window))
 
             # Intervalo: 2000-5000M → mínimo
             for m in re.finditer(r"\b(\d{3,4})-(\d{3,4})M\b", vis_content):
@@ -966,7 +1083,7 @@ def parse_gamet(text):
                 val = min(int(m.group(1)), int(m.group(2)))
                 consumed_spans.append(m.span())
                 if 100 <= val <= 9999:
-                    blocks.append(MetBlock("VIS", poly, val, qualifier))
+                    blocks.append(MetBlock("VIS", poly, val, qualifier, surface=surface, window=window))
 
             # Valor simples
             for m in re.finditer(r"(?<!\d)(\d{3,4})M\b", vis_content):
@@ -977,7 +1094,7 @@ def parse_gamet(text):
                     continue
                 val = int(m.group(1))
                 if 100 <= val <= 9999:
-                    blocks.append(MetBlock("VIS", poly, val, qualifier))
+                    blocks.append(MetBlock("VIS", poly, val, qualifier, surface=surface, window=window))
 
         elif state == "CLD":
             # Suporta "015-030/XXXHFT AGL", "015HFT AGL" e "035HFT AMSL"
@@ -987,7 +1104,7 @@ def parse_gamet(text):
                 content
             ):
                 base_ft = int(m.group(1)) * 100
-                blocks.append(MetBlock("BASE_AGL", poly, base_ft, qualifier))
+                blocks.append(MetBlock("BASE_AGL", poly, base_ft, qualifier, surface=surface, window=window))
 
             # Base única HFT AGL — excluir apenas se o dígito é precedido directamente por / ou -
             # ex: "004/020HFT" → skip (020 é topo do range)
@@ -999,7 +1116,7 @@ def parse_gamet(text):
                 if pre and pre[-1] in "-/":
                     continue
                 base_ft = int(m.group(1)) * 100
-                blocks.append(MetBlock("BASE_AGL", poly, base_ft, qualifier))
+                blocks.append(MetBlock("BASE_AGL", poly, base_ft, qualifier, surface=surface, window=window))
 
             # AMSL — converter para AGL usando elevação máxima do sector (conservador)
             for m in re.finditer(r"\b(\d{3})HFT\s+AMSL\b", content):
@@ -1008,7 +1125,7 @@ def parse_gamet(text):
                 if pre and pre[-1] in "-/":
                     continue
                 amsl_ft = int(m.group(1)) * 100
-                blocks.append(MetBlock("BASE_AMSL", poly, amsl_ft, qualifier))
+                blocks.append(MetBlock("BASE_AMSL", poly, amsl_ft, qualifier, surface=surface, window=window))
 
         elif state == "SIGWX":
             # FIX: EMBD tratado separadamente e eleva risco
@@ -1030,7 +1147,7 @@ def parse_gamet(text):
                     ts_qualifier = "EMBD"
                 elif not ts_qualifier:
                     ts_qualifier = "GEN"
-                blocks.append(MetBlock("TS", poly, ts_qualifier, qualifier))
+                blocks.append(MetBlock("TS", poly, ts_qualifier, qualifier, surface=surface, window=window))
 
         elif state == "TURB":
             layer = ""
@@ -1061,7 +1178,7 @@ def parse_gamet(text):
             if severity:
                 extra = " ".join(filter(None, [mov, trend]))
                 blocks.append(MetBlock("TURB", poly, severity, qualifier,
-                                       layer + (f" {extra}" if extra else "")))
+                                       layer + (f" {extra}" if extra else ""), surface=surface, window=window))
 
         elif state == "ICE":
             layer = ""
@@ -1082,18 +1199,18 @@ def parse_gamet(text):
             elif "WKN" in content:
                 trend = "WKN"
             if severity:
-                blocks.append(MetBlock("ICE", poly, severity, qualifier, layer + (f" {trend}" if trend else "")))
+                blocks.append(MetBlock("ICE", poly, severity, qualifier, layer + (f" {trend}" if trend else ""), surface=surface, window=window))
 
         elif state == "MT_OBSC":
             # Montanhas obscurecidas — sempre NO-GO para VFR
             # Só appenda quando a linha activa o estado (new_state presente)
             if new_state == "MT_OBSC":
-                blocks.append(MetBlock("MT_OBSC", poly, "MT OBSC", qualifier))
+                blocks.append(MetBlock("MT_OBSC", poly, "MT OBSC", qualifier, surface=surface, window=window))
 
         elif state == "VA":
             # Cinzas vulcânicas — sempre NO-GO
             if new_state == "VA":
-                blocks.append(MetBlock("VA", poly, "VA", qualifier))
+                blocks.append(MetBlock("VA", poly, "VA", qualifier, surface=surface, window=window))
 
     # ---- Extração Secção II: FZLVL, QNH e vento ----
     fzlvl_values = [int(m) for m in re.findall(r"(\d{4,5})FT\s+AMSL", secn2)]
@@ -1113,6 +1230,23 @@ def parse_gamet(text):
 # decisão é calculada directamente sobre a forma real de cada fenómeno do
 # GAMET, não sobre regiões pré-definidas. ZONES / SECTOR_* mantêm-se apenas
 # como definição da fronteira geográfica da FIR (FIR_POLYGON).
+
+_SURFACE_LABEL = {
+    "MAR": "o mar",
+    "LAN": "terra",
+    "COT": "a faixa costeira",
+    "COT/MAR": "a costa e o mar",
+    "LAN/MAR": "terra e mar",
+    "COT/LAN": "a costa e terra",
+    "COT/LAN/MAR": "costa, terra e mar",
+}
+
+_PHENOM_LABEL = {
+    "VIS": "VIS", "BASE_AGL": "BASE", "BASE_AMSL": "BASE",
+    "TS": "TS", "TURB": "TURB", "ICE": "ICE",
+    "MT_OBSC": "MT OBSC", "VA": "VA",
+}
+
 
 def label_region(poly, max_names=3):
     """
@@ -1185,7 +1319,7 @@ def compute_dynamic_regions(blocks):
             "decision": dec, "vis": vis, "base": base, "ts": ts,
             "turb": turb, "turb_layers": turb_layers, "turb_parcial": False,
             "ice": ice, "ice_layers": ice_layers, "ice_parcial": False,
-            "mt_obsc": mt_obsc, "va": va, "reasons": reasons,
+            "mt_obsc": mt_obsc, "va": va, "reasons": reasons, "notas": [],
         }]
 
     if not relevant:
@@ -1204,9 +1338,11 @@ def compute_dynamic_regions(blocks):
 
     # 3. Calcular decisão completa por célula (com base no ponto representativo)
     cell_results = []
+    cell_notes   = []   # anotações (superfície / janela temporal) por célula
     for cell in atomic_cells:
         centroid = cell.representative_point()
         events = []
+        notas = set()
         for b in relevant:
             if not b.polygon.contains(centroid):
                 continue
@@ -1219,8 +1355,19 @@ def compute_dynamic_regions(blocks):
             else:
                 events.append((b.phenomenon, b.value, b.qualifier, b.layer))
 
+            # Anotações que não alteram a decisão mas restringem o alcance
+            # real do aviso — mostradas no briefing para o piloto saber
+            # que o fenómeno não cobre tudo o que está desenhado.
+            rotulo = _PHENOM_LABEL.get(b.phenomenon, b.phenomenon)
+            if getattr(b, "surface", ""):
+                notas.add(f"{rotulo}: apenas sobre {_SURFACE_LABEL.get(b.surface, b.surface)} "
+                          f"(área já recortada)")
+            if getattr(b, "window", ""):
+                notas.add(f"{rotulo}: apenas {b.window}")
+
         dec_result = decision(events)
         cell_results.append((cell, dec_result))
+        cell_notes.append(tuple(sorted(notas)))
 
     # 4. Agrupar células por (decisão + conjunto de causas).
     #
@@ -1247,10 +1394,12 @@ def compute_dynamic_regions(blocks):
 
     grouped_cells = defaultdict(list)   # (decisão, assinatura) -> células
     group_results = defaultdict(list)   # (decisão, assinatura) -> resultados
-    for cell, res in cell_results:
-        key = (res[0], _cause_signature(res))
+    group_notes   = defaultdict(set)    # (decisão, assinatura) -> anotações
+    for (cell, res), notas in zip(cell_results, cell_notes):
+        key = (res[0], _cause_signature(res), notas)
         grouped_cells[key].append(cell)
         group_results[key].append(res)
+        group_notes[key].update(notas)
 
     # 5. Dentro de cada grupo, separar por componente conexo — duas bolsas
     # geograficamente distintas com as mesmas causas continuam a ser
@@ -1315,6 +1464,7 @@ def compute_dynamic_regions(blocks):
                 "mt_obsc":     sorted(mt_s),
                 "va":          sorted(va_s),
                 "reasons":     sorted(reasons_s),
+                "notas":       sorted(group_notes[key]),
             })
 
     # 6. Fundir fragmentos residuais.
@@ -1383,6 +1533,8 @@ def _merge_slivers(regions, min_area_frac=0.015):
         alvo["label"] = label_region(fundido)
         if peq["reasons"]:
             alvo["reasons"] = sorted(set(alvo["reasons"]) | set(peq["reasons"]))
+        if peq.get("notas"):
+            alvo["notas"] = sorted(set(alvo.get("notas", [])) | set(peq["notas"]))
 
     return grandes + orfas
 
@@ -1638,6 +1790,13 @@ def _pdf_briefing_page(pdf, regions, gamet_text, validity_label):
             ax.text(0.08, y, "Motivos: " + "; ".join(reasons), va="top",
                     fontsize=7, color="#555", transform=ax.transAxes,
                     wrap=True)
+            y -= 0.024
+
+        notas_reg = region.get("notas") or []
+        if notas_reg:
+            ax.text(0.08, y, "Alcance: " + "; ".join(notas_reg), va="top",
+                    fontsize=7, color="#777", style="italic",
+                    transform=ax.transAxes, wrap=True)
             y -= 0.024
 
         # Linha divisória entre regiões
@@ -1991,6 +2150,13 @@ if st.session_state.get("_active_gamet_text"):
                 with st.expander("ℹ️ Motivos da decisão", expanded=True):
                     for r in reasons:
                         st.write(f"• {r}")
+
+            # Anotações que restringem o alcance real do aviso — o
+            # fenómeno não cobre necessariamente toda a área desenhada
+            notas = region.get("notas") or []
+            if notas:
+                st.caption("**Alcance restrito:**  \n" +
+                           "  \n".join(f"· {n}" for n in notas))
 
     # ---- Mapa Interativo (Folium) ----
     st.subheader("🗺️ Mapa Interativo")
