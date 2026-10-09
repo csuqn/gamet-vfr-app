@@ -1,4 +1,5 @@
 import streamlit as st
+import math
 import re
 import io
 import time
@@ -20,13 +21,14 @@ from matplotlib.lines import Line2D
 from shapely.geometry import box, Polygon, MultiPolygon, Point, LineString
 from shapely.ops import unary_union, polygonize
 from dataclasses import dataclass
+from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 
 # -------------------------------------------------
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "31.0"
+APP_VERSION = "1.0"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
 st.title(f"✈️ LPPC GAMET – Motor Cartográfico v{APP_VERSION}")
@@ -268,7 +270,9 @@ ZONES = {
     "SECTOR SUL": SECTOR_SUL,
 }
 
-FIR_POLYGON = unary_union(list(ZONES.values()))
+# Contorno dos antigos sectores — só os limites MARÍTIMOS são usados
+# (ver FRONTEIRA TERRESTRE, mais abaixo).
+_FIR_SECTORES = unary_union(list(ZONES.values()))
 
 # -------------------------------------------------
 # LINHA DE COSTA
@@ -314,14 +318,135 @@ def _parse_coastline(raw):
 _COAST_POINTS = _parse_coastline(_COASTLINE_RAW)
 COASTLINE = LineString(_COAST_POINTS)
 
-# Terra = área da FIR a leste da linha de costa; mar = o restante.
-# O anel fecha-se bem a leste dos limites da FIR e é depois cortado por
-# ela, o que evita depender da forma exacta da fronteira terrestre.
-_fir_maxx = FIR_POLYGON.bounds[2]
-LAND_POLYGON = Polygon(
+# -------------------------------------------------
+# FRONTEIRA TERRESTRE PORTUGAL–ESPANHA
+# -------------------------------------------------
+# Do Guadiana (foz) ao Minho (junto a Vila Nova de Cerveira), 343 pontos
+# (lon,lat). Fonte: Natural Earth 1:10m, "admin_0_boundary_lines_land"
+# (domínio público), simplificada a 0,002° — desvio máximo de ~0,2 km face
+# à fonte, abaixo da própria precisão da escala 1:10m (~1 km).
+#
+# Até à v31 a fronteira terrestre da FIR era uma linha de 5 pontos que
+# deixava de fora Miranda do Douro (42 km), Melgaço (26 km), Barrancos
+# (25 km), Cerval e Bragança, e incluía território espanhol junto ao
+# Guadiana. A FIR LPPC segue a fronteira nacional em terra; se tiveres as
+# coordenadas oficiais do eAIP (ENR 2.1), substituem estas.
+_BORDER_RAW = (
+    "-7.4144,37.1928 -7.4342,37.2593 -7.4276,37.2745 -7.4374,37.3073 "
+    "-7.4450,37.3868 -7.4623,37.4179 -7.4600,37.4291 -7.4689,37.4756 "
+    "-7.4759,37.4943 -7.5063,37.5181 -7.5154,37.5293 -7.5237,37.5557 "
+    "-7.5291,37.5567 -7.5297,37.5672 -7.5158,37.5809 -7.5125,37.5904 "
+    "-7.5143,37.6014 -7.5049,37.6064 -7.4716,37.6369 -7.4576,37.7001 "
+    "-7.4440,37.7302 -7.4263,37.7506 -7.3344,37.8119 -7.3069,37.8508 "
+    "-7.2958,37.8849 -7.2739,37.9315 -7.2686,37.9492 -7.2727,37.9770 "
+    "-7.2658,37.9830 -7.2340,37.9881 -7.2233,37.9938 -7.1853,37.9887 "
+    "-7.1597,37.9968 -7.1419,38.0116 -7.1320,38.0324 -7.1233,38.0400 "
+    "-7.1059,38.0387 -7.0494,38.0202 -7.0240,38.0226 -7.0158,38.0468 "
+    "-7.0064,38.0593 -6.9976,38.0896 -6.9790,38.1199 -6.9475,38.1966 "
+    "-6.9642,38.2061 -6.9921,38.2043 -7.0181,38.1980 -7.0264,38.1996 "
+    "-7.0387,38.1862 -7.0631,38.1775 -7.1035,38.1736 -7.1269,38.1909 "
+    "-7.1672,38.2721 -7.1963,38.2922 -7.2114,38.3175 -7.3171,38.4246 "
+    "-7.3592,38.4464 -7.3352,38.4694 -7.3341,38.4810 -7.3456,38.4941 "
+    "-7.3358,38.5059 -7.3177,38.5563 -7.2759,38.6038 -7.2704,38.6177 "
+    "-7.2735,38.6254 -7.2860,38.6319 -7.2909,38.6382 -7.2930,38.6563 "
+    "-7.2841,38.7132 -7.2704,38.7375 -7.2115,38.7754 -7.1964,38.7800 "
+    "-7.1797,38.7909 -7.1662,38.8034 -7.1606,38.8129 -7.1510,38.8193 "
+    "-7.1049,38.8272 -7.0887,38.8334 -7.0561,38.8551 -7.0573,38.8694 "
+    "-7.0522,38.8850 -7.0660,38.9046 -7.0445,38.9186 -7.0221,38.9429 "
+    "-6.9733,39.0140 -6.9749,39.0230 -6.9863,39.0301 -6.9794,39.0472 "
+    "-6.9857,39.0668 -6.9997,39.0847 -7.0158,39.0968 -7.0388,39.1091 "
+    "-7.0649,39.1148 -7.0913,39.1124 -7.1273,39.0975 -7.1572,39.1054 "
+    "-7.1675,39.1135 -7.1689,39.1219 -7.1579,39.1414 -7.1558,39.1515 "
+    "-7.1681,39.1706 -7.2193,39.1848 -7.2441,39.1956 -7.2581,39.2113 "
+    "-7.2658,39.2314 -7.2643,39.2523 -7.2508,39.2706 -7.3005,39.3179 "
+    "-7.3193,39.3295 -7.3267,39.3413 -7.3314,39.3626 -7.3319,39.3847 "
+    "-7.3189,39.4133 -7.3136,39.4361 -7.3135,39.4574 -7.3209,39.4674 "
+    "-7.3629,39.4761 -7.3842,39.4840 -7.3994,39.4937 -7.4089,39.5156 "
+    "-7.4176,39.5242 -7.4513,39.5378 -7.4681,39.5502 -7.4979,39.5810 "
+    "-7.5158,39.5938 -7.5573,39.6798 -7.3414,39.6718 -7.2928,39.6833 "
+    "-7.2529,39.6823 -7.2358,39.6865 -7.2141,39.6762 -7.1829,39.6751 "
+    "-7.0358,39.6893 -7.0211,39.6940 -7.0096,39.7155 -7.0133,39.7389 "
+    "-6.9930,39.7742 -7.0003,39.8025 -6.9930,39.8161 -6.9852,39.8211 "
+    "-6.9528,39.8329 -6.9277,39.8619 -6.9218,39.8972 -6.9252,39.9179 "
+    "-6.9095,39.9320 -6.8998,39.9656 -6.9016,39.9765 -6.8969,39.9871 "
+    "-6.8797,40.0092 -6.9199,40.0649 -6.9557,40.1029 -6.9772,40.1134 "
+    "-7.0158,40.1191 -7.0277,40.1326 -7.0348,40.1667 -7.0431,40.1814 "
+    "-7.0346,40.1931 -7.0248,40.2162 -7.0158,40.2255 -6.9547,40.2534 "
+    "-6.8964,40.2555 -6.8781,40.2652 -6.8702,40.2955 -6.8120,40.3323 "
+    "-6.7944,40.3564 -6.8281,40.3806 -6.8513,40.4095 -6.8571,40.4421 "
+    "-6.8387,40.4772 -6.8153,40.5025 -6.8125,40.5146 -6.8181,40.5319 "
+    "-6.8484,40.5648 -6.8505,40.5822 -6.8445,40.5978 -6.8213,40.6302 "
+    "-6.8143,40.6472 -6.8162,40.6772 -6.8391,40.7575 -6.8391,40.7769 "
+    "-6.8335,40.7978 -6.8381,40.8149 -6.8367,40.8402 -6.8203,40.8442 "
+    "-6.8162,40.8568 -6.8212,40.8701 -6.8321,40.8759 -6.8470,40.8789 "
+    "-6.8553,40.8872 -6.8852,40.9489 -6.8992,40.9668 -6.9404,41.0034 "
+    "-6.9425,41.0160 -6.9318,41.0291 -6.9279,41.0479 -6.9068,41.0561 "
+    "-6.8453,41.0519 -6.8180,41.0541 -6.8044,41.0644 -6.7648,41.1089 "
+    "-6.7565,41.1271 -6.7590,41.1518 -6.7552,41.1588 -6.7422,41.1714 "
+    "-6.7069,41.1943 -6.6938,41.2174 -6.6466,41.2676 -6.5635,41.2707 "
+    "-6.4959,41.2949 -6.4631,41.3141 -6.4310,41.3390 -6.3996,41.3775 "
+    "-6.3792,41.3775 -6.3755,41.3908 -6.3762,41.3969 -6.3792,41.3973 "
+    "-6.3523,41.4093 -6.3211,41.4110 -6.3210,41.4196 -6.2829,41.4656 "
+    "-6.2859,41.4869 -6.2795,41.4970 -6.2536,41.5175 -6.2059,41.5703 "
+    "-6.2301,41.5949 -6.2722,41.6282 -6.3171,41.6501 -6.3659,41.6636 "
+    "-6.4608,41.6766 -6.4744,41.6659 -6.5030,41.6531 -6.5134,41.6509 "
+    "-6.5415,41.6589 -6.5553,41.6749 -6.5631,41.7130 -6.5774,41.7397 "
+    "-6.5601,41.7669 -6.5357,41.8486 -6.5242,41.8674 -6.5679,41.8759 "
+    "-6.5758,41.8829 -6.5676,41.9261 -6.5717,41.9426 -6.5851,41.9547 "
+    "-6.6095,41.9623 -6.6228,41.9410 -6.6568,41.9331 -6.7280,41.9309 "
+    "-6.7579,41.9376 -6.7944,41.9797 -6.8249,41.9838 -6.8312,41.9540 "
+    "-6.8550,41.9429 -6.9171,41.9391 -6.9451,41.9434 -6.9695,41.9577 "
+    "-6.9924,41.9664 -7.0158,41.9537 -7.0513,41.9420 -7.0827,41.9528 "
+    "-7.1132,41.9724 -7.1454,41.9875 -7.1597,41.9857 -7.1773,41.9784 "
+    "-7.1999,41.9637 -7.2021,41.9497 -7.1957,41.9174 -7.1979,41.9015 "
+    "-7.2187,41.8790 -7.2515,41.8637 -7.3225,41.8454 -7.3919,41.8420 "
+    "-7.4054,41.8352 -7.4427,41.8060 -7.4470,41.8218 -7.4566,41.8392 "
+    "-7.4694,41.8525 -7.5158,41.8650 -7.5233,41.8602 -7.5263,41.8474 "
+    "-7.5316,41.8402 -7.5467,41.8320 -7.5884,41.8242 -7.6061,41.8255 "
+    "-7.6222,41.8323 -7.6228,41.8417 -7.6074,41.8732 -7.6612,41.8749 "
+    "-7.7064,41.8963 -7.7220,41.8993 -7.7501,41.8884 -7.8122,41.8771 "
+    "-7.8392,41.8784 -7.8497,41.8758 -7.8648,41.8579 -7.8966,41.8579 "
+    "-7.9061,41.9139 -7.9258,41.9082 -7.9354,41.8800 -7.9448,41.8670 "
+    "-7.9794,41.8686 -7.9936,41.8637 -8.0157,41.8419 -8.0486,41.8164 "
+    "-8.0935,41.8067 -8.1796,41.8107 -8.1754,41.8366 -8.1770,41.8499 "
+    "-8.1846,41.8577 -8.2204,41.8682 -8.2317,41.8860 -8.2302,41.9047 "
+    "-8.2207,41.9227 -8.1821,41.9654 -8.1530,41.9868 -8.1080,42.0109 "
+    "-8.0974,42.0235 -8.0951,42.0409 -8.1032,42.0558 -8.1184,42.0669 "
+    "-8.1376,42.0729 -8.1584,42.0714 -8.1913,42.0621 -8.2040,42.0696 "
+    "-8.2074,42.0858 -8.2043,42.1288 -8.2224,42.1536 -8.2523,42.1376 "
+    "-8.2707,42.1320 -8.2954,42.1301 -8.3300,42.1084 -8.3467,42.1017 "
+    "-8.5012,42.0831 -8.5200,42.0777 -8.5544,42.0601 -8.5728,42.0544 "
+    "-8.6269,42.0510 -8.6439,42.0415 -8.6526,42.0314 -8.6708,41.9998 "
+    "-8.6913,41.9896 -8.7170,41.9838 -8.7508,41.9690 "
+)
+
+_BORDER_POINTS = [tuple(float(v) for v in par.split(",")) for par in _BORDER_RAW.split()]
+
+# Terra portuguesa = anel fechado pela costa (Guadiana → Minho) e pela
+# fronteira (Minho → Guadiana). O troço final do estuário do Minho, entre
+# Caminha e o início da fronteira da Natural Earth, fica como terra — como
+# o estuário do Tejo.
+_LAND_PT = Polygon(_COAST_POINTS + _BORDER_POINTS[::-1]).buffer(0)
+
+# Mar da FIR = a parte da área antiga a oeste da costa. Os limites
+# marítimos dos sectores são os oficiais; o que estava errado era só o
+# lado terrestre.
+_old_maxx = _FIR_SECTORES.bounds[2]
+_old_land = Polygon(
     _COAST_POINTS
-    + [(_fir_maxx + 1, _COAST_POINTS[-1][1]), (_fir_maxx + 1, _COAST_POINTS[0][1])]
-).buffer(0).intersection(FIR_POLYGON)
+    + [(_COAST_POINTS[-1][0], 43.0), (_old_maxx + 1, 43.0),
+       (_old_maxx + 1, _COAST_POINTS[0][1])]
+).buffer(0)
+# O fecho sobe primeiro para norte a partir do Minho: fechar logo para
+# leste deixava a faixa a norte de 41,87°N classificada como "mar" e
+# abria buracos na FIR em pleno Gerês.
+_SEA_PT = _FIR_SECTORES.difference(_old_land)
+
+_fir = unary_union([_LAND_PT, _SEA_PT]).buffer(0)
+# Garantia: a FIR é um polígono único e sem buracos.
+assert _fir.geom_type == "Polygon", _fir.geom_type
+FIR_POLYGON = Polygon(_fir.exterior)
+LAND_POLYGON = _LAND_PT.intersection(FIR_POLYGON)
 SEA_POLYGON = FIR_POLYGON.difference(LAND_POLYGON)
 
 # Faixa costeira (COT): banda de ~10 km para cada lado da linha, que é a
@@ -350,41 +475,115 @@ def surface_polygon(surface):
 
 FIR_MINX, FIR_MINY, FIR_MAXX, FIR_MAXY = FIR_POLYGON.bounds
 
-# Pontos de referência de elevação de terreno (lat, lon, ft) — usados para
-# interpolar a elevação aproximada em qualquer ponto da FIR (IDW), na
-# conversão AMSL→AGL. Substituem a antiga aproximação fixa por sector,
-# agora que a decisão é calculada por geometria dinâmica, não por sectores.
-_TERRAIN_REF_POINTS = [
-    (41.80, -7.00, 1700),   # Trás-os-Montes
-    (41.70, -8.30, 300),    # Minho / litoral Norte
-    (40.90, -7.90, 1200),   # Douro / Beira Alta
-    (40.33, -7.60, 3500),   # Serra da Estrela
-    (40.20, -8.40, 300),    # Beira Litoral / Coimbra
-    (39.60, -8.90, 150),    # Oeste / litoral Centro
-    (39.00, -7.50, 500),    # Alto Alentejo
-    (38.90, -9.30, 100),    # Litoral Oeste (Peniche/Ericeira)
-    (38.72, -9.14, 100),    # Lisboa
-    (37.90, -7.90, 250),    # Baixo Alentejo
-    (37.10, -8.20, 150),    # Algarve
-]
+# -------------------------------------------------
+# RELEVO — elevação MÁXIMA por quadrícula de 0,5°
+# -------------------------------------------------
+# Usada na conversão AMSL→AGL das bases de nuvem. Até à v31 era uma
+# interpolação (IDW) de 11 pontos, avaliada num único ponto por zona:
+# subestimava a Serra da Estrela em ~3000 ft, Monchique em ~2700 ft, e com
+# "BKN 050HFT AMSL" dava GO em toda a FIR com nuvem colada às serras.
+#
+# Agora: cada quadrícula guarda a elevação máxima do terreno lá dentro e a
+# conversão usa SEMPRE o máximo das quadrículas que a zona toca — a base
+# AGL calculada é a pior que um piloto encontra nessa zona.
+#
+# ⚠ VALORES APROXIMADOS, arredondados por excesso a partir dos cumes
+# conhecidos de cada quadrícula (ex.: Torre 1993 m, Larouco 1535 m, Marão
+# 1415 m, Fóia 902 m). NÃO são dados oficiais. Devem ser substituídos
+# pelos valores de elevação máxima da carta VFR 1:500 000 (eVFR) quando
+# disponíveis. Chave: (latitude sul, longitude oeste) da quadrícula.
+_TERRAIN_TILE = 0.5
+_TERRAIN_MAX_FT = {
+    # 42.0–42.5 N — Alto Minho (Melgaço, Castro Laboreiro)
+    (42.0, -9.0): 1500, (42.0, -8.5): 4400,
+    # 41.5–42.0 N — Arga, Peneda-Gerês, Larouco, Montesinho
+    (41.5, -9.0): 2800, (41.5, -8.5): 5100, (41.5, -8.0): 5100,
+    (41.5, -7.5): 4300, (41.5, -7.0): 5000, (41.5, -6.5): 2900,
+    # 41.0–41.5 N — Porto, Aboboreira, Marão/Alvão, Bornes
+    (41.0, -9.0): 1500, (41.0, -8.5): 3400, (41.0, -8.0): 4800,
+    (41.0, -7.5): 3600, (41.0, -7.0): 4100, (41.0, -6.5): 2900,
+    # 40.5–41.0 N — Freita/Caramulo, Montemuro, Lapa, Guarda/Marofa
+    (40.5, -9.0): 1200, (40.5, -8.5): 3800, (40.5, -8.0): 4700,
+    (40.5, -7.5): 3600, (40.5, -7.0): 3600,
+    # 40.0–40.5 N — Lousã, ESTRELA, Gardunha, Malcata
+    (40.0, -9.0): 1000, (40.0, -8.5): 4100, (40.0, -8.0): 6600,
+    (40.0, -7.5): 6300, (40.0, -7.0): 3700,
+    # 39.5–40.0 N — Aire/Candeeiros, Alvelos, Beira Baixa
+    (39.5, -9.5): 400,  (39.5, -9.0): 2400, (39.5, -8.5): 3500,
+    (39.5, -8.0): 3700, (39.5, -7.5): 2900, (39.5, -7.0): 2900,
+    # 39.0–39.5 N — Montejunto, Ribatejo, São Mamede
+    (39.0, -9.5): 2300, (39.0, -9.0): 2200, (39.0, -8.5): 1300,
+    (39.0, -8.0): 1500, (39.0, -7.5): 3500, (39.0, -7.0): 2000,
+    # 38.5–39.0 N — Sintra, Lisboa, Alentejo, Ossa
+    (38.5, -10.0): 500, (38.5, -9.5): 1900, (38.5, -9.0): 1500,
+    (38.5, -8.5): 1500, (38.5, -8.0): 2300, (38.5, -7.5): 2300,
+    (38.5, -7.0): 1500,
+    # 38.0–38.5 N — Espichel, Arrábida, Grândola, Portel, Moura/Barrancos
+    (38.0, -9.5): 600,  (38.0, -9.0): 1800, (38.0, -8.5): 1400,
+    (38.0, -8.0): 1500, (38.0, -7.5): 1900, (38.0, -7.0): 1900,
+    # 37.5–38.0 N — Cercal, Odemira, Mértola
+    (37.5, -9.0): 1300, (37.5, -8.5): 1700, (37.5, -8.0): 1700,
+    (37.5, -7.5): 1400,
+    # 37.0–37.5 N — MONCHIQUE, Caldeirão, Sotavento
+    (37.0, -9.0): 3200, (37.0, -8.5): 2700, (37.0, -8.0): 2100,
+    (37.0, -7.5): 1400,
+    # 36.5–37.0 N — pontas da costa algarvia
+    (36.5, -9.0): 300,  (36.5, -8.0): 300,
+}
+
+def _tile_key(lon, lat):
+    t = _TERRAIN_TILE
+    return (math.floor(lat / t) * t, math.floor(lon / t) * t)
+
+def _tile_box(key):
+    lat_s, lon_w = key
+    return box(lon_w, lat_s, lon_w + _TERRAIN_TILE, lat_s + _TERRAIN_TILE)
+
+# Falhar em voz alta: uma quadrícula com terra e sem valor daria 0 ft de
+# terreno — base AMSL lida como AGL, o erro optimista que isto veio evitar.
+_lx0, _ly0, _lx1, _ly1 = LAND_POLYGON.bounds
+for _la in range(math.floor(_ly0 / _TERRAIN_TILE), math.ceil(_ly1 / _TERRAIN_TILE)):
+    for _lo in range(math.floor(_lx0 / _TERRAIN_TILE), math.ceil(_lx1 / _TERRAIN_TILE)):
+        _k = (_la * _TERRAIN_TILE, _lo * _TERRAIN_TILE)
+        if _k not in _TERRAIN_MAX_FT and _tile_box(_k).intersection(LAND_POLYGON).area > 1e-7:
+            raise RuntimeError(f"Quadrícula de relevo em falta: {_k}")
+
+def _terrain_max_ft(geom):
+    """
+    Elevação máxima (ft) do terreno em qualquer ponto de `geom`: o máximo
+    das quadrículas que a geometria toca com área. Quadrículas só de mar
+    valem 0.
+    """
+    x0, y0, x1, y1 = geom.bounds
+    t = _TERRAIN_TILE
+    maximo = 0
+    for la in range(math.floor(y0 / t), math.ceil(y1 / t)):
+        for lo in range(math.floor(x0 / t), math.ceil(x1 / t)):
+            k = (la * t, lo * t)
+            v = _TERRAIN_MAX_FT.get(k, 0)
+            if v > maximo and _tile_box(k).intersection(geom).area > 1e-9:
+                maximo = v
+    return maximo
 
 def _terrain_elevation_ft(lon, lat):
-    """
-    Estima a elevação do terreno (ft) num ponto, por interpolação de
-    distância inversa (IDW) sobre pontos de referência conhecidos.
-    Aproximação suficiente para a conversão AMSL→AGL — não substitui um
-    modelo digital de elevação real.
-    """
-    total_w = 0.0
-    total_v = 0.0
-    for ref_lat, ref_lon, elev in _TERRAIN_REF_POINTS:
-        d2 = (lat - ref_lat) ** 2 + (lon - ref_lon) ** 2
-        if d2 < 1e-6:
-            return elev  # praticamente no ponto de referência
-        w = 1.0 / d2
-        total_w += w
-        total_v += w * elev
-    return total_v / total_w if total_w else 500
+    """Elevação máxima da quadrícula que contém o ponto (lon, lat)."""
+    return _TERRAIN_MAX_FT.get(_tile_key(lon, lat), 0)
+
+# Quadrículas que tocam a FIR — usadas para partir as zonas quando há
+# bases AMSL, para a conversão ser feita quadrícula a quadrícula e não com
+# o máximo de uma zona enorme (a Estrela não pode pôr o Algarve em NO-GO).
+def _terrain_tiles():
+    x0, y0, x1, y1 = FIR_POLYGON.bounds
+    t = _TERRAIN_TILE
+    caixas = []
+    for la in range(math.floor(y0 / t), math.ceil(y1 / t)):
+        for lo in range(math.floor(x0 / t), math.ceil(x1 / t)):
+            cx = _tile_box((la * t, lo * t))
+            if cx.intersection(FIR_POLYGON).area > 1e-9:
+                caixas.append(cx)
+    return caixas
+
+TERRAIN_TILES = _terrain_tiles()
 
 # -------------------------------------------------
 # CIDADES
@@ -900,6 +1099,62 @@ def _trend_text(layer_str):
         return " [A ENFRAQUECER]"
     return ""
 
+
+# -------------------------------------------------
+# JANELA HORÁRIA — estado face à hora actual
+# -------------------------------------------------
+# A janela "HH/HH" de um campo NÃO altera a decisão (continua a valer para
+# todo o período, por ser o conservador: a previsão pode atrasar-se ou
+# antecipar-se). Mas o piloto deve saber se, à hora a que consulta, o
+# fenómeno já passou ou ainda não começou.
+_WINDOW_RE = re.compile(r"(\d{2})–(\d{2})Z")
+
+def window_status(window, start_dt, now=None):
+    """
+    Devolve "activo agora", "já terminou", "ainda não começou" ou "" (sem
+    dados). `start_dt` é o início da validade do GAMET, que fixa o dia a
+    que as horas da janela se referem.
+    """
+    m = _WINDOW_RE.search(window or "")
+    if not m or start_dt is None:
+        return ""
+    now = now or datetime.now(timezone.utc)
+    h1, h2 = int(m.group(1)), int(m.group(2))
+    if h1 > 24 or h2 > 24:
+        return ""
+    # O GAMET só dá horas: o dia é o do candidato (véspera, mesmo dia,
+    # dia seguinte) mais próximo do início da validade. Ex.: válido desde
+    # as 21Z, "00/03" é na madrugada seguinte; válido desde as 12Z, "10/12"
+    # é na manhã do próprio dia (e já terminou).
+    meia_noite = start_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+    candidatos = [meia_noite + timedelta(days=k, hours=h1) for k in (-1, 0, 1)]
+    ini = min(candidatos, key=lambda c: abs((c - start_dt).total_seconds()))
+    fim = ini.replace(hour=0) + timedelta(hours=h2) if h2 != 24 else \
+          ini.replace(hour=0) + timedelta(days=1)
+    if fim <= ini:                          # cruza a meia-noite
+        fim += timedelta(days=1)
+    if now < ini:
+        return "ainda não começou"
+    if now >= fim:
+        return "já terminou"
+    return "activo agora"
+
+def annotate_window_notes(notas, start_dt, now=None):
+    """Acrescenta o estado actual às notas de janela horária."""
+    saida = []
+    for n in notas or []:
+        estado = window_status(n, start_dt, now) if "apenas" in n and _WINDOW_RE.search(n) else ""
+        saida.append(f"{n} — {estado}" if estado else n)
+    return saida
+
+# Base de nuvem em SIG CLD — ver comentário no estado "CLD" de parse_gamet.
+_CLD_BASE_RE = re.compile(
+    r"(?<![\dA-Z])(?P<base>SFC|\d{3,5})"
+    r"(?:-\d{3,5})?"                      # fim do intervalo de bases
+    r"(?:/(?:\d{3,5}|XXX))?"              # topo
+    r"\s*(?P<unit>HFT|FT)\s+(?P<ref>AGL|AMSL)\b"
+)
+
 def parse_gamet(text):
 
     text = normalize(text)
@@ -1097,35 +1352,32 @@ def parse_gamet(text):
                     blocks.append(MetBlock("VIS", poly, val, qualifier, surface=surface, window=window))
 
         elif state == "CLD":
-            # Suporta "015-030/XXXHFT AGL", "015HFT AGL" e "035HFT AMSL"
-            # Range HFT AGL
-            for m in re.finditer(
-                r"\b(\d{3})-(\d{3})(?:/[A-Z0-9]+)?HFT\s+AGL\b",
-                content
-            ):
-                base_ft = int(m.group(1)) * 100
-                blocks.append(MetBlock("BASE_AGL", poly, base_ft, qualifier, surface=surface, window=window))
-
-            # Base única HFT AGL — excluir apenas se o dígito é precedido directamente por / ou -
-            # ex: "004/020HFT" → skip (020 é topo do range)
-            # ex: "TCU/CB 020HFT" → manter (/ pertence a TCU/CB, não ao número)
-            for m in re.finditer(r"\b(\d{3})HFT\s+AGL\b", content):
-                pos = m.start()
-                # Verificar char imediatamente antes do número (ignorando espaços)
-                pre = content[:pos].rstrip()
-                if pre and pre[-1] in "-/":
+            # Uma única expressão para todas as formas de base de nuvem:
+            #   "002HFT AGL"          base única
+            #   "002/010HFT AGL"      base/topo (forma-modelo OACI)
+            #   "002-004/010HFT AGL"  intervalo de bases/topo
+            #   "004/XXXHFT AGL"      topo desconhecido
+            #   "SFC/010HFT AGL"      base à superfície → 0 ft
+            #   "800/1100FT AGL"      valores em pés (sem o H de centenas)
+            # e o mesmo com AMSL. A base é sempre o PRIMEIRO número — o
+            # menor do intervalo, por ser o conservador. Antes da v32 a
+            # forma base/topo sem intervalo não era reconhecida e nuvens a
+            # 200 ft passavam como GO.
+            for m in _CLD_BASE_RE.finditer(content):
+                # Um número precedido de '-' ou '/' é topo ou fim de intervalo,
+                # não base ("TCU/CB 020HFT" mantém-se: o '/' é do TCU/CB e
+                # está separado do número por um espaço).
+                if m.start() > 0 and content[m.start() - 1] in "-/":
                     continue
-                base_ft = int(m.group(1)) * 100
-                blocks.append(MetBlock("BASE_AGL", poly, base_ft, qualifier, surface=surface, window=window))
-
-            # AMSL — converter para AGL usando elevação máxima do sector (conservador)
-            for m in re.finditer(r"\b(\d{3})HFT\s+AMSL\b", content):
-                pos = m.start()
-                pre = content[:pos].rstrip()
-                if pre and pre[-1] in "-/":
-                    continue
-                amsl_ft = int(m.group(1)) * 100
-                blocks.append(MetBlock("BASE_AMSL", poly, amsl_ft, qualifier, surface=surface, window=window))
+                base_txt, unidade, ref = m.group("base"), m.group("unit"), m.group("ref")
+                if base_txt == "SFC":
+                    base_ft = 0
+                elif unidade == "HFT":
+                    base_ft = int(base_txt) * 100
+                else:
+                    base_ft = int(base_txt)
+                fen = "BASE_AGL" if ref == "AGL" else "BASE_AMSL"
+                blocks.append(MetBlock(fen, poly, base_ft, qualifier, surface=surface, window=window))
 
         elif state == "SIGWX":
             # FIX: EMBD tratado separadamente e eleva risco
@@ -1289,6 +1541,52 @@ def label_region(poly, max_names=3):
     return f"Zona {ns}/{ew}"
 
 
+_BASE_REASON_RE = re.compile(r"^BASE \d+ft")
+
+def _dedupe_base_reasons(reasons):
+    """
+    Numa região que junta células com bases diferentes, manter só o motivo
+    com a base mais baixa por limiar ("< 300ft", "< 500ft").
+    """
+    outros, por_limiar = [], {}
+    for r in reasons:
+        m = re.match(r"^BASE (\d+)ft (.*)$", r)
+        if not m:
+            outros.append(r)
+            continue
+        val, limiar = int(m.group(1)), m.group(2)
+        if limiar not in por_limiar or val < por_limiar[limiar][0]:
+            por_limiar[limiar] = (val, r)
+    return sorted(outros + [r for _, r in por_limiar.values()])
+
+
+def _refine_cells(cells, splitters, tol=1e-3):
+    """
+    Parte cada célula pelos polígonos `splitters` que a cobrem só
+    parcialmente (entre tol e 1-tol da área). Devolve células que estão,
+    cada uma, inteiramente dentro ou fora de cada splitter.
+    """
+    def _partes(geom):
+        geom = _clean_poly(geom)
+        if geom is None or geom.is_empty:
+            return []
+        return [g for g in getattr(geom, "geoms", [geom]) if g.area > 1e-9]
+
+    for sp in splitters:
+        novas = []
+        for c in cells:
+            if not c.intersects(sp):
+                novas.append(c)
+                continue
+            frac = c.intersection(sp).area / c.area
+            if tol < frac < 1 - tol:
+                novas.extend(_partes(c.intersection(sp)) + _partes(c.difference(sp)))
+            else:
+                novas.append(c)
+        cells = novas
+    return cells
+
+
 def compute_dynamic_regions(blocks):
     """
     Constrói regiões de decisão dinâmica com base na geometria REAL de cada
@@ -1336,18 +1634,36 @@ def compute_dynamic_regions(blocks):
     if not atomic_cells:
         return _empty_region()
 
+    # 2b. Rede de segurança: o polygonize descarta segmentos cujas pontas
+    # não coincidem EXACTAMENTE com outra linha, e a célula fica por
+    # partir. Partir explicitamente qualquer célula que um fenómeno cubra
+    # só em parte garante que cada célula está toda dentro ou toda fora.
+    splitters = [b.polygon for b in relevant]
+    # Com bases AMSL, partir também pela grelha de relevo — a conversão
+    # para AGL é feita quadrícula a quadrícula.
+    if any(b.phenomenon == "BASE_AMSL" for b in relevant):
+        splitters += TERRAIN_TILES
+    atomic_cells = _refine_cells(atomic_cells, splitters)
+
     # 3. Calcular decisão completa por célula (com base no ponto representativo)
     cell_results = []
     cell_notes   = []   # anotações (superfície / janela temporal) por célula
     for cell in atomic_cells:
-        centroid = cell.representative_point()
+        # Pertença por ÁREA, não por ponto. Cada célula atómica está
+        # inteiramente dentro ou fora de cada fenómeno, por isso basta ver
+        # se mais de metade dela está coberta. Até à v31 usava-se
+        # representative_point(), que numa célula degenerada devolveu um
+        # vértice da fronteira (-9, 38) — fora de TODOS os fenómenos — e
+        # 12% da FIR saíram GO com trovoada embebida em toda a área.
+        cell_area = cell.area
         events = []
         notas = set()
         for b in relevant:
-            if not b.polygon.contains(centroid):
+            if b.polygon.intersection(cell).area < 0.5 * cell_area:
                 continue
             if b.phenomenon == "BASE_AMSL":
-                elev_ft = _terrain_elevation_ft(centroid.x, centroid.y)
+                # Pior caso dentro da célula: terreno mais alto que ela toca.
+                elev_ft = _terrain_max_ft(cell)
                 agl_ft = max(0, round(b.value - elev_ft))
                 events.append(("BASE", agl_ft, b.qualifier, b.layer))
             elif b.phenomenon == "BASE_AGL":
@@ -1390,7 +1706,11 @@ def compute_dynamic_regions(blocks):
         com o mesmo risco real em vários cartões: um GAMET típico passava
         de 3 para 8 regiões sem acrescentar informação útil.
         """
-        return tuple(sorted(res[-1]))   # reasons
+        # A base exacta não entra na assinatura, só o limiar que ela
+        # violou: com bases AMSL cada quadrícula de relevo dá uma base AGL
+        # diferente e o briefing partia-se em dezenas de cartões. A região
+        # mostra a base mínima (a conservadora) — ver _dedupe_base_reasons.
+        return tuple(sorted(_BASE_REASON_RE.sub("BASE #ft", r) for r in res[-1]))
 
     grouped_cells = defaultdict(list)   # (decisão, assinatura) -> células
     group_results = defaultdict(list)   # (decisão, assinatura) -> resultados
@@ -1405,7 +1725,7 @@ def compute_dynamic_regions(blocks):
     # geograficamente distintas com as mesmas causas continuam a ser
     # regiões independentes.
     regions = []
-    for key, cells in grouped_cells.items():
+    for grupo_id, (key, cells) in enumerate(grouped_cells.items()):
         dec_level = key[0]
         merged = unary_union(cells)
         components = list(merged.geoms) if isinstance(merged, MultiPolygon) else [merged]
@@ -1463,8 +1783,9 @@ def compute_dynamic_regions(blocks):
                 "ice_parcial": ice_parcial,
                 "mt_obsc":     sorted(mt_s),
                 "va":          sorted(va_s),
-                "reasons":     sorted(reasons_s),
+                "reasons":     _dedupe_base_reasons(reasons_s),
                 "notas":       sorted(group_notes[key]),
+                "_grupo":      grupo_id,
             })
 
     # 6. Fundir fragmentos residuais.
@@ -1474,11 +1795,42 @@ def compute_dynamic_regions(blocks):
     # São absorvidos pela região vizinha compatível de maior área, para
     # não poluírem o briefing com cartões de 0,3% da FIR.
     regions = _merge_slivers(regions)
+    regions = _consolidate_groups(regions)
 
     # Ordenar da pior decisão para a melhor e, dentro da mesma decisão,
     # da maior área para a menor (as zonas mais relevantes primeiro)
     _order = {"NO-GO": 0, "MARGINAL": 1, "GO": 2}
     regions.sort(key=lambda r: (_order.get(r["decision"], 3), -r["polygon"].area))
+    return regions
+
+
+_MAX_REGIOES = 8
+
+def _consolidate_groups(regions, max_regioes=_MAX_REGIOES):
+    """
+    Se o briefing tiver demasiadas regiões, juntar as bolsas separadas que
+    têm exactamente a mesma decisão e as mesmas causas numa só região
+    (multipolígono). Não se perde informação — os valores já eram
+    agregados por grupo — e evita-se um briefing com 30 cartões quando
+    bases AMSL sobre relevo variado dão um padrão em xadrez.
+    """
+    if len(regions) > max_regioes:
+        por_grupo = defaultdict(list)
+        for r in regions:
+            por_grupo[r.get("_grupo")].append(r)
+        juntas = []
+        for membros in por_grupo.values():
+            base = membros[0]
+            if len(membros) > 1:
+                poly = unary_union([m["polygon"] for m in membros])
+                base = dict(base, polygon=poly, label=label_region(poly),
+                            reasons=sorted(set().union(*[m["reasons"] for m in membros])),
+                            notas=sorted(set().union(*[m.get("notas", []) for m in membros])))
+                base["reasons"] = _dedupe_base_reasons(base["reasons"])
+            juntas.append(base)
+        regions = juntas
+    for r in regions:
+        r.pop("_grupo", None)
     return regions
 
 
@@ -1792,7 +2144,8 @@ def _pdf_briefing_page(pdf, regions, gamet_text, validity_label):
                     wrap=True)
             y -= 0.024
 
-        notas_reg = region.get("notas") or []
+        notas_reg = annotate_window_notes(region.get("notas"),
+                                          parse_validity(gamet_text)[0])
         if notas_reg:
             ax.text(0.08, y, "Alcance: " + "; ".join(notas_reg), va="top",
                     fontsize=7, color="#777", style="italic",
@@ -2153,7 +2506,7 @@ if st.session_state.get("_active_gamet_text"):
 
             # Anotações que restringem o alcance real do aviso — o
             # fenómeno não cobre necessariamente toda a área desenhada
-            notas = region.get("notas") or []
+            notas = annotate_window_notes(region.get("notas"), start_dt)
             if notas:
                 st.caption("**Alcance restrito:**  \n" +
                            "  \n".join(f"· {n}" for n in notas))
@@ -2200,7 +2553,12 @@ if st.session_state.get("_active_gamet_text"):
                 fill_opacity=0.8,
                 tooltip=name,
             ).add_to(fmap)
-        st.components.v1.html(fmap._repr_html_(), height=500)
+        # st.iframe substitui st.components.v1.html (descontinuado); manter
+        # o antigo como recurso para versões do Streamlit sem st.iframe.
+        if hasattr(st, "iframe"):
+            st.iframe(fmap._repr_html_(), height=500)
+        else:
+            st.components.v1.html(fmap._repr_html_(), height=500)
     else:
         st.warning("Folium não instalado — mapa estático disponível no PDF.")
 
