@@ -1,69 +1,275 @@
 # LPPC GAMET – Motor Cartográfico
 
-Descodificador de GAMETs da FIR de Lisboa (Portugal Continental) para pilotos
-VFR e de ultraleves. Transforma o texto do GAMET num briefing com decisões
-**GO / MARGINAL / NO-GO** por zona, num mapa interactivo e num PDF.
+**Briefing meteorológico VFR para Portugal Continental, a partir do GAMET.**
 
-> ⚠️ **Ferramenta de apoio à decisão.** Não substitui o briefing oficial nem a
-> leitura do GAMET, METAR, TAF e SIGMET pelo piloto. A responsabilidade da
-> decisão de voo é sempre do piloto em comando.
+Uma app web que lê o GAMET da FIR de Lisboa, percebe o que ele diz e onde, e
+mostra num mapa onde se pode voar em VFR (**GO**), onde é preciso cautela
+(**MARGINAL**) e onde não se deve voar (**NO-GO**), zona a zona e aeródromo a
+aeródromo. Pensada para pilotos de ultraleves e de aviação geral em VFR.
 
-## O que faz
+> ⚠️ **Ferramenta de apoio à decisão, não de decisão.** Não substitui o
+> briefing oficial nem a leitura do GAMET, METAR, TAF e SIGMET pelo próprio
+> piloto. Uma previsão pode falhar, e a app pode ter erros. A responsabilidade
+> da decisão de voo é sempre do piloto em comando.
 
-- Vai buscar o GAMET actual ao Self-Briefing do IPMA (ou aceita-o colado à mão).
-- Interpreta a Secção I — visibilidade, nuvens, trovoada, turbulência, gelo,
-  montanhas obscurecidas, cinzas vulcânicas — e o campo `SIGMET APPLICABLE`.
-- Desenha as zonas afectadas com a geometria real de cada fenómeno, incluindo
-  os qualificadores geográficos (`N OF`, `BTN`…) e de superfície (`MAR`,
-  `LAN`, `COT`).
-- Calcula a decisão em cada zona e mostra-a no mapa, por aeródromo e por pista
-  de ultraleves (52 pontos), com consulta rápida.
-- Mostra vento, temperatura, FZLVL e QNH da Secção II, e exporta tudo em PDF.
+---
 
-A app é **determinística**: regras fixas e expressões regulares, sem IA. O
-mesmo GAMET dá sempre o mesmo resultado.
+## Índice
 
-## Regras de decisão
+1. [O problema que resolve](#1-o-problema-que-resolve)
+2. [O que é um GAMET](#2-o-que-é-um-gamet)
+3. [Como usar a app](#3-como-usar-a-app)
+4. [Como ler o briefing](#4-como-ler-o-briefing)
+5. [Exemplo real](#5-exemplo-real)
+6. [Como a app decide](#6-como-a-app-decide)
+7. [Como a app desenha as zonas](#7-como-a-app-desenha-as-zonas)
+8. [Limitações conhecidas](#8-limitações-conhecidas)
+9. [Fontes dos dados](#9-fontes-dos-dados)
+10. [Qualidade e testes](#10-qualidade-e-testes)
+11. [Para programadores](#11-para-programadores)
+12. [Perguntas frequentes](#12-perguntas-frequentes)
 
-| Condição | Decisão |
-|---|---|
-| VIS < 1500 m | NO-GO (MARGINAL se for local, `LCA`) |
-| VIS < 3000 m | MARGINAL |
-| Base < 300 ft AGL | NO-GO |
-| Base < 500 ft AGL | MARGINAL |
-| TS ISOL | MARGINAL |
-| TS OCNL / FRQ / EMBD | NO-GO |
-| TURB ou ICE severos | NO-GO |
-| MT OBSC, cinzas vulcânicas | NO-GO |
-| SIGMET aplicável | NO-GO em toda a área |
+---
 
-Na dúvida, a app escolhe sempre a leitura mais conservadora. Bases em AMSL são
-convertidas para AGL contra a elevação máxima da zona.
+## 1. O problema que resolve
 
-## Fontes dos dados
+O GAMET é a previsão oficial para voos a baixa altitude, mas é escrito num
+código compacto, pensado para meteorologistas e controladores:
+
+```
+SFC VIS:N OF N3840 MAR AND COT LCA 0200-5000M FG/BR
+SIG CLD:N OF N3840 MAR AND COT LCA BKN 002-008/012HFT AGL
+```
+
+Para saber se se pode voar de Alqueidão para Évora é preciso descodificar cada
+campo, imaginar no mapa onde fica "a norte de 38°40'", perceber se "MAR AND
+COT" inclui a rota, e cruzar tudo com os mínimos VFR. É lento e fácil de
+errar, sobretudo quando o GAMET tem vários fenómenos sobrepostos.
+
+A app faz esse trabalho: lê o texto, desenha cada fenómeno na sua área real e
+dá uma decisão clara para cada zona, sem perder o detalhe de **porquê**.
+
+## 2. O que é um GAMET
+
+O GAMET (*GAMET Area Forecast*) é emitido pelo IPMA para a área continental da
+FIR de Lisboa, abaixo do FL150, a cada 6 horas (períodos de validade 03–09,
+09–15, 15–21 e 21–03 UTC, com emendas `AMD` quando a previsão muda). Tem duas
+secções:
+
+- **Secção I — fenómenos significativos:** visibilidade à superfície
+  (`SFC VIS`), nuvens significativas (`SIG CLD`), trovoada e tempo severo
+  (`SIGWX`), turbulência (`TURB`), gelo (`ICE`), montanhas obscurecidas
+  (`MT OBSC`), cinzas vulcânicas (`VA`) e os SIGMET aplicáveis.
+- **Secção II — informação geral:** sistemas de pressão, nebulosidade,
+  vento e temperatura por níveis em seis estações, nível de congelação
+  (`FZLVL`) e QNH mínimo.
+
+Cada fenómeno pode vir limitado no espaço (`N OF N3840`, `BTN N3900 AND
+N4130`, `E OF W00800`), à superfície (`MAR` mar, `LAN` terra, `COT` costa), no
+tempo (`11/15` = só das 11 às 15 UTC) e na extensão (`ISOL`, `OCNL`, `FRQ`,
+`LCA` = localmente).
+
+## 3. Como usar a app
+
+1. **Abre a app.** O GAMET em vigor é carregado automaticamente do IPMA.
+   - Se o IPMA não responder, a app explica o que falhou. Podes colar o GAMET
+     à mão na caixa de texto, ou indicar um endereço alternativo nas opções
+     do painel "📡 GAMET do IPMA".
+   - O botão **🔄 Recarregar GAMET** vai buscar a versão mais recente.
+2. **Carrega em 🔍 Analisar GAMET.**
+3. **Lê o resultado**, de cima para baixo:
+   - validade do GAMET e quanto tempo falta para expirar;
+   - avisos importantes (SIGMET, texto ilegível, vento forte);
+   - veredicto global (ex.: "🔴 NO-GO em 11% da FIR");
+   - consulta rápida, briefing por zonas, mapa, dados da Secção II e PDF.
+
+A app também funciona sem internet, com o GAMET colado à mão.
+
+## 4. Como ler o briefing
+
+**Avisos no topo**
+- 🚨 **SIGMET aplicável:** a decisão é forçada a NO-GO em toda a área. Lê o
+  SIGMET completo.
+- ⚠️ **Nenhum campo reconhecido:** a app não percebeu o texto. Isto **não**
+  significa que o tempo está calmo; confirma o GAMET.
+- 💨 **Vento forte a 1000 ft AGL** (20 kt ou mais numa estação): aviso
+  informativo, para confirmares os limites de vento cruzado da tua aeronave.
+- ⏳ **GAMET a expirar ou fora de validade:** espera pelo próximo, ou confirma
+  que estás a ver o actual.
+
+**✈️ Consulta rápida.** Escolhe um aeródromo ou pista de ultraleves (52
+pontos, com coordenadas oficiais do eVFR) e vês logo a decisão nesse local e
+os motivos. A app lembra-se do último que escolheste.
+
+**📋 Briefing por zonas.** Um cartão por zona, da pior para a melhor:
+- **decisão** (GO / MARGINAL / NO-GO) e percentagem da área;
+- **nome da zona**, pelos aeródromos que lá caem (ex.: "Braga, Porto, Vila
+  Real +5");
+- **valores** de visibilidade, base das nuvens, trovoada, turbulência e gelo;
+- **motivos da decisão**, ou seja, que regra a tornou NO-GO ou MARGINAL;
+- **alcance restrito**: avisos que só se aplicam a parte do que está desenhado
+  (ex.: "só sobre o mar", "apenas 11–15Z — já terminou").
+
+**🗺️ Mapa interactivo.** As zonas a verde, laranja e vermelho sobre o mapa,
+com todos os aeródromos e pistas. Podes aproximar e clicar.
+
+**🌡️ Secção II.** Nível de congelação mínimo, QNH mínimo e tabela de vento e
+temperatura por níveis nas seis estações (Bragança, Porto, Viseu, Lisboa,
+Évora e Faro).
+
+**📄 PDF.** O briefing completo, com o mapa e o texto original do GAMET, para
+guardar ou imprimir.
+
+**🕐 Histórico.** Os últimos GAMETs analisados, para comparar ou voltar a
+abrir.
+
+## 5. Exemplo real
+
+GAMET de 14/10/2026, válido das 15 às 21 UTC:
+
+```
+SFC VIS:N OF N3840 MAR AND COT LCA 0200-5000M FG/BR
+SIG CLD:N OF N3840 MAR AND COT LCA BKN 002-008/012HFT AGL
+TURB:S OF N3700 LCA MOD SFC/FL040
+SIGMET APPLICABLE: AT TIME OF ISSUE NIL
+```
+
+Em linguagem corrente: nevoeiro e neblina, localmente com visibilidade até
+200 m, e nuvens com base entre 200 e 800 ft, a norte de 38°40' (latitude de
+Lisboa), mas só sobre o mar e a faixa costeira; turbulência moderada no
+Algarve.
+
+O que a app mostra:
+- **NO-GO** no mar e na faixa costeira a norte de 38°40' (cerca de 11% da
+  área): base das nuvens a 200 ft, abaixo do mínimo de 300 ft.
+- **GO** no resto do país. A turbulência moderada no Algarve aparece como
+  informação, porque não altera a decisão.
+
+## 6. Como a app decide
+
+Em cada zona, a app aplica estas regras. Fica a pior decisão que se aplicar.
+
+| Condição | Decisão | Porquê |
+|---|---|---|
+| Visibilidade < 1500 m | NO-GO | Abaixo dos mínimos VFR |
+| Visibilidade < 1500 m, mas local (`LCA`) | MARGINAL | Pode ser contornável |
+| Visibilidade < 3000 m | MARGINAL | Perto dos mínimos |
+| Base das nuvens < 300 ft AGL | NO-GO | Sem margem sobre o terreno e obstáculos |
+| Base das nuvens < 500 ft AGL | MARGINAL | Margem reduzida |
+| Trovoada isolada (`ISOL TS`) | MARGINAL | Contornável com cuidado |
+| Trovoada ocasional, frequente ou embebida | NO-GO | Não contornável em segurança |
+| Turbulência ou gelo **severos** | NO-GO | A maioria dos ultraleves não tem margem estrutural nem degelo |
+| Turbulência ou gelo moderados | informativo | Mostrado, mas não muda a decisão |
+| Montanhas obscurecidas (`MT OBSC`) | NO-GO | Risco de voo controlado contra o terreno |
+| Cinzas vulcânicas (`VA`) | NO-GO | — |
+| SIGMET aplicável | NO-GO em toda a área | O GAMET não diz onde é o SIGMET; restringir seria inventar precisão |
+
+**Princípios por trás das regras**
+- **Na dúvida, a leitura conservadora.** Errar para o lado pessimista é
+  incómodo; errar para o lado optimista é perigoso. Quando há vários valores
+  numa zona, conta o pior (visibilidade e base mínimas).
+- **Bases em AMSL** são convertidas para AGL contra a **elevação máxima** do
+  terreno na zona (MEF do SkyDemon por quadrícula de 1° × 30'), ou seja, a
+  pior situação que se encontra lá.
+- **Falhar em voz alta.** Se a app não perceber o texto, avisa. Nunca mostra
+  um GO silencioso.
+- **Sem IA.** A app usa regras fixas e expressões regulares. O mesmo GAMET dá
+  sempre o mesmo resultado, e um erro é sempre localizável e corrigível.
+
+## 7. Como a app desenha as zonas
+
+Não há sectores fixos. Cada fenómeno do GAMET é desenhado na sua área exacta:
+
+1. A área do GAMET, isto é, os limites oficiais da FIR abaixo do FL245, com a
+   fronteira terrestre e a linha de costa.
+2. Cada qualificador corta essa área: `N OF N3840` fica com a parte a norte de
+   38°40'; `MAR` só com o mar; `COT` com uma faixa de 10 km para cada lado da
+   costa.
+3. Todos os fenómenos são sobrepostos, e o mapa fica dividido nas zonas onde a
+   combinação é a mesma.
+4. Em cada zona é aplicada a tabela de decisão; zonas vizinhas com o mesmo
+   resultado e os mesmos motivos são juntas.
+
+Assim, um nevoeiro no Minho não põe Bragança em NO-GO, e uma trovoada no
+Algarve não afecta Lisboa.
+
+## 8. Limitações conhecidas
+
+- **A app só sabe o que o GAMET diz.** Um SIGMET emitido depois do GAMET não
+  aparece até ao GAMET seguinte. Consulta sempre os SIGMET em vigor.
+- **Janelas horárias** (`11/15`) são anotadas, com indicação de se já
+  começaram ou terminaram, mas não mudam a decisão: a previsão pode
+  atrasar-se ou antecipar-se.
+- **Os limiares de decisão** foram definidos pelo autor para ultraleves e
+  aviação geral VFR; não são uma norma oficial.
+- **Estuários** (Tejo, Minho) contam como terra para efeitos de `MAR`/`LAN`.
+- **A faixa costeira** (`COT`) usa 10 km para cada lado da costa; a OACI não
+  fixa uma largura.
+- **O GAMET é uma previsão.** A app pode descodificá-lo na perfeição e o
+  tempo real ser diferente.
+
+## 9. Fontes dos dados
 
 | Dado | Fonte |
 |---|---|
 | GAMET e SIGMET | IPMA — Self-Briefing |
-| Limites da área do GAMET | eAIP Portugal, ENR 2.1 (sectores inferiores da FIR) |
-| Fronteira terrestre | Natural Earth 1:10m, ajustada aos pontos do ENR 2.1 |
+| Limites da área do GAMET | eAIP Portugal, ENR 2.1 — sectores inferiores da FIR (SFC–FL245) |
+| Fronteira terrestre | Natural Earth 1:10m, forçada a passar pelos pontos de fronteira do ENR 2.1 |
 | Linha de costa | NAV Portugal |
-| Aeródromos e pistas UL | eVFR da NAV Portugal (AD 2 e AD 4) |
+| Aeródromos e pistas de ultraleves | eVFR da NAV Portugal (AD 2.2 e AD 4.2) |
 | Relevo (MEF) | SkyDemon |
+| Mapa de fundo | OpenStreetMap |
 
-## Teste contínuo com boletins reais
+## 10. Qualidade e testes
 
-Desde Outubro de 2026, os GAMETs e SIGMETs do IPMA são recolhidos de hora a
-hora (GitHub Actions) e analisados todos os dias. Os boletins e os relatórios
-diários estão no ramo [`dados`](../../tree/dados). Qualquer correcção à app é
-proposta como *pull request* e só entra depois de aprovada.
+- **323 testes automáticos** cobrem a leitura do texto, a geometria, as
+  decisões, os dados aeronáuticos e a app completa. Cada erro alguma vez
+  encontrado tem um teste que impede que volte a aparecer.
+- **Verificação cruzada:** em centenas de GAMETs gerados, a decisão de cada
+  zona é comparada com um cálculo feito directamente ponto a ponto, em cada
+  aeródromo.
+- **Teste contínuo com boletins reais:** desde Outubro de 2026, os GAMETs e
+  SIGMETs do IPMA são recolhidos de hora a hora pelo GitHub Actions e
+  analisados todos os dias (um script automático e uma revisão manual). Os
+  boletins e os relatórios diários estão no ramo [`dados`](../../tree/dados).
+- **Nenhuma alteração entra sem aprovação:** qualquer correcção é proposta
+  como *pull request*, com o boletim real que expôs o problema, e só é
+  aplicada depois de aprovada pelo autor.
 
-## Para programadores
+## 11. Para programadores
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
 streamlit run app.py      # a app
-python3 -m pytest         # 323 testes
+python3 -m pytest         # os testes
 ```
 
-Detalhes técnicos, princípios e armadilhas conhecidas em [`CLAUDE.md`](CLAUDE.md).
+| Ficheiro / pasta | Conteúdo |
+|---|---|
+| `app.py` | A app inteira: recolha, leitura, geometria, decisão, interface e PDF |
+| `tests/` | Testes automáticos |
+| `scripts/recolher_gamet.py` | Recolha de GAMETs e SIGMETs (GitHub Actions) |
+| `scripts/analisar.py` | Análise automática de boletins reais |
+| `.github/workflows/` | Recolha de hora a hora |
+| `CLAUDE.md` | Notas técnicas: arquitectura, princípios, armadilhas conhecidas |
+| ramo `dados` | Boletins recolhidos e relatórios diários |
+
+## 12. Perguntas frequentes
+
+**A app diz GO. Posso voar?**
+Não só por isso. GO significa que o GAMET não prevê nada que viole os mínimos
+VFR nessa zona. Continuas a ter de ver METAR, TAF, SIGMET, NOTAM e as
+condições reais, e de decidir tu.
+
+**Porque é que a minha zona está NO-GO se o aviso é "local" (`LCA`)?**
+Para a visibilidade, `LCA` baixa a decisão para MARGINAL. Para nuvens baixas e
+trovoada não: uma base a 200 ft, mesmo local, pode fechar um vale ou uma
+aproximação.
+
+**Porque é que há turbulência no cartão mas a zona está GO?**
+Turbulência e gelo moderados são mostrados como informação, mas não mudam a
+decisão. Só os severos dão NO-GO.
+
+**O que acontece se o IPMA mudar o site?**
+A app tenta vários endereços conhecidos e explica o que falhou. Podes colar o
+GAMET à mão ou indicar o novo endereço nas opções.
