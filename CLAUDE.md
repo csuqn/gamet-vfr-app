@@ -67,9 +67,13 @@ definir `FIR_POLYGON` — não entram na decisão.
 | TS OCNL / FRQ / EMBD / ISOL_EMBD / GEN | NO-GO |
 | TURB ou ICE **SEV** (ou HVY) | NO-GO |
 | TURB ou ICE MOD | informativo, não altera decisão |
+| MTW (onda de montanha) SEV | NO-GO |
+| MTW MOD | MARGINAL (≠ TURB MOD: descendentes junto ao relevo) |
+| SFC WSPD ≥ 30 kt | NO-GO |
+| SIGWX SQL / FZRA / FZDZ / DS / SS / GR / FC | NO-GO |
 | MT OBSC | NO-GO |
 | VA (cinzas vulcânicas) | NO-GO |
-| SIGMET activo | NO-GO em toda a área |
+| SIGMET activo (no GAMET **ou** na página do IPMA) | NO-GO em toda a área |
 
 TURB e ICE severos forçam NO-GO desde a v23: a maioria dos ultraleves não
 tem sistemas de degelo nem margem estrutural para turbulência severa.
@@ -77,6 +81,14 @@ tem sistemas de degelo nem margem estrutural para turbulência severa.
 O SIGMET aplica-se a toda a FIR porque o campo `SIGMET APPLICABLE` do
 GAMET não descreve geometria — restringi-lo a parte da área seria inventar
 precisão que não temos.
+
+Desde a 1.4 a app também lê os SIGMET/AIRMET da página do IPMA (a mesma
+que traz o GAMET; `extract_bulletins_from_html`, `active_bulletins`), para
+apanhar SIGMETs emitidos depois do GAMET. Só se aplicam ao GAMET carregado
+do IPMA nessa sessão. AIRMETs são mostrados mas não interpretados.
+
+Campos do modelo OACI (Anexo 3) suportados desde a 1.4: `SFC WSPD`, `MTW`
+e, em `SIGWX`, os fenómenos de `_SIGWX_SEVEROS` além da trovoada.
 
 ## Princípios que orientam o código
 
@@ -105,13 +117,14 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-323 testes. Devem passar a 100%.
+346 testes. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
 - `tests/test_data.py` — validade temporal, vento, IPMA, robustez
 - `tests/test_v1.py` — regressões da 1.0, oráculo, fronteira, relevo,
   janela horária e **a app completa** (via `streamlit.testing`)
+- `tests/test_v14.py` — campos OACI novos e SIGMETs do IPMA
 - `tests/conftest.py` — extrai o motor da app sem executar a UI. Os imports
   vêm da própria app (nunca de uma lista fixa — escondia imports em falta)
 

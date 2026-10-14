@@ -60,7 +60,8 @@ secções:
 
 - **Secção I — fenómenos significativos:** visibilidade à superfície
   (`SFC VIS`), nuvens significativas (`SIG CLD`), trovoada e tempo severo
-  (`SIGWX`), turbulência (`TURB`), gelo (`ICE`), montanhas obscurecidas
+  (`SIGWX`), turbulência (`TURB`), gelo (`ICE`), onda de montanha (`MTW`),
+  vento generalizado à superfície (`SFC WSPD`), montanhas obscurecidas
   (`MT OBSC`), cinzas vulcânicas (`VA`) e os SIGMET aplicáveis.
 - **Secção II — informação geral:** sistemas de pressão, nebulosidade,
   vento e temperatura por níveis em seis estações, nível de congelação
@@ -90,8 +91,10 @@ A app também funciona sem internet, com o GAMET colado à mão.
 ## 4. Como ler o briefing
 
 **Avisos no topo**
-- 🚨 **SIGMET aplicável:** a decisão é forçada a NO-GO em toda a área. Lê o
-  SIGMET completo.
+- 🚨 **SIGMET:** a decisão é forçada a NO-GO em toda a área, seja o SIGMET
+  referido pelo GAMET, seja um SIGMET em vigor na página do IPMA que saiu
+  depois do GAMET. Lê o SIGMET completo.
+- ⚠️ **AIRMET:** se existir, é mostrado, mas a app não o interpreta.
 - ⚠️ **Nenhum campo reconhecido:** a app não percebeu o texto. Isto **não**
   significa que o tempo está calmo; confirma o GAMET.
 - 💨 **Vento forte a 1000 ft AGL** (20 kt ou mais numa estação): aviso
@@ -162,9 +165,13 @@ Em cada zona, a app aplica estas regras. Fica a pior decisão que se aplicar.
 | Trovoada ocasional, frequente ou embebida | NO-GO | Não contornável em segurança |
 | Turbulência ou gelo **severos** | NO-GO | A maioria dos ultraleves não tem margem estrutural nem degelo |
 | Turbulência ou gelo moderados | informativo | Mostrado, mas não muda a decisão |
+| Onda de montanha (`MTW`) severa | NO-GO | Risco severo |
+| Onda de montanha (`MTW`) moderada | MARGINAL | Descendentes junto ao relevo que podem exceder a razão de subida de uma aeronave com pouca potência |
+| Vento generalizado à superfície (`SFC WSPD`) ≥ 30 kt | NO-GO | Fora dos limites de qualquer ultraleve |
+| Linha de borrasca, chuva ou chuvisco que gela, tempestade de poeira ou areia, granizo, nuvem funil (`SQL`, `FZRA`, `FZDZ`, `DS`, `SS`, `GR`, `FC`) | NO-GO | Fenómenos severos |
 | Montanhas obscurecidas (`MT OBSC`) | NO-GO | Risco de voo controlado contra o terreno |
 | Cinzas vulcânicas (`VA`) | NO-GO | — |
-| SIGMET aplicável | NO-GO em toda a área | O GAMET não diz onde é o SIGMET; restringir seria inventar precisão |
+| SIGMET em vigor | NO-GO em toda a área | Nem o GAMET nem a lista do IPMA dizem com precisão onde é; restringir seria inventar precisão |
 
 **Princípios por trás das regras**
 - **Na dúvida, a leitura conservadora.** Errar para o lado pessimista é
@@ -197,8 +204,11 @@ Algarve não afecta Lisboa.
 
 ## 8. Limitações conhecidas
 
-- **A app só sabe o que o GAMET diz.** Um SIGMET emitido depois do GAMET não
-  aparece até ao GAMET seguinte. Consulta sempre os SIGMET em vigor.
+- **SIGMETs:** a app lê os que estão em vigor na página do IPMA no momento
+  em que o GAMET é carregado (e indica a hora da verificação). Um SIGMET que
+  saia depois disso só aparece ao carregares de novo. Com um GAMET colado à
+  mão, só conta o campo `SIGMET APPLICABLE` do próprio GAMET.
+- **AIRMETs** são mostrados mas não interpretados.
 - **Janelas horárias** (`11/15`) são anotadas, com indicação de se já
   começaram ou terminaram, mas não mudam a decisão: a previsão pode
   atrasar-se ou antecipar-se.
@@ -224,7 +234,7 @@ Algarve não afecta Lisboa.
 
 ## 10. Qualidade e testes
 
-- **323 testes automáticos** cobrem a leitura do texto, a geometria, as
+- **346 testes automáticos** cobrem a leitura do texto, a geometria, as
   decisões, os dados aeronáuticos e a app completa. Cada erro alguma vez
   encontrado tem um teste que impede que volte a aparecer.
 - **Verificação cruzada:** em centenas de GAMETs gerados, a decisão de cada
@@ -243,7 +253,7 @@ Algarve não afecta Lisboa.
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
 streamlit run app.py      # a app
-python3 -m pytest         # os testes
+python3 -m pytest         # os testes (346)
 ```
 
 | Ficheiro / pasta | Conteúdo |

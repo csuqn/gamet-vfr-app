@@ -28,7 +28,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "1.3"
+APP_VERSION = "1.4"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
 st.title(f"✈️ LPPC GAMET – Motor Cartográfico v{APP_VERSION}")
@@ -108,6 +108,30 @@ def extract_gamet_from_html(raw: str) -> str:
     m = re.search(r"(LPPC\s+GAMET\s+(?:AMD\s+|COR\s+)?VALID\s+.+?=)", text, re.DOTALL)
     return m.group(1).strip() if m else ""
 
+_IPMA_LAST = {"raw": "", "at": None}   # última página recebida com GAMET
+
+_BULLETIN_RE = re.compile(
+    r"(LPPC\s+(?:SIGMET|AIRMET)\s+\S+\s+VALID\s+\d{6}/\d{6}.+?=)", re.DOTALL)
+
+
+def extract_bulletins_from_html(raw: str) -> list:
+    """
+    SIGMET/AIRMET LPPC presentes na página do IPMA (um por bloco <pre>;
+    se a página não tiver blocos, procura no texto todo).
+    """
+    def _limpar(t):
+        t = t.replace("\\n", " ").replace("\\r", " ").replace('\\"', '"').replace("\\/", "/")
+        t = re.sub(r"<[^>]+>", " ", t).replace("&nbsp;", " ").replace("&amp;", "&")
+        return re.sub(r"\s+", " ", t).strip()
+    blocos = re.findall(r"<pre[^>]*>(.*?)</pre>", raw or "", re.DOTALL | re.IGNORECASE) or [raw or ""]
+    out = []
+    for bl in blocos:
+        for m in _BULLETIN_RE.finditer(_limpar(bl)):
+            if m.group(1) not in out:
+                out.append(m.group(1))
+    return out
+
+
 def fetch_gamet_ipma(custom_url: str = "") -> tuple:
     """
     Carrega o GAMET do LPPC do Self-Briefing IPMA (endpoint público).
@@ -155,6 +179,10 @@ def fetch_gamet_ipma(custom_url: str = "") -> tuple:
         reached_ok = True
         gamet = extract_gamet_from_html(resp.text)
         if gamet:
+            # A mesma página traz os SIGMET/AIRMET em vigor — guardada para
+            # extract_bulletins_from_html, sem um segundo pedido ao IPMA
+            _IPMA_LAST["raw"] = resp.text
+            _IPMA_LAST["at"] = datetime.now(timezone.utc)
             return True, gamet
         attempts.append(f"{url} → respondeu, mas sem GAMET do LPPC no conteúdo")
 
@@ -184,6 +212,8 @@ if "gamet_loaded" not in st.session_state:
     if ok:
         st.session_state["gamet_loaded"]    = result
         st.session_state["gamet_loaded_at"] = datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%MZ")
+        st.session_state["ipma_boletins"]    = extract_bulletins_from_html(_IPMA_LAST["raw"])
+        st.session_state["ipma_boletins_at"] = _IPMA_LAST["at"]
     else:
         # Guardar o erro para o mostrar no expander — antes falhava em
         # silêncio e o utilizador só via a caixa de texto vazia
@@ -198,6 +228,8 @@ with st.expander("📡 GAMET do IPMA", expanded=bool(st.session_state.get("gamet
             if ok:
                 st.session_state["gamet_loaded"]    = result
                 st.session_state["gamet_loaded_at"] = datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%MZ")
+                st.session_state["ipma_boletins"]    = extract_bulletins_from_html(_IPMA_LAST["raw"])
+                st.session_state["ipma_boletins_at"] = _IPMA_LAST["at"]
                 st.session_state.pop("gamet_fetch_error", None)
                 st.success("✅ GAMET actualizado!")
             else:
@@ -1145,6 +1177,19 @@ def annotate_window_notes(notas, start_dt, now=None):
         saida.append(f"{n} — {estado}" if estado else n)
     return saida
 
+# Fenómenos de SIGWX (além da trovoada) que forçam NO-GO, com a descrição
+# usada nos motivos. GR isolado = granizo sem trovoada (TSGR conta como TS).
+_SIGWX_SEVEROS = {
+    "SQL":  "linha de borrasca",
+    "FZRA": "chuva que gela",
+    "FZDZ": "chuvisco que gela",
+    "DS":   "tempestade de poeira",
+    "SS":   "tempestade de areia",
+    "FC":   "nuvem funil",
+    "TC":   "ciclone tropical",
+    "GR":   "granizo",
+}
+
 # Base de nuvem em SIG CLD — ver comentário no estado "CLD" de parse_gamet.
 _CLD_BASE_RE = re.compile(
     r"(?<![\dA-Z])(?P<base>SFC|\d{3,5})"
@@ -1171,6 +1216,11 @@ def parse_gamet(text):
     secn1 = re.sub(r"(\bTURB\b\s*:?)", r"\n\1", secn1)
     secn1 = re.sub(r"(\bICE\b\s*:?)", r"\n\1", secn1)
     secn1 = re.sub(r"(\bMT\s+OBSC\b)", r"\n\1", secn1)
+    # Campos do modelo OACI (Anexo 3) que até à 1.3 eram ignorados:
+    # vento generalizado à superfície e onda de montanha. "MTW" só abre
+    # campo com dois pontos — "SEV MTW" dentro de TURB não é um campo.
+    secn1 = re.sub(r"(\bSFC\s+WSPD\b\s*:?)", r"\n\1", secn1)
+    secn1 = re.sub(r"(\bMTW\s*:)", r"\n\1", secn1)
     secn1 = re.sub(r"(\bVA\b\s*:?)", r"\n\1", secn1)
     secn1 = re.sub(r"(SIGMET\s+APPLICABLE)", r"\n\1", secn1)
 
@@ -1216,6 +1266,10 @@ def parse_gamet(text):
             new_state = "ICE"
         elif re.match(r"MT\s+OBSC", line):
             new_state = "MT_OBSC"
+        elif re.match(r"SFC\s+WSPD", line):
+            new_state = "WSPD"
+        elif re.match(r"MTW\s*:", line):
+            new_state = "MTW"
         elif re.match(r"VA\b", line):
             new_state = "VA"
         elif re.match(r"SECN\s+I\b", line):
@@ -1229,7 +1283,7 @@ def parse_gamet(text):
             current_window = ""            # reset janela temporal
             # Remover a keyword da linha para processar só o conteúdo
             content = re.sub(
-                r"^(SFC\s+VIS\s*:?|SIG\s+VIS\s*:?|VIS\s*:|SIG\s+CLD\s*:?|CLD\s*:|SIGWX\s*:?|TURB\s*:?|ICE\s*:?|MT\s+OBSC\s*:?|VA\s*:?)\s*",
+                r"^(SFC\s+VIS\s*:?|SIG\s+VIS\s*:?|VIS\s*:|SIG\s+CLD\s*:?|CLD\s*:|SIGWX\s*:?|TURB\s*:?|ICE\s*:?|MT\s+OBSC\s*:?|SFC\s+WSPD\s*:?|MTW\s*:|VA\s*:?)\s*",
                 "", line
             ).strip()
         else:
@@ -1399,6 +1453,38 @@ def parse_gamet(text):
                     ts_qualifier = "GEN"
                 blocks.append(MetBlock("TS", poly, ts_qualifier, qualifier, surface=surface, window=window))
 
+            # Outros fenómenos de SIGWX, todos NO-GO para VFR. Até à 1.3 só
+            # a trovoada era lida e "SIGWX: SEV SQL" passava como GO.
+            severos = [c for c in _SIGWX_SEVEROS if re.search(rf"\b{c}\b", content)]
+            if severos:
+                blocks.append(MetBlock("WX", poly, "/".join(severos), qualifier,
+                                       surface=surface, window=window))
+
+        elif state == "WSPD":
+            # Vento médio generalizado à superfície (o GAMET só o inclui
+            # acima de 30 kt). Fica o valor mais alto, por ser o conservador.
+            kts = []
+            for m in re.finditer(r"(\d{2,3})(?:-(\d{2,3}))?\s*(KT|MPS)\b", content):
+                vals = [int(v) for v in m.groups()[:2] if v]
+                fator = 1.944 if m.group(3) == "MPS" else 1.0
+                kts.append(round(max(vals) * fator))
+            if kts:
+                blocks.append(MetBlock("WSPD", poly, max(kts), qualifier,
+                                       surface=surface, window=window))
+
+        elif state == "MTW":
+            layer_m = re.search(r"(SFC/FL\d+|FL\d+/FL\d+|ABV\s+FL\d+|BLW\s+FL\d+)", content)
+            if "HVY" in content or "SEV" in content:
+                severity = "SEV"
+            elif "MOD" in content:
+                severity = "MOD"
+            else:
+                severity = None
+            if severity:
+                blocks.append(MetBlock("MTW", poly, severity, qualifier,
+                                       layer_m.group(1) if layer_m else "",
+                                       surface=surface, window=window))
+
         elif state == "TURB":
             layer = ""
             layer_m = re.search(r"(SFC/FL\d+|FL\d+/FL\d+|SFC/\d+FT|ABV\s+FL\d+|BLW\s+FL\d+)", content)
@@ -1495,6 +1581,7 @@ _PHENOM_LABEL = {
     "VIS": "VIS", "BASE_AGL": "BASE", "BASE_AMSL": "BASE",
     "TS": "TS", "TURB": "TURB", "ICE": "ICE",
     "MT_OBSC": "MT OBSC", "VA": "VA",
+    "WSPD": "SFC WSPD", "MTW": "MTW", "WX": "SIGWX",
 }
 
 
@@ -1678,7 +1765,8 @@ def compute_dynamic_regions(blocks):
                 if b.polygon is not None and not b.polygon.is_empty
                 and b.polygon.geom_type in ("Polygon", "MultiPolygon")
                 and b.phenomenon in ("VIS", "BASE_AGL", "BASE_AMSL", "TS",
-                                       "TURB", "ICE", "MT_OBSC", "VA")]
+                                       "TURB", "ICE", "MT_OBSC", "VA",
+                                       "WSPD", "MTW", "WX")]
 
     def _empty_region():
         dec, vis, base, ts, turb, turb_layers, ice, ice_layers, mt_obsc, va, reasons = decision([])
@@ -1920,6 +2008,40 @@ def _merge_slivers(regions, min_area_frac=0.015):
     return grandes + orfas
 
 
+def active_bulletins(bulletins, now=None):
+    """
+    A partir dos SIGMET/AIRMET LPPC lidos da página do IPMA, devolve
+    (sigmets_activos, airmets_activos): os que estão dentro da validade e
+    não foram cancelados por um "CNL SIGMET n". Os próprios boletins de
+    cancelamento nunca contam como activos.
+
+    Na dúvida (validade ilegível), o boletim conta como activo — é a
+    leitura conservadora.
+    """
+    now = now or datetime.now(timezone.utc)
+    cancelados = set()
+    for b in bulletins:
+        for m in re.finditer(r"\bCNL\s+(SIGMET|AIRMET)\s+(\S+)", b):
+            cancelados.add((m.group(1), m.group(2)))
+    sigmets, airmets = [], []
+    for b in bulletins:
+        cab = re.match(r"LPPC\s+(SIGMET|AIRMET)\s+(\S+)\s+VALID\s+(\d{2})(\d{2})(\d{2})/(\d{2})(\d{2})(\d{2})", b)
+        if not cab:
+            continue
+        tipo, num = cab.group(1), cab.group(2)
+        if re.search(r"\bCNL\s+(SIGMET|AIRMET)\b", b) or (tipo, num) in cancelados:
+            continue
+        d1, h1, m1, d2, h2, m2 = (int(cab.group(i)) for i in range(3, 9))
+        ini = _build_utc_date(d1, h1, m1, now)
+        fim = _build_utc_date(d2, h2, m2, ini) if ini else None
+        if fim is not None and ini is not None and fim <= ini:
+            fim = fim + timedelta(days=1)
+        activo = (ini is None or fim is None) or (ini <= now < fim)
+        if activo:
+            (sigmets if tipo == "SIGMET" else airmets).append(b)
+    return sigmets, airmets
+
+
 def apply_sigmet_override(regions, sigmet_text):
     """
     Quando existe um SIGMET activo aplicável ao GAMET, força NO-GO em todas
@@ -2073,6 +2195,34 @@ def decision(events):
         decision_level = "NO-GO"
         layer_note = f" {'/'.join(ice_layers)}" if ice_layers else ""
         reasons.append(f"ICE SEV{layer_note} — risco severo")
+
+    # ---- Vento generalizado à superfície (SFC WSPD) — NO-GO a partir de
+    # 30 kt: fora dos limites de qualquer ultraleve ----
+    wspd_vals = [v for t, v, *_ in events if t == "WSPD"]
+    if wspd_vals and max(wspd_vals) >= 30:
+        decision_level = "NO-GO"
+        reasons.append(f"SFC WSPD {max(wspd_vals)}KT ≥ 30KT (vento à superfície)")
+
+    # ---- Onda de montanha (MTW). SEV → NO-GO; MOD → MARGINAL, ao contrário
+    # da turbulência moderada: as descendentes junto ao relevo são perigosas
+    # para aeronaves com pouca potência ----
+    mtw_vals = [v for t, v, *_ in events if t == "MTW"]
+    mtw_layers = [layer for t, v, q, layer in events if t == "MTW" and layer]
+    mtw_note = f" {'/'.join(mtw_layers)}" if mtw_layers else ""
+    if "SEV" in mtw_vals:
+        decision_level = "NO-GO"
+        reasons.append(f"MTW SEV{mtw_note} (onda de montanha) — risco severo")
+    elif "MOD" in mtw_vals:
+        if decision_level == "GO":
+            decision_level = "MARGINAL"
+        reasons.append(f"MTW MOD{mtw_note} (onda de montanha)")
+
+    # ---- Outros fenómenos severos de SIGWX — NO-GO ----
+    wx_codes = sorted({c for t, v, *_ in events if t == "WX" for c in v.split("/")})
+    if wx_codes:
+        decision_level = "NO-GO"
+        desc = ", ".join(f"{c} ({_SIGWX_SEVEROS.get(c, c)})" for c in wx_codes)
+        reasons.append(f"SIGWX {desc}")
 
     return decision_level, vis, base, ts_vals, turb_vals, turb_layers, ice_vals, ice_layers, mt_obsc, va_vals, reasons
 
@@ -2350,6 +2500,42 @@ if st.session_state.get("_active_gamet_text"):
     dynamic_regions = compute_dynamic_regions(blocks)
 
     has_sigmet, sigmet_text = extract_sigmet_applicable(gamet_text)
+
+    # SIGMETs lidos directamente da página do IPMA. Cobrem o caso que o
+    # GAMET não cobre: um SIGMET emitido DEPOIS do GAMET, que este ainda
+    # dá como "NIL". Só se aplicam ao GAMET que veio do IPMA nesta sessão
+    # (o mais recente): para um GAMET colado à mão ou do histórico, os
+    # SIGMETs de agora podem não ter nada a ver com ele.
+    _bol = st.session_state.get("ipma_boletins")
+    _bol_at = st.session_state.get("ipma_boletins_at")
+    _gamet_e_o_carregado = gamet_text.strip() == st.session_state.get("gamet_loaded", "").strip()
+    sig_ipma, air_ipma = ([], [])
+    if _bol is not None and _gamet_e_o_carregado:
+        sig_ipma, air_ipma = active_bulletins(_bol)
+    if sig_ipma:
+        dynamic_regions = apply_sigmet_override(
+            dynamic_regions, " | ".join(b[:80] for b in sig_ipma))
+        st.error(
+            f"🚨 **{len(sig_ipma)} SIGMET em vigor no IPMA**"
+            + ("" if has_sigmet else " — **não referido no GAMET**, provavelmente "
+               "emitido depois dele") + ". A decisão foi forçada a NO-GO em toda a "
+            "área. Lê o SIGMET completo antes de voar:\n\n"
+            + "\n\n".join(f"`{b}`" for b in sig_ipma)
+        )
+    if air_ipma:
+        st.warning(
+            f"⚠️ **{len(air_ipma)} AIRMET em vigor no IPMA.** A app mostra-o mas "
+            "não o interpreta — lê-o antes de voar:\n\n"
+            + "\n\n".join(f"`{b}`" for b in air_ipma)
+        )
+    if _bol is None or not _gamet_e_o_carregado:
+        st.info("ℹ️ SIGMETs do IPMA **não verificados**: o GAMET em análise não "
+                "foi carregado do IPMA nesta sessão. Só conta o campo "
+                "\"SIGMET APPLICABLE\" do próprio GAMET.")
+    elif not sig_ipma and not air_ipma and _bol_at:
+        st.caption(f"✅ Sem SIGMET/AIRMET LPPC em vigor no IPMA "
+                   f"(verificado às {_bol_at.strftime('%H:%MZ')}).")
+
     if has_sigmet:
         dynamic_regions = apply_sigmet_override(dynamic_regions, sigmet_text)
         st.error(
@@ -2614,14 +2800,20 @@ if st.session_state.get("_active_gamet_text"):
 
 **Campos:**
 - 👁️ VIS – Visibilidade horizontal em metros. LCA = condição localizada (não cobre toda a área)
-- ☁️ BASE – Base das nuvens convectivas significativas em ft AGL (acima do solo)
+- ☁️ BASE – Base das nuvens significativas (SIG CLD) em ft AGL (acima do solo). Bases em AMSL são convertidas contra a elevação máxima da zona
 - ⛈️ TS – Trovoadas: ISOL / OCNL / FRQ / EMBD
 - 🌪 TURB – Turbulência: MOD (moderada) / SEV (severa)
 - ❄️ ICE – Gelo em voo: MOD (moderado) / SEV (severo)
 
-**Regras de decisão TS:**
-- ISOL → MARGINAL
-- OCNL / GEN / ISOL/EMBD / EMBD / FRQ → NO-GO
+**Regras de decisão:**
+- VIS < 1500 m → NO-GO (MARGINAL se LCA) · VIS < 3000 m → MARGINAL
+- BASE < 300 ft AGL → NO-GO · BASE < 500 ft AGL → MARGINAL
+- TS ISOL → MARGINAL · TS OCNL / GEN / ISOL/EMBD / EMBD / FRQ → NO-GO
+- TURB ou ICE SEV/HVY → NO-GO (MOD é só informativo)
+- MTW (onda de montanha) SEV → NO-GO · MOD → MARGINAL
+- SFC WSPD ≥ 30 kt → NO-GO
+- SIGWX: SQL, FZRA, FZDZ, DS, SS, GR, FC → NO-GO
+- MT OBSC, VA, SIGMET em vigor → NO-GO
 
 ---
 
@@ -2638,7 +2830,7 @@ if st.session_state.get("_active_gamet_text"):
 - LCA significa que a má visibilidade é localizada — pode ser nevoeiro numa zona específica, não em toda a rota.
 
 **Base das nuvens (BASE):**
-- Indica a que altitude as nuvens convectivas (trovoadas ou cumulus) começam.
+- Indica a que altura acima do solo começam as nuvens significativas previstas no GAMET (nebulosidade fragmentada ou encoberta, ou nuvens convectivas).
 - Abaixo de 500ft AGL tens muito pouco espaço para voar por baixo das nuvens.
 - Abaixo de 300ft AGL o voo VFR é praticamente impossível em segurança.
 
@@ -2665,6 +2857,11 @@ if st.session_state.get("_active_gamet_text"):
 **Outros fenómenos:**
 - ⛰️ MT OBSC – Montanhas obscurecidas por nuvens ou neblina. NO-GO imediato para VFR — terreno elevado invisível.
 - 🌋 VA – Cinzas vulcânicas. NO-GO imediato — perigo para motores e visibilidade.
+- 💨 SFC WSPD – Vento médio generalizado à superfície (o GAMET só o indica a partir de 30 kt). NO-GO: fora dos limites de qualquer ultraleve.
+- 🌊 MTW – Onda de montanha. SEV → NO-GO. MOD → MARGINAL: as descendentes junto ao relevo podem exceder a razão de subida de uma aeronave com pouca potência.
+- SQL – Linha de borrasca · FZRA / FZDZ – Chuva / chuvisco que gela · DS / SS – Tempestade de poeira / areia · GR – Granizo · FC – Nuvem funil. Todos NO-GO.
+- 🚨 SIGMET – Aviso de fenómeno perigoso. A app usa o campo "SIGMET APPLICABLE" do GAMET **e** os SIGMETs em vigor na página do IPMA (que podem ter saído depois do GAMET). Qualquer um deles põe NO-GO em toda a área — lê sempre o SIGMET completo.
+- AIRMET – Mostrado se existir, mas não interpretado pela app.
 - BLW – Abaixo de (ex: VIS BLW 1500M → visibilidade inferior a 1500m).
 - ABV – Acima de (ex: VIS ABV 5000M → visibilidade superior a 5000m).
 - HVY – Intensidade elevada (equivale a SEV para decisão VFR).
