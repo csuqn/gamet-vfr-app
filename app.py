@@ -28,7 +28,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "1.0"
+APP_VERSION = "1.2"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
 st.title(f"✈️ LPPC GAMET – Motor Cartográfico v{APP_VERSION}")
@@ -241,38 +241,26 @@ gamet_text = st.text_area(
 )
 
 # -------------------------------------------------
-# SECTORES
+# GEOGRAFIA — área do GAMET, costa e fronteira
 # -------------------------------------------------
+# Fonte dos limites: eAIP Portugal, ENR 2.1 (27-NOV-2025). O GAMET LPPC
+# cobre a área continental abaixo do FL150, que corresponde aos sectores
+# INFERIORES da FIR (ENR 2.1.3, SFC–FL245): NORTH LOWER (3.1), CENTRE
+# LOWER (6.1) e SOUTH LOWER (8.1). Os sectores superiores incluem espaço
+# aéreo delegado sobre Espanha e não servem para isto — até à 1.0 a app
+# usava, por engano, dois vértices deles (415203N 0085037W e 403856N
+# 0091500W) e um limite sudoeste simplificado.
 
-SECTOR_NORTE = Polygon([
-    (-8.843611, 41.867500), (-6.850000, 41.900000),
-    (-6.621944, 41.700556), (-6.818333, 40.399444),
-    (-8.016667, 39.383333), (-10.000000, 38.900000),
-    (-9.784722, 39.348611), (-9.442500, 40.199722),
-    (-9.368056, 40.382222), (-9.250000, 40.648889),
-    (-9.186389, 40.827778),
-]).buffer(0)
+def _dms(token):
+    """'415308N0085015W' (ou com espaço) → (lon, lat) em graus decimais."""
+    m = re.fullmatch(r"(\d{2})(\d{2})(\d{2})N\s*(\d{3})(\d{2})(\d{2})W", token.strip())
+    if not m:
+        raise ValueError(f"coordenada inválida: {token!r}")
+    g = [int(v) for v in m.groups()]
+    return (-(g[3] + g[4] / 60 + g[5] / 3600), g[0] + g[1] / 60 + g[2] / 3600)
 
-SECTOR_CENTRO = Polygon([
-    (-6.818333, 40.399444), (-7.230000, 37.999444),
-    (-9.000000, 38.000000), (-10.000000, 38.000000),
-    (-10.000000, 38.900000), (-8.016667, 39.383333),
-]).buffer(0)
-
-SECTOR_SUL = Polygon([
-    (-7.230000, 37.999444), (-7.383333, 35.966667),
-    (-10.733333, 35.966667), (-9.000000, 38.000000),
-]).buffer(0)
-
-ZONES = {
-    "SECTOR NORTE": SECTOR_NORTE,
-    "SECTOR CENTRO": SECTOR_CENTRO,
-    "SECTOR SUL": SECTOR_SUL,
-}
-
-# Contorno dos antigos sectores — só os limites MARÍTIMOS são usados
-# (ver FRONTEIRA TERRESTRE, mais abaixo).
-_FIR_SECTORES = unary_union(list(ZONES.values()))
+def _dms_list(raw):
+    return [_dms(t) for t in raw.split()]
 
 # -------------------------------------------------
 # LINHA DE COSTA
@@ -280,9 +268,6 @@ _FIR_SECTORES = unary_union(list(ZONES.values()))
 # Costa continental portuguesa, do Guadiana (Vila Real de Santo António)
 # ao Minho (Caminha), com 67 pontos e espaçamento médio de ~12 km.
 # Fornecida pelo utilizador a partir de dados aeronáuticos.
-#
-# Permite recortar geograficamente os qualificadores MAR / LAN / COT dos
-# GAMETs, em vez de os tratar apenas como anotação textual.
 _COASTLINE_RAW = (
     "370943N0072400W 371035N0072708W 370932N0073135W 370741N0073559W "
     "370431N0074045W 365750N0075207W 365741N0075334W 365804N0075516W "
@@ -303,34 +288,24 @@ _COASTLINE_RAW = (
     "414508N0085303W 415021N0085241W 415220N0085233W"
 )
 
-def _parse_coastline(raw):
-    """Converte a lista DMS em pares (lon, lat) para shapely."""
-    pontos = []
-    for token in raw.split():
-        m = re.fullmatch(r"(\d{2})(\d{2})(\d{2})N(\d{3})(\d{2})(\d{2})W", token)
-        if not m:
-            continue
-        lat = int(m.group(1)) + int(m.group(2)) / 60 + int(m.group(3)) / 3600
-        lon = -(int(m.group(4)) + int(m.group(5)) / 60 + int(m.group(6)) / 3600)
-        pontos.append((lon, lat))
-    return pontos
-
-_COAST_POINTS = _parse_coastline(_COASTLINE_RAW)
+_COAST_POINTS = _dms_list(_COASTLINE_RAW)
 COASTLINE = LineString(_COAST_POINTS)
 
 # -------------------------------------------------
 # FRONTEIRA TERRESTRE PORTUGAL–ESPANHA
 # -------------------------------------------------
-# Do Guadiana (foz) ao Minho (junto a Vila Nova de Cerveira), 343 pontos
-# (lon,lat). Fonte: Natural Earth 1:10m, "admin_0_boundary_lines_land"
-# (domínio público), simplificada a 0,002° — desvio máximo de ~0,2 km face
-# à fonte, abaixo da própria precisão da escala 1:10m (~1 km).
+# O ENR 2.1 define o troço terrestre só como "along Portuguese/Spanish
+# border", sem coordenadas intermédias. Construção:
 #
-# Até à v31 a fronteira terrestre da FIR era uma linha de 5 pontos que
-# deixava de fora Miranda do Douro (42 km), Melgaço (26 km), Barrancos
-# (25 km), Cerval e Bragança, e incluía território espanhol junto ao
-# Guadiana. A FIR LPPC segue a fronteira nacional em terra; se tiveres as
-# coordenadas oficiais do eAIP (ENR 2.1), substituem estas.
+# 1. Traçado base: Natural Earth 1:10m, "admin_0_boundary_lines_land"
+#    (domínio público), simplificado a 0,002°. Vai de junto à foz do
+#    Guadiana até V. N. de Cerveira — não inclui os estuários.
+# 2. Âncoras oficiais: os pontos do ENR 2.1 onde um espaço aéreo começa
+#    ou acaba "along Portuguese/Spanish border" estão, por definição, na
+#    fronteira. A linha é forçada a passar exactamente por eles. Antes do
+#    ajuste a Natural Earth desviava-se deles 0,04–3,3 km.
+# 3. Extremos: foz do Minho (415308N 0085015W) e foz do Guadiana
+#    (370730N 0072318W), também do ENR 2.1.
 _BORDER_RAW = (
     "-7.4144,37.1928 -7.4342,37.2593 -7.4276,37.2745 -7.4374,37.3073 "
     "-7.4450,37.3868 -7.4623,37.4179 -7.4600,37.4291 -7.4689,37.4756 "
@@ -420,33 +395,85 @@ _BORDER_RAW = (
     "-8.6913,41.9896 -8.7170,41.9838 -8.7508,41.9690 "
 )
 
-_BORDER_POINTS = [tuple(float(v) for v in par.split(",")) for par in _BORDER_RAW.split()]
 
-# Terra portuguesa = anel fechado pela costa (Guadiana → Minho) e pela
-# fronteira (Minho → Guadiana). O troço final do estuário do Minho, entre
-# Caminha e o início da fronteira da Natural Earth, fica como terra — como
-# o estuário do Tejo.
-_LAND_PT = Polygon(_COAST_POINTS + _BORDER_POINTS[::-1]).buffer(0)
+_FOZ_MINHO    = _dms("415308N0085015W")   # NORTH LOWER 3.1
+_FOZ_GUADIANA = _dms("370730N0072318W")   # SOUTH LOWER 8.1
+_LIM_NORTE_CENTRO = _dms("402358N0064906W")   # sectores 3.1 / 6.1
+_LIM_CENTRO_SUL   = _dms("375957N0071223W")   # sectores 6.1 / 8.1
 
-# Mar da FIR = a parte da área antiga a oeste da costa. Os limites
-# marítimos dos sectores são os oficiais; o que estava errado era só o
-# lado terrestre.
-_old_maxx = _FIR_SECTORES.bounds[2]
-_old_land = Polygon(
-    _COAST_POINTS
-    + [(_COAST_POINTS[-1][0], 43.0), (_old_maxx + 1, 43.0),
-       (_old_maxx + 1, _COAST_POINTS[0][1])]
-).buffer(0)
-# O fecho sobe primeiro para norte a partir do Minho: fechar logo para
-# leste deixava a faixa a norte de 41,87°N classificada como "mar" e
-# abria buracos na FIR em pleno Gerês.
-_SEA_PT = _FIR_SECTORES.difference(_old_land)
+# Outros pontos do ENR 2.1 que iniciam/terminam "along border"
+_BORDER_ANCHORS = _dms_list(
+    "414909N0080902W 414849N0080335W "    # NORTH UPPER
+    "415145N0072708W "                    # PORTO TMA
+    "412853N0061708W "                    # NORTH UPPER (Douro)
+    "390700N0070100W 384917N0070505W "    # CENTRE UPPER
+    "381812N0071047W "                    # CENTRE UPPER
+    "375928N0071409W 371016N0072340W "    # SOUTH UPPER
+    "372503N0072636W"                     # FARO TMA
+) + [_LIM_NORTE_CENTRO, _LIM_CENTRO_SUL]
 
-_fir = unary_union([_LAND_PT, _SEA_PT]).buffer(0)
-# Garantia: a FIR é um polígono único e sem buracos.
-assert _fir.geom_type == "Polygon", _fir.geom_type
-FIR_POLYGON = Polygon(_fir.exterior)
-LAND_POLYGON = _LAND_PT.intersection(FIR_POLYGON)
+def _build_border():
+    """Fronteira Minho → Guadiana, a passar exactamente pelas âncoras."""
+    from shapely.ops import substring
+    ne = [tuple(float(v) for v in par.split(",")) for par in _BORDER_RAW.split()]
+    base = LineString([_FOZ_MINHO] + ne[::-1] + [_FOZ_GUADIANA])
+    marcos = sorted([(0.0, _FOZ_MINHO), (base.length, _FOZ_GUADIANA)]
+                    + [(base.project(Point(p)), p) for p in _BORDER_ANCHORS])
+    coords = [_FOZ_MINHO]
+    for (d0, _p0), (d1, p1) in zip(marcos, marcos[1:]):
+        troco = list(substring(base, d0, d1).coords)
+        coords.extend(troco[1:-1])     # interior do troço da Natural Earth
+        coords.append(p1)              # e a âncora oficial, exacta
+    linha = LineString(coords)
+    # Falhar em voz alta: uma âncora mal ordenada criaria um zigue-zague
+    assert linha.is_simple, "fronteira com auto-intersecção"
+    return linha
+
+BORDER_LINE = _build_border()
+
+def _border_between(a, b):
+    """Troço da fronteira entre dois pontos dela, de a para b."""
+    from shapely.ops import substring
+    d0, d1 = BORDER_LINE.project(Point(a)), BORDER_LINE.project(Point(b))
+    pts = list(substring(BORDER_LINE, d0, d1).coords)
+    return [a] + pts[1:-1] + [b]
+
+# -------------------------------------------------
+# SECTORES INFERIORES (ENR 2.1.3, SFC–FL245)
+# -------------------------------------------------
+SECTOR_NORTE = Polygon(   # NORTH LOWER SECTOR 3.1
+    _border_between(_FOZ_MINHO, _LIM_NORTE_CENTRO)
+    + _dms_list("392300N0080100W 385400N0100000W 392055N0094705W "
+                "401159N0092633W 402256N0092205W 403856N0091505W "
+                "404940N0091111W")
+)
+SECTOR_CENTRO = Polygon(  # CENTRE LOWER SECTOR 6.1
+    _border_between(_LIM_NORTE_CENTRO, _LIM_CENTRO_SUL)
+    + _dms_list("380000N0090000W 380000N0091200W 380000N0092800W "
+                "380000N0100000W 385400N0100000W 392300N0080100W")
+)
+SECTOR_SUL = Polygon(     # SOUTH LOWER SECTOR 8.1
+    _border_between(_LIM_CENTRO_SUL, _FOZ_GUADIANA)
+    + _dms_list("364016N0072311W 355800N0072300W 355800N0104400W "
+                "380000N0092800W 380000N0091200W 380000N0090000W")
+)
+
+ZONES = {
+    "SECTOR NORTE": SECTOR_NORTE,
+    "SECTOR CENTRO": SECTOR_CENTRO,
+    "SECTOR SUL": SECTOR_SUL,
+}
+for _nome, _sec in ZONES.items():
+    assert _sec.is_valid, f"{_nome} inválido"
+
+_fir = unary_union(list(ZONES.values()))
+# Garantia: a área é um polígono único e sem buracos.
+assert _fir.geom_type == "Polygon" and not _fir.interiors, _fir.geom_type
+FIR_POLYGON = _fir
+
+# Terra = anel fechado pela costa (Guadiana → Minho) e pela fronteira
+# (Minho → Guadiana). Os estuários do Minho e do Tejo contam como terra.
+LAND_POLYGON = Polygon(_COAST_POINTS + list(BORDER_LINE.coords)).buffer(0).intersection(FIR_POLYGON)
 SEA_POLYGON = FIR_POLYGON.difference(LAND_POLYGON)
 
 # Faixa costeira (COT): banda de ~10 km para cada lado da linha, que é a
@@ -476,114 +503,84 @@ def surface_polygon(surface):
 FIR_MINX, FIR_MINY, FIR_MAXX, FIR_MAXY = FIR_POLYGON.bounds
 
 # -------------------------------------------------
-# RELEVO — elevação MÁXIMA por quadrícula de 0,5°
+# RELEVO — MEF (Maximum Elevation Figure) por quadrícula de 1° × 30'
 # -------------------------------------------------
-# Usada na conversão AMSL→AGL das bases de nuvem. Até à v31 era uma
-# interpolação (IDW) de 11 pontos, avaliada num único ponto por zona:
-# subestimava a Serra da Estrela em ~3000 ft, Monchique em ~2700 ft, e com
-# "BKN 050HFT AMSL" dava GO em toda a FIR com nuvem colada às serras.
+# Usada na conversão AMSL→AGL das bases de nuvem: a base AGL é calculada
+# contra a elevação MÁXIMA da quadrícula, ou seja, a pior que um piloto
+# encontra nessa zona. (Até à v31 era uma interpolação de 11 pontos que
+# subestimava a Estrela em ~3000 ft; na 1.0/1.1 uma grelha aproximada.)
 #
-# Agora: cada quadrícula guarda a elevação máxima do terreno lá dentro e a
-# conversão usa SEMPRE o máximo das quadrículas que a zona toca — a base
-# AGL calculada é a pior que um piloto encontra nessa zona.
+# Fonte: MEF do SkyDemon, lidos pelo utilizador e conferidos em capturas de
+# ecrã (out-2026). Incluem obstáculos e margem — mais adequados a isto do
+# que a altitude pura do terreno. NÃO são a carta oficial da NAV Portugal.
+# Conferência com cumes conhecidos: Torre 6539 ft → 6900; Larouco 5036 →
+# 5400; Marão 4642 → 5000; Fóia 2959 → 3300; Montejunto 2185 → 2500.
 #
-# ⚠ VALORES APROXIMADOS, arredondados por excesso a partir dos cumes
-# conhecidos de cada quadrícula (ex.: Torre 1993 m, Larouco 1535 m, Marão
-# 1415 m, Fóia 902 m). NÃO são dados oficiais. Devem ser substituídos
-# pelos valores de elevação máxima da carta VFR 1:500 000 (eVFR) quando
-# disponíveis. Chave: (latitude sul, longitude oeste) da quadrícula.
-_TERRAIN_TILE = 0.5
+# Quadrículas de 1° de longitude × 30' de latitude, como as do SkyDemon.
+# Chave: (latitude sul, longitude oeste). Valores em pés.
+_TILE_LAT = 0.5
+_TILE_LON = 1.0
+_MEF_MAR_NAO_LIDO = 600   # quadrículas só de mar sem MEF legível: o
+                          # maior valor visto em quadrículas de mar
 _TERRAIN_MAX_FT = {
-    # 42.0–42.5 N — Alto Minho (Melgaço, Castro Laboreiro)
-    (42.0, -9.0): 1500, (42.0, -8.5): 4400,
-    # 41.5–42.0 N — Arga, Peneda-Gerês, Larouco, Montesinho
-    (41.5, -9.0): 2800, (41.5, -8.5): 5100, (41.5, -8.0): 5100,
-    (41.5, -7.5): 4300, (41.5, -7.0): 5000, (41.5, -6.5): 2900,
-    # 41.0–41.5 N — Porto, Aboboreira, Marão/Alvão, Bornes
-    (41.0, -9.0): 1500, (41.0, -8.5): 3400, (41.0, -8.0): 4800,
-    (41.0, -7.5): 3600, (41.0, -7.0): 4100, (41.0, -6.5): 2900,
-    # 40.5–41.0 N — Freita/Caramulo, Montemuro, Lapa, Guarda/Marofa
-    (40.5, -9.0): 1200, (40.5, -8.5): 3800, (40.5, -8.0): 4700,
-    (40.5, -7.5): 3600, (40.5, -7.0): 3600,
-    # 40.0–40.5 N — Lousã, ESTRELA, Gardunha, Malcata
-    (40.0, -9.0): 1000, (40.0, -8.5): 4100, (40.0, -8.0): 6600,
-    (40.0, -7.5): 6300, (40.0, -7.0): 3700,
-    # 39.5–40.0 N — Aire/Candeeiros, Alvelos, Beira Baixa
-    (39.5, -9.5): 400,  (39.5, -9.0): 2400, (39.5, -8.5): 3500,
-    (39.5, -8.0): 3700, (39.5, -7.5): 2900, (39.5, -7.0): 2900,
-    # 39.0–39.5 N — Montejunto, Ribatejo, São Mamede
-    (39.0, -9.5): 2300, (39.0, -9.0): 2200, (39.0, -8.5): 1300,
-    (39.0, -8.0): 1500, (39.0, -7.5): 3500, (39.0, -7.0): 2000,
-    # 38.5–39.0 N — Sintra, Lisboa, Alentejo, Ossa
-    (38.5, -10.0): 500, (38.5, -9.5): 1900, (38.5, -9.0): 1500,
-    (38.5, -8.5): 1500, (38.5, -8.0): 2300, (38.5, -7.5): 2300,
-    (38.5, -7.0): 1500,
-    # 38.0–38.5 N — Espichel, Arrábida, Grândola, Portel, Moura/Barrancos
-    (38.0, -9.5): 600,  (38.0, -9.0): 1800, (38.0, -8.5): 1400,
-    (38.0, -8.0): 1500, (38.0, -7.5): 1900, (38.0, -7.0): 1900,
-    # 37.5–38.0 N — Cercal, Odemira, Mértola
-    (37.5, -9.0): 1300, (37.5, -8.5): 1700, (37.5, -8.0): 1700,
-    (37.5, -7.5): 1400,
-    # 37.0–37.5 N — MONCHIQUE, Caldeirão, Sotavento
-    (37.0, -9.0): 3200, (37.0, -8.5): 2700, (37.0, -8.0): 2100,
-    (37.0, -7.5): 1400,
-    # 36.5–37.0 N — pontas da costa algarvia
-    (36.5, -9.0): 300,  (36.5, -8.0): 300,
+    #            10–9°W            9–8°W             8–7°W             7–6°W
+    (42.0, -10): 600,  (42.0, -9): 4700, (42.0, -8): 6200, (42.0, -7): 7500,
+    (41.5, -10): 300,  (41.5, -9): 5400, (41.5, -8): 5400, (41.5, -7): 5800,
+    (41.0, -10): 300,  (41.0, -9): 4400, (41.0, -8): 5000, (41.0, -7): 4200,
+    (40.5, -10): 300,  (40.5, -9): 4700, (40.5, -8): 4900, (40.5, -7): 6000,
+    (40.0, -10): 300,  (40.0, -9): 4400, (40.0, -8): 6900, (40.0, -7): 5700,
+    (39.5, -10): 1000, (39.5, -9): 3400, (39.5, -8): 3900, (39.5, -7): 3000,
+    (39.0, -10): 2500, (39.0, -9): 2100, (39.0, -8): 3700, (39.0, -7): 3600,
+    (38.5, -10): 2100, (38.5, -9): 1800, (38.5, -8): 2500, (38.5, -7): 3300,
+    (38.0, -10): 2000, (38.0, -9): 2000, (38.0, -8): 2400, (38.0, -7): 3900,
+    (37.5, -10): 300,  (37.5, -9): 1600, (37.5, -8): 2400, (37.5, -7): 3400,
+    (37.0, -10): 400,  (37.0, -9): 3300, (37.0, -8): 2300, (37.0, -7): 1200,
+    (36.5, -10): 300,  (36.5, -9): 500,  (36.5, -8): 400,  (36.5, -7): 900,
+    # Só mar, sem MEF legível nas capturas (sul e sudoeste da área)
+    (37.5, -11): _MEF_MAR_NAO_LIDO, (37.0, -11): _MEF_MAR_NAO_LIDO,
+    (36.5, -11): _MEF_MAR_NAO_LIDO,
+    (36.0, -11): _MEF_MAR_NAO_LIDO, (36.0, -10): _MEF_MAR_NAO_LIDO,
+    (36.0, -9): _MEF_MAR_NAO_LIDO,  (36.0, -8): _MEF_MAR_NAO_LIDO,
+    (35.5, -11): _MEF_MAR_NAO_LIDO, (35.5, -10): _MEF_MAR_NAO_LIDO,
+    (35.5, -9): _MEF_MAR_NAO_LIDO,  (35.5, -8): _MEF_MAR_NAO_LIDO,
 }
 
 def _tile_key(lon, lat):
-    t = _TERRAIN_TILE
-    return (math.floor(lat / t) * t, math.floor(lon / t) * t)
+    return (math.floor(lat / _TILE_LAT) * _TILE_LAT, math.floor(lon / _TILE_LON) * _TILE_LON)
 
 def _tile_box(key):
     lat_s, lon_w = key
-    return box(lon_w, lat_s, lon_w + _TERRAIN_TILE, lat_s + _TERRAIN_TILE)
+    return box(lon_w, lat_s, lon_w + _TILE_LON, lat_s + _TILE_LAT)
 
-# Falhar em voz alta: uma quadrícula com terra e sem valor daria 0 ft de
-# terreno — base AMSL lida como AGL, o erro optimista que isto veio evitar.
-_lx0, _ly0, _lx1, _ly1 = LAND_POLYGON.bounds
-for _la in range(math.floor(_ly0 / _TERRAIN_TILE), math.ceil(_ly1 / _TERRAIN_TILE)):
-    for _lo in range(math.floor(_lx0 / _TERRAIN_TILE), math.ceil(_lx1 / _TERRAIN_TILE)):
-        _k = (_la * _TERRAIN_TILE, _lo * _TERRAIN_TILE)
-        if _k not in _TERRAIN_MAX_FT and _tile_box(_k).intersection(LAND_POLYGON).area > 1e-7:
-            raise RuntimeError(f"Quadrícula de relevo em falta: {_k}")
+def _tiles_touching(geom):
+    """Chaves das quadrículas cuja área intersecta `geom`."""
+    x0, y0, x1, y1 = geom.bounds
+    for la in range(math.floor(y0 / _TILE_LAT), math.ceil(y1 / _TILE_LAT)):
+        for lo in range(math.floor(x0 / _TILE_LON), math.ceil(x1 / _TILE_LON)):
+            k = (la * _TILE_LAT, lo * _TILE_LON)
+            if _tile_box(k).intersection(geom).area > 1e-9:
+                yield k
+
+# Falhar em voz alta: TODAS as quadrículas que tocam a área têm de ter
+# valor. Uma em falta daria 0 ft de terreno — base AMSL lida como AGL, o
+# erro optimista que isto veio evitar.
+_em_falta = [k for k in _tiles_touching(FIR_POLYGON) if k not in _TERRAIN_MAX_FT]
+if _em_falta:
+    raise RuntimeError(f"Quadrículas de relevo em falta: {_em_falta}")
 
 def _terrain_max_ft(geom):
-    """
-    Elevação máxima (ft) do terreno em qualquer ponto de `geom`: o máximo
-    das quadrículas que a geometria toca com área. Quadrículas só de mar
-    valem 0.
-    """
-    x0, y0, x1, y1 = geom.bounds
-    t = _TERRAIN_TILE
-    maximo = 0
-    for la in range(math.floor(y0 / t), math.ceil(y1 / t)):
-        for lo in range(math.floor(x0 / t), math.ceil(x1 / t)):
-            k = (la * t, lo * t)
-            v = _TERRAIN_MAX_FT.get(k, 0)
-            if v > maximo and _tile_box(k).intersection(geom).area > 1e-9:
-                maximo = v
-    return maximo
+    """Elevação máxima (ft) das quadrículas que `geom` toca com área."""
+    return max((_TERRAIN_MAX_FT[k] for k in _tiles_touching(geom)
+                if k in _TERRAIN_MAX_FT), default=0)
 
 def _terrain_elevation_ft(lon, lat):
-    """Elevação máxima da quadrícula que contém o ponto (lon, lat)."""
+    """MEF da quadrícula que contém o ponto (lon, lat)."""
     return _TERRAIN_MAX_FT.get(_tile_key(lon, lat), 0)
 
-# Quadrículas que tocam a FIR — usadas para partir as zonas quando há
+# Quadrículas que tocam a área — usadas para partir as zonas quando há
 # bases AMSL, para a conversão ser feita quadrícula a quadrícula e não com
 # o máximo de uma zona enorme (a Estrela não pode pôr o Algarve em NO-GO).
-def _terrain_tiles():
-    x0, y0, x1, y1 = FIR_POLYGON.bounds
-    t = _TERRAIN_TILE
-    caixas = []
-    for la in range(math.floor(y0 / t), math.ceil(y1 / t)):
-        for lo in range(math.floor(x0 / t), math.ceil(x1 / t)):
-            cx = _tile_box((la * t, lo * t))
-            if cx.intersection(FIR_POLYGON).area > 1e-9:
-                caixas.append(cx)
-    return caixas
-
-TERRAIN_TILES = _terrain_tiles()
+TERRAIN_TILES = [_tile_box(k) for k in _tiles_touching(FIR_POLYGON)]
 
 # -------------------------------------------------
 # CIDADES
@@ -1578,8 +1575,13 @@ def _refine_cells(cells, splitters, tol=1e-3):
             if not c.intersects(sp):
                 novas.append(c)
                 continue
-            frac = c.intersection(sp).area / c.area
-            if tol < frac < 1 - tol:
+            inter = c.intersection(sp).area
+            frac = inter / c.area
+            # Com tol=0 o critério é absoluto (área > 1e-9 de cada lado),
+            # o mesmo que _tiles_touching usa.
+            parcial = (tol < frac < 1 - tol) if tol > 0 else \
+                      (inter > 1e-9 and c.area - inter > 1e-9)
+            if parcial:
                 novas.extend(_partes(c.intersection(sp)) + _partes(c.difference(sp)))
             else:
                 novas.append(c)
@@ -1638,12 +1640,14 @@ def compute_dynamic_regions(blocks):
     # não coincidem EXACTAMENTE com outra linha, e a célula fica por
     # partir. Partir explicitamente qualquer célula que um fenómeno cubra
     # só em parte garante que cada célula está toda dentro ou toda fora.
-    splitters = [b.polygon for b in relevant]
+    atomic_cells = _refine_cells(atomic_cells, [b.polygon for b in relevant])
     # Com bases AMSL, partir também pela grelha de relevo — a conversão
-    # para AGL é feita quadrícula a quadrícula.
+    # para AGL é feita quadrícula a quadrícula. Aqui sem tolerância
+    # relativa: _terrain_max_ft conta qualquer quadrícula que a célula
+    # toque com área, por isso a célula tem de ser partida mesmo por uma
+    # sobreposição mínima (senão Évora herdava o MEF de uma vizinha).
     if any(b.phenomenon == "BASE_AMSL" for b in relevant):
-        splitters += TERRAIN_TILES
-    atomic_cells = _refine_cells(atomic_cells, splitters)
+        atomic_cells = _refine_cells(atomic_cells, TERRAIN_TILES, tol=0.0)
 
     # 3. Calcular decisão completa por célula (com base no ponto representativo)
     cell_results = []
