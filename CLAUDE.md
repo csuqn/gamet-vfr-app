@@ -185,7 +185,7 @@ marca de água "API KEY REQUIRED".
 procura o mês certo à volta da data actual; `replace(day=31)` rebentava
 quando o mês corrente não tinha dia 31.
 
-## Teste com GAMETs reais (30 dias)
+## Teste contínuo com GAMETs reais
 
 Ramos: `main` tem o código (é o que o Streamlit Cloud publica); `dados` tem
 os GAMETs recolhidos (`gamets/AAAA/MM/`) e os relatórios (`relatorios/`).
@@ -199,6 +199,7 @@ Ficam separados para que cada recolha não reinicie a app publicada.
   GAMET ilegível, **campos com conteúdo que não geraram fenómeno**,
   palavras fora do vocabulário e discrepâncias com o oráculo. Uso:
   `python scripts/analisar.py --dir dados/gamets --desde 24`.
-- Relatórios diários em `relatorios/AAAA-MM-DD.md` (ramo `dados`).
+- Relatórios diários em `relatorios/AAAA-MM-DD.md` e resumo mensal em
+  `relatorios/resumo-AAAA-MM.md` (ramo `dados`). Sem data de fim.
   Correcções de código são **propostas** num ramo `proposta/...` e só
   entram no `main` com aprovação do utilizador.
