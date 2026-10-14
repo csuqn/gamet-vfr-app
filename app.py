@@ -28,7 +28,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "1.2"
+APP_VERSION = "1.3"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
 st.title(f"✈️ LPPC GAMET – Motor Cartográfico v{APP_VERSION}")
@@ -267,7 +267,7 @@ def _dms_list(raw):
 # -------------------------------------------------
 # Costa continental portuguesa, do Guadiana (Vila Real de Santo António)
 # ao Minho (Caminha), com 67 pontos e espaçamento médio de ~12 km.
-# Fornecida pelo utilizador a partir de dados aeronáuticos.
+# Fonte: NAV Portugal (dados fornecidos pelo utilizador).
 _COASTLINE_RAW = (
     "370943N0072400W 371035N0072708W 370932N0073135W 370741N0073559W "
     "370431N0074045W 365750N0075207W 365741N0075334W 365804N0075516W "
@@ -510,9 +510,10 @@ FIR_MINX, FIR_MINY, FIR_MAXX, FIR_MAXY = FIR_POLYGON.bounds
 # encontra nessa zona. (Até à v31 era uma interpolação de 11 pontos que
 # subestimava a Estrela em ~3000 ft; na 1.0/1.1 uma grelha aproximada.)
 #
-# Fonte: MEF do SkyDemon, lidos pelo utilizador e conferidos em capturas de
-# ecrã (out-2026). Incluem obstáculos e margem — mais adequados a isto do
-# que a altitude pura do terreno. NÃO são a carta oficial da NAV Portugal.
+# Fonte: MEF do SkyDemon (software de navegação que usa dados aeronáuticos
+# oficiais), lidos em capturas de ecrã fornecidas pelo utilizador (out-2026).
+# Incluem obstáculos e margem — mais adequados a isto do que a altitude pura
+# do terreno.
 # Conferência com cumes conhecidos: Torre 6539 ft → 6900; Larouco 5036 →
 # 5400; Marão 4642 → 5000; Fóia 2959 → 3300; Montejunto 2185 → 2500.
 #
@@ -1557,6 +1558,73 @@ def _dedupe_base_reasons(reasons):
     return sorted(outros + [r for _, r in por_limiar.values()])
 
 
+def _aggregate_results(resultados):
+    """
+    Junta os resultados de decisão de várias células numa região: valor
+    mais conservador para VIS e base, união do resto. Os fenómenos
+    informativos (ICE/TURB moderados) não entram na assinatura e podem
+    existir só em parte da região — fica registado como "parcial".
+    """
+    vis_vals, base_vals = [], []
+    ts_s, turb_s, turb_l = set(), set(), set()
+    ice_s, ice_l, mt_s, va_s, reasons_s = set(), set(), set(), set(), set()
+    n_com_ice = n_com_turb = 0
+    for res in resultados:
+        (_d, vis, base, ts, turb, turb_layers,
+         ice, ice_layers, mt_obsc, va, reasons) = res
+        if vis is not None:
+            vis_vals.append(vis)
+        if base is not None:
+            base_vals.append(base)
+        ts_s.update(ts)
+        turb_s.update(turb)
+        turb_l.update(l for l in turb_layers if l)
+        ice_s.update(ice)
+        ice_l.update(l for l in ice_layers if l)
+        mt_s.update(mt_obsc)
+        va_s.update(va)
+        reasons_s.update(reasons)
+        n_com_ice += bool(ice)
+        n_com_turb += bool(turb)
+    return {
+        "vis":          min(vis_vals) if vis_vals else None,
+        "base":         min(base_vals) if base_vals else None,
+        "ts":           sorted(ts_s),
+        "turb":         sorted(turb_s),
+        "turb_layers":  sorted(turb_l),
+        "turb_parcial": bool(turb_s) and n_com_turb < len(resultados),
+        "ice":          sorted(ice_s),
+        "ice_layers":   sorted(ice_l),
+        "ice_parcial":  bool(ice_s) and n_com_ice < len(resultados),
+        "mt_obsc":      sorted(mt_s),
+        "va":           sorted(va_s),
+        "reasons":      _dedupe_base_reasons(reasons_s),
+    }
+
+
+def _absorb_values(alvo, peq):
+    """
+    Quando uma região absorve outra (lasca ou bolsa consolidada), os
+    valores mostrados passam a cobrir ambas: o mais conservador para VIS e
+    base, união para o resto. Até à 1.2 a região absorvente mantinha os
+    seus — uma lasca com base 100 ft fundida numa região de 200 ft
+    desaparecia do cartão.
+    """
+    for campo in ("turb", "ice"):
+        # Parcial se já o era numa das partes, ou se só uma o tinha
+        a_tem, p_tem = bool(alvo.get(campo)), bool(peq.get(campo))
+        alvo[campo + "_parcial"] = bool(
+            alvo.get(campo + "_parcial") or peq.get(campo + "_parcial")
+            or (a_tem != p_tem))
+    for campo in ("vis", "base"):
+        vals = [v for v in (alvo.get(campo), peq.get(campo)) if v is not None]
+        alvo[campo] = min(vals) if vals else None
+    for campo in ("ts", "turb", "turb_layers", "ice", "ice_layers", "mt_obsc", "va"):
+        alvo[campo] = sorted(set(alvo.get(campo, [])) | set(peq.get(campo, [])))
+    alvo["reasons"] = _dedupe_base_reasons(set(alvo.get("reasons", [])) | set(peq.get("reasons", [])))
+    alvo["notas"] = sorted(set(alvo.get("notas", [])) | set(peq.get("notas", [])))
+
+
 def _refine_cells(cells, splitters, tol=1e-3):
     """
     Parte cada célula pelos polígonos `splitters` que a cobrem só
@@ -1731,66 +1799,27 @@ def compute_dynamic_regions(blocks):
     regions = []
     for grupo_id, (key, cells) in enumerate(grouped_cells.items()):
         dec_level = key[0]
+        resultados = group_results[key]
         merged = unary_union(cells)
         components = list(merged.geoms) if isinstance(merged, MultiPolygon) else [merged]
-
-        # Os fenómenos informativos (ICE/TURB moderados) já não fazem parte
-        # da assinatura, pelo que podem variar dentro do grupo — agregar
-        # todos, usando o valor mais conservador para VIS e base.
-        #
-        # Como podem existir só em parte da região, regista-se se são
-        # parciais, para o briefing poder assinalá-lo em vez de dar a
-        # entender que se aplicam a toda a área.
-        vis_vals, base_vals = [], []
-        ts_s, turb_s, turb_l = set(), set(), set()
-        ice_s, ice_l, mt_s, va_s, reasons_s = set(), set(), set(), set(), set()
-        n_com_ice = n_com_turb = 0
-        resultados = group_results[key]
-        for res in resultados:
-            (_d, vis, base, ts, turb, turb_layers,
-             ice, ice_layers, mt_obsc, va, reasons) = res
-            if vis is not None:
-                vis_vals.append(vis)
-            if base is not None:
-                base_vals.append(base)
-            ts_s.update(ts)
-            turb_s.update(turb)
-            turb_l.update(l for l in turb_layers if l)
-            ice_s.update(ice)
-            ice_l.update(l for l in ice_layers if l)
-            mt_s.update(mt_obsc)
-            va_s.update(va)
-            reasons_s.update(reasons)
-            if ice:
-                n_com_ice += 1
-            if turb:
-                n_com_turb += 1
-
-        ice_parcial  = bool(ice_s)  and n_com_ice  < len(resultados)
-        turb_parcial = bool(turb_s) and n_com_turb < len(resultados)
 
         for comp in components:
             if comp.is_empty or comp.area <= 1e-9:
                 continue
-            regions.append({
-                "polygon":     comp,
-                "label":       label_region(comp),
-                "decision":    dec_level,
-                "vis":         min(vis_vals) if vis_vals else None,
-                "base":        min(base_vals) if base_vals else None,
-                "ts":          sorted(ts_s),
-                "turb":        sorted(turb_s),
-                "turb_layers": sorted(turb_l),
-                "turb_parcial": turb_parcial,
-                "ice":         sorted(ice_s),
-                "ice_layers":  sorted(ice_l),
-                "ice_parcial": ice_parcial,
-                "mt_obsc":     sorted(mt_s),
-                "va":          sorted(va_s),
-                "reasons":     _dedupe_base_reasons(reasons_s),
-                "notas":       sorted(group_notes[key]),
-                "_grupo":      grupo_id,
-            })
+            # Valores agregados SÓ com as células desta bolsa. Até à 1.2
+            # eram agregados no grupo inteiro: duas bolsas separadas com as
+            # mesmas causas (ex.: base 200 ft a norte, 100 ft a sul)
+            # mostravam ambas a base mais baixa.
+            meus = [res for cell, res in zip(cells, resultados)
+                    if comp.intersection(cell).area > 0.5 * cell.area]
+            regions.append(dict(
+                polygon=comp,
+                label=label_region(comp),
+                decision=dec_level,
+                notas=sorted(group_notes[key]),
+                _grupo=grupo_id,
+                **_aggregate_results(meus),
+            ))
 
     # 6. Fundir fragmentos residuais.
     #
@@ -1824,13 +1853,12 @@ def _consolidate_groups(regions, max_regioes=_MAX_REGIOES):
             por_grupo[r.get("_grupo")].append(r)
         juntas = []
         for membros in por_grupo.values():
-            base = membros[0]
+            base = dict(membros[0])
             if len(membros) > 1:
+                for m in membros[1:]:
+                    _absorb_values(base, m)
                 poly = unary_union([m["polygon"] for m in membros])
-                base = dict(base, polygon=poly, label=label_region(poly),
-                            reasons=sorted(set().union(*[m["reasons"] for m in membros])),
-                            notas=sorted(set().union(*[m.get("notas", []) for m in membros])))
-                base["reasons"] = _dedupe_base_reasons(base["reasons"])
+                base["polygon"], base["label"] = poly, label_region(poly)
             juntas.append(base)
         regions = juntas
     for r in regions:
@@ -1887,10 +1915,7 @@ def _merge_slivers(regions, min_area_frac=0.015):
             continue
         alvo["polygon"] = fundido
         alvo["label"] = label_region(fundido)
-        if peq["reasons"]:
-            alvo["reasons"] = sorted(set(alvo["reasons"]) | set(peq["reasons"]))
-        if peq.get("notas"):
-            alvo["notas"] = sorted(set(alvo.get("notas", [])) | set(peq["notas"]))
+        _absorb_values(alvo, peq)
 
     return grandes + orfas
 

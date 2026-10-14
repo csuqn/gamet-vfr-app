@@ -1,0 +1,204 @@
+# LPPC GAMET Decoder
+
+App Streamlit que descodifica GAMETs da FIR LPPC (Portugal Continental) e
+produz um briefing VFR com decisões **GO / MARGINAL / NO-GO** por região
+geográfica.
+
+Público-alvo: pilotos VFR e de ultraleves. **É uma ferramenta de apoio à
+decisão de voo** — um erro pode levar alguém a voar em condições inseguras.
+Isso condiciona todas as escolhas técnicas abaixo.
+
+## Estrutura
+
+Ficheiro único `app.py` (~2700 linhas) — é o ficheiro que o Streamlit Cloud publica a partir do ramo `main`. Não está dividido em
+módulos porque o Streamlit corre um script de cima a baixo e a divisão
+traria pouco benefício face ao custo. As secções estão marcadas por
+comentários (`# PARSER`, `# DECISION`, `# PDF EXPORT`, `# EXECUÇÃO`).
+
+Versão numa constante única, `APP_VERSION`, usada no título, no User-Agent
+e nos metadados do PDF. Desde a **1.0** (estável) o ficheiro tem nome fixo (`app.py` no repositório) —
+ao criar uma versão nova muda só a constante (1.1, 1.2… para correcções e
+melhorias; 2.0 para mudanças de regras de decisão). Até à 1.0 a numeração
+era v11…v31 no nome do ficheiro.
+
+## Pipeline
+
+```
+texto → normalize → injecção de quebras por campo → máquina de estados
+      → MetBlock(fenómeno, polígono, valor) → compute_dynamic_regions
+      → decision() por célula → regiões fundidas por decisão
+```
+
+`compute_dynamic_regions` usa `polygonize` para partir a FIR nas células
+atómicas definidas pela intersecção de todos os fenómenos, calcula a
+decisão em cada uma e funde as que têm a mesma decisão. As regiões cobrem
+sempre ~100% da FIR.
+
+Três pormenores que já causaram erros reais:
+
+- **Pertença por área, nunca por ponto.** Um fenómeno aplica-se a uma
+  célula se cobrir mais de metade dela. Até à v31 usava-se
+  `representative_point()`, que numa célula degenerada devolveu um vértice
+  da fronteira e pôs 12% da FIR em GO com TS EMBD por todo o lado.
+- **`_refine_cells`** parte explicitamente qualquer célula que um fenómeno
+  cubra só em parte. O `polygonize` descarta segmentos cujas pontas não
+  coincidem exactamente e deixa células por partir.
+- Com bases AMSL as células são também partidas pela grelha de relevo, e
+  se o briefing passar de 8 regiões juntam-se as bolsas com as mesmas
+  causas (`_consolidate_groups`).
+
+Não há sectores fixos. A app teve 3 sectores (Norte/Centro/Sul) até à v17;
+foram substituídos por geometria dinâmica porque marcavam um sector
+inteiro como NO-GO quando só uma fatia estava afectada — Bragança e Porto
+estão ambos no "Norte" mas podem ter condições muito diferentes.
+`ZONES` e `SECTOR_*` (sectores inferiores oficiais) servem apenas para
+definir `FIR_POLYGON` — não entram na decisão.
+
+## Regras de decisão
+
+| Condição | Decisão |
+|---|---|
+| VIS < 1500 m (geral) | NO-GO |
+| VIS < 1500 m (LCA) | MARGINAL — é local |
+| VIS < 3000 m | MARGINAL |
+| Base < 300 ft AGL | NO-GO |
+| Base < 500 ft AGL | MARGINAL |
+| TS ISOL | MARGINAL |
+| TS OCNL / FRQ / EMBD / ISOL_EMBD / GEN | NO-GO |
+| TURB ou ICE **SEV** (ou HVY) | NO-GO |
+| TURB ou ICE MOD | informativo, não altera decisão |
+| MT OBSC | NO-GO |
+| VA (cinzas vulcânicas) | NO-GO |
+| SIGMET activo | NO-GO em toda a área |
+
+TURB e ICE severos forçam NO-GO desde a v23: a maioria dos ultraleves não
+tem sistemas de degelo nem margem estrutural para turbulência severa.
+
+O SIGMET aplica-se a toda a FIR porque o campo `SIGMET APPLICABLE` do
+GAMET não descreve geometria — restringi-lo a parte da área seria inventar
+precisão que não temos.
+
+## Princípios que orientam o código
+
+**O erro optimista é inaceitável.** Reportar pior do que a realidade é
+chato; reportar melhor é perigoso. Na dúvida entre duas leituras, escolhe
+a conservadora. É por isso que valores de visibilidade e base usam sempre
+`min()`.
+
+**Falhar em voz alta.** Um GAMET que não é interpretado não pode resultar
+em "GO" silencioso — `looks_unparseable()` existe para distinguir "está
+calmo" de "não percebi o texto". Um fetch que falha mostra diagnóstico, não
+uma caixa vazia.
+
+**Determinismo.** O parser é regex e máquina de estados, sem LLM. Um erro
+é localizável e corrigível; um LLM erraria de forma silenciosa e não
+reproduzível, o que num contexto go/no-go é bastante pior. A app também
+funciona sem rede, com o GAMET colado à mão.
+
+**Testar comportamento.** Verificar que uma string existe no ficheiro não
+prova nada. Todos os bugs reais deste projecto apareceram ao executar
+lógica com dados concretos.
+
+## Testes
+
+```bash
+python3 -m pytest
+```
+
+323 testes. Devem passar a 100%.
+
+- `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
+- `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
+- `tests/test_data.py` — validade temporal, vento, IPMA, robustez
+- `tests/test_v1.py` — regressões da 1.0, oráculo, fronteira, relevo,
+  janela horária e **a app completa** (via `streamlit.testing`)
+- `tests/conftest.py` — extrai o motor da app sem executar a UI. Os imports
+  vêm da própria app (nunca de uma lista fixa — escondia imports em falta)
+
+`test_regioes_concordam_com_oraculo` é o teste mais importante: compara a
+decisão de cada região com a decisão calculada directamente sobre os
+fenómenos que contêm cada aeródromo, em 150 GAMETs aleatórios.
+
+Os invariantes em `test_geometry.py` correm sobre uma lista de GAMETs
+representativos e verificam propriedades que têm de se manter sempre.
+Acrescentar um GAMET a `GAMETS_VARIADOS` fá-lo passar por todos.
+
+**Nunca ajustes um teste ao output para o fazer passar.**
+
+## Subagentes
+
+- `testes` — escrever e correr testes após alterações
+- `parser` — rever regex e lógica de extracção
+- `dados-aero` — adicionar ou validar aeródromos e pistas UL
+
+## Geografia
+
+- **Área do GAMET** — os três sectores **inferiores** da FIR (ENR 2.1.3,
+  SFC–FL245): NORTH LOWER 3.1, CENTRE LOWER 6.1, SOUTH LOWER 8.1, com as
+  coordenadas oficiais do eAIP (ENR 2.1, 27-NOV-2025, fornecido pelo
+  utilizador). Nunca usar vértices dos sectores superiores — incluem espaço
+  aéreo delegado sobre Espanha.
+- **Fronteira** — o ENR 2.1 só diz "along Portuguese/Spanish border". Traçado
+  base da Natural Earth 1:10m (domínio público), forçado a passar pelos 14
+  pontos do ENR 2.1 que iniciam/terminam "along border" (antes do ajuste
+  desviava-se deles 0,04–3,3 km) e pelas fozes do Minho e do Guadiana.
+- **Costa** — 67 pontos da NAV Portugal, fornecidos pelo utilizador. Os estuários do Tejo e
+  do Minho contam como terra.
+- **Relevo** — `_TERRAIN_MAX_FT`: MEF (Maximum Elevation Figure) do
+  SkyDemon por quadrícula de **1° de longitude × 30' de latitude**, lidos
+  das capturas de ecrã do utilizador (out-2026). O SkyDemon usa dados
+  aeronáuticos oficiais; os MEF incluem obstáculos e margem. Quadrículas só de mar sem valor
+  legível ficam a 600 ft. A app recusa arrancar se alguma quadrícula que
+  toque a área não tiver valor.
+
+## Dados aeronáuticos
+
+52 pontos: 28 aeródromos ICAO + 24 pistas de ultraleves, todos com
+coordenadas oficiais do eVFR da NAV Portugal (AD 2.2 e AD 4.2).
+Nunca inventar coordenadas — se falta uma, dizer que falta.
+
+## Ligação ao IPMA
+
+Endpoint actual: `https://brief-ng.ipma.pt/pages/actuals/sigmet.php`
+
+O IPMA já mudou o caminho (era `/showsigmet.php` na raiz até à migração
+para single-page app). O fetch tenta 7 endpoints em sequência, aceita HTML
+e JSON, e a app tem um campo de URL alternativo para o utilizador corrigir
+sem editar código.
+
+## Armadilhas conhecidas
+
+**Streamlit e `st.button`** — devolve `True` só no ciclo imediatamente a
+seguir ao clique. Widgets dentro de um `if st.button(...)` desaparecem
+quando o utilizador interage com eles. Guarda o estado em
+`st.session_state` (ver `_active_gamet_text`).
+
+**Tiles do mapa** — usar `tiles="OpenStreetMap"`. Os alias de CartoDB do
+Folium levam a serviços que passaram a exigir API key e o mapa aparece com
+marca de água "API KEY REQUIRED".
+
+**Intersecções degeneradas** — podem produzir `GeometryCollection`, cujo
+`.boundary` é `None`, fazendo o fenómeno desaparecer do `polygonize`.
+`_clean_poly()` existe para isso e é chamada após cada intersecção.
+
+**Dia sem mês** — o GAMET indica o dia mas não o mês. `_build_utc_date()`
+procura o mês certo à volta da data actual; `replace(day=31)` rebentava
+quando o mês corrente não tinha dia 31.
+
+## Teste com GAMETs reais (30 dias)
+
+Ramos: `main` tem o código (é o que o Streamlit Cloud publica); `dados` tem
+os GAMETs recolhidos (`gamets/AAAA/MM/`) e os relatórios (`relatorios/`).
+Ficam separados para que cada recolha não reinicie a app publicada.
+
+- `.github/workflows/recolha-gamet.yml` — GitHub Actions, de hora a hora:
+  corre `scripts/recolher_gamet.py`, que usa o MESMO código de recolha da
+  app, e guarda cada GAMET distinto no ramo `dados` (inclui AMD/COR).
+  Falhas de recolha ficam em `gamets/falhas.log`.
+- `scripts/analisar.py` — passa os GAMETs pela app e assinala: excepções,
+  GAMET ilegível, **campos com conteúdo que não geraram fenómeno**,
+  palavras fora do vocabulário e discrepâncias com o oráculo. Uso:
+  `python scripts/analisar.py --dir dados/gamets --desde 24`.
+- Relatórios diários em `relatorios/AAAA-MM-DD.md` (ramo `dados`).
+  Correcções de código são **propostas** num ramo `proposta/...` e só
+  entram no `main` com aprovação do utilizador.
