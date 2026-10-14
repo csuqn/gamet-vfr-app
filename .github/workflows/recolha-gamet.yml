@@ -2,7 +2,7 @@ name: Recolha GAMET LPPC
 
 on:
   schedule:
-    - cron: "17 * * * *"     # de hora a hora (apanha emendas AMD/COR)
+    - cron: "23 * * * *"     # de hora a hora (apanha emendas AMD/COR)
   workflow_dispatch:         # permite correr à mão no separador Actions
     inputs:
       guardar_pagina:
