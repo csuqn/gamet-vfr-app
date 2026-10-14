@@ -91,12 +91,24 @@ def recolher_sigmets(rede, agora):
         pag.write_text(raw, encoding="utf-8")
         print("Página guardada:", pag)
     pasta = DESTINO.parent / "sigmets"
-    for texto in _SIGMET_RE.findall(_limpar(raw)):
-        tipo = "AIRMET" if " AIRMET " in texto else "SIGMET"
-        num = re.search(r"(?:SIGMET|AIRMET)\s+(\S+)", texto).group(1)
-        d = _guardar(pasta, f"{tipo}{num}_", texto, agora)
+    # Cada boletim vem num bloco <pre>. Guardar todos os que não sejam o
+    # GAMET: SIGMET/AIRMET no formato OACI ficam classificados; qualquer
+    # outra coisa fica em sigmets/desconhecidos/ para análise — assim um
+    # formato inesperado não se perde.
+    for bloco in re.findall(r"<pre[^>]*>(.*?)</pre>", raw, re.DOTALL | re.IGNORECASE):
+        texto = _limpar(bloco)
+        if not texto or re.match(r"LPPC\s+GAMET\b", texto):
+            continue
+        m = _SIGMET_RE.search(texto)
+        if m:
+            texto = m.group(1)
+            tipo = "AIRMET" if " AIRMET " in f" {texto} " else "SIGMET"
+            num = re.search(r"(?:SIGMET|AIRMET)\s+(\S+)", texto).group(1)
+            d = _guardar(pasta, f"{tipo}{num}_", texto, agora)
+        else:
+            d = _guardar(pasta / "desconhecidos", "", texto, agora)
         if d:
-            print("Novo", tipo + ":", d)
+            print("Novo boletim:", d)
 
 
 def main() -> int:

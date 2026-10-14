@@ -194,7 +194,10 @@ Ficam separados para que cada recolha não reinicie a app publicada.
 - `.github/workflows/recolha-gamet.yml` — GitHub Actions, de hora a hora:
   corre `scripts/recolher_gamet.py`, que usa o MESMO código de recolha da
   app, e guarda cada GAMET distinto no ramo `dados` (inclui AMD/COR).
-  Falhas de recolha ficam em `gamets/falhas.log`.
+  Guarda também os SIGMET/AIRMET LPPC em `sigmets/AAAA/MM/` (blocos com
+  formato inesperado vão para `sigmets/desconhecidos/`). Falhas de recolha
+  ficam em `gamets/falhas.log`. Correr à mão com "guardar_pagina" guarda a
+  página do IPMA tal como vem, em `paginas/`, para diagnóstico.
 - `scripts/analisar.py` — passa os GAMETs pela app e assinala: excepções,
   GAMET ilegível, **campos com conteúdo que não geraram fenómeno**,
   palavras fora do vocabulário e discrepâncias com o oráculo. Uso:
