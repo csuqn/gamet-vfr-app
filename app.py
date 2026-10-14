@@ -28,7 +28,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "1.4"
+APP_VERSION = "1.5"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
 st.title(f"✈️ LPPC GAMET – Motor Cartográfico v{APP_VERSION}")
@@ -885,44 +885,57 @@ def _clean_poly(geom):
 def extract_polygon(line):
     poly = FIR_POLYGON
     geo_found = False
+    partes = []  # cada qualificador isolado, recortado à FIR
 
     # BTN N\d\d\d\d AND N\d\d\d\d  (latitude)
     for m in re.findall(r"BTN\s+N(\d{2})(\d{2})\s+AND\s+N(\d{2})(\d{2})", line):
         geo_found = True
         lat1 = int(m[0]) + int(m[1]) / 60
         lat2 = int(m[2]) + int(m[3]) / 60
-        poly = _clean_poly(poly.intersection(box(FIR_MINX, min(lat1, lat2), FIR_MAXX, max(lat1, lat2))))
+        partes.append(_clean_poly(FIR_POLYGON.intersection(box(FIR_MINX, min(lat1, lat2), FIR_MAXX, max(lat1, lat2)))))
+        poly = _clean_poly(poly.intersection(partes[-1]))
 
     # BTN W/E\d\d\d\d AND W/E\d\d\d\d  (longitude)
     for m in re.findall(r"BTN\s+([WE])(\d{2,3})(\d{2})\s+AND\s+([WE])(\d{2,3})(\d{2})", line):
         geo_found = True
         lon1 = _lon(m[1], m[2], m[0])
         lon2 = _lon(m[4], m[5], m[3])
-        poly = _clean_poly(poly.intersection(box(min(lon1, lon2), FIR_MINY, max(lon1, lon2), FIR_MAXY)))
+        partes.append(_clean_poly(FIR_POLYGON.intersection(box(min(lon1, lon2), FIR_MINY, max(lon1, lon2), FIR_MAXY))))
+        poly = _clean_poly(poly.intersection(partes[-1]))
 
     # N OF N\d\d\d\d
     for m in re.findall(r"N\s+OF\s+N(\d{2})(\d{2})", line):
         geo_found = True
         lat = int(m[0]) + int(m[1]) / 60
-        poly = _clean_poly(poly.intersection(box(FIR_MINX, lat, FIR_MAXX, FIR_MAXY)))
+        partes.append(_clean_poly(FIR_POLYGON.intersection(box(FIR_MINX, lat, FIR_MAXX, FIR_MAXY))))
+        poly = _clean_poly(poly.intersection(partes[-1]))
 
     # S OF N\d\d\d\d
     for m in re.findall(r"S\s+OF\s+N(\d{2})(\d{2})", line):
         geo_found = True
         lat = int(m[0]) + int(m[1]) / 60
-        poly = _clean_poly(poly.intersection(box(FIR_MINX, FIR_MINY, FIR_MAXX, lat)))
+        partes.append(_clean_poly(FIR_POLYGON.intersection(box(FIR_MINX, FIR_MINY, FIR_MAXX, lat))))
+        poly = _clean_poly(poly.intersection(partes[-1]))
 
     # E OF W/E\d\d\d\d
     for m in re.findall(r"E\s+OF\s+([WE])(\d{2,3})(\d{2})", line):
         geo_found = True
         lon = _lon(m[1], m[2], m[0])
-        poly = _clean_poly(poly.intersection(box(lon, FIR_MINY, FIR_MAXX, FIR_MAXY)))
+        partes.append(_clean_poly(FIR_POLYGON.intersection(box(lon, FIR_MINY, FIR_MAXX, FIR_MAXY))))
+        poly = _clean_poly(poly.intersection(partes[-1]))
 
     # W OF W/E\d\d\d\d
     for m in re.findall(r"W\s+OF\s+([WE])(\d{2,3})(\d{2})", line):
         geo_found = True
         lon = _lon(m[1], m[2], m[0])
-        poly = _clean_poly(poly.intersection(box(FIR_MINX, FIR_MINY, lon, FIR_MAXY)))
+        partes.append(_clean_poly(FIR_POLYGON.intersection(box(FIR_MINX, FIR_MINY, lon, FIR_MAXY))))
+        poly = _clean_poly(poly.intersection(partes[-1]))
+
+    if geo_found and poly.is_empty and len(partes) > 1:
+        # Qualificadores incompatíveis na mesma linha (ex.: "N OF N4000 AND
+        # S OF N3800") dão intersecção vazia, o que faria o fenómeno
+        # desaparecer. Na dúvida, a leitura conservadora é a união.
+        poly = _clean_poly(unary_union([p for p in partes if not p.is_empty]))
 
     return poly if geo_found else None
 
@@ -1227,11 +1240,22 @@ def parse_gamet(text):
     # Injetar quebras antes de qualificadores geográficos secundários na mesma linha
     # ex: "...010HFT AGL S OF N3845 ISOL..." → "...010HFT AGL\nS OF N3845 ISOL..."
     # Aplica-se a N OF, S OF, E OF, W OF, BTN quando precedidos de conteúdo meteorológico
+    # Qualificadores ligados por AND ("N OF N3840 AND W OF W00815") definem
+    # UMA área e não podem ser partidos em linhas diferentes — senão o
+    # segundo substitui o primeiro (GAMET real de 14-out-2026: o nevoeiro
+    # do N de N3840 passava a cobrir todo o W de W00815, Algarve incluído).
+    # O AND fica temporariamente como "&&" para as regras abaixo não o
+    # verem como conteúdo meteorológico.
+    secn1 = re.sub(
+        r"((?:[NSEW]\s+OF\s+[NWE]\d{4,5}|BTN\s+[NWE]\d{4,5}\s+AND\s+[NWE]\d{4,5}))"
+        r"\s+AND\s+(?=(?:[NSEW]\s+OF\s+[NWE]\d{4,5}|BTN\s+[NWE]\d{4,5}))",
+        r"\1 && ", secn1)
     secn1 = re.sub(r"(\w)\s+(N\s+OF\s+N\d{4})", r"\1\n\2", secn1)
     secn1 = re.sub(r"(\w)\s+(S\s+OF\s+N\d{4})", r"\1\n\2", secn1)
     secn1 = re.sub(r"(\w)\s+(E\s+OF\s+[WE]\d{4,5})", r"\1\n\2", secn1)
     secn1 = re.sub(r"(\w)\s+(W\s+OF\s+[WE]\d{4,5})", r"\1\n\2", secn1)
     secn1 = re.sub(r"(\w)\s+(BTN\s+N\d{4})", r"\1\n\2", secn1)
+    secn1 = secn1.replace(" && ", " AND ")
 
     lines = [l.strip() for l in secn1.splitlines() if l.strip()]
 
