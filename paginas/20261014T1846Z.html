@@ -1,0 +1,72 @@
+<h1 class="extra-large-heading sigmet-heading">SIGMET/AIRMET/GAMET</h1>
+	<b>Date:</b> 2026-10-14 <b>Time:</b> 18:46:54<br />
+<div class="opmet-search">
+	<label for="stations" class="actual-label">Query SIGMET</label>
+	<a href="#" onclick="showStationSearch('firs_opmet');return false" title="Click here to search by nane"
+		class="actual-search ">
+		<i class=' fa fa-magnifying-glass tiny-img default-colour default-size'></i>	</a>
+
+	<input type="text" class="actual-input" id="firs_opmet" value=""/>
+
+	<button onclick="window.submitQuerysigmet()" class="actual-search-button">
+		Search	</button>
+</div>
+
+<div class="left sigmet-container">
+
+<hr><b>LPPC (LISBOA FIR)</b>
+				<pre>LPPC GAMET VALID 141500/142100 LPPT-
+LPPC LISBOA FIR/MAINLAND AREA BLW FL150
+SECN I
+SFC VIS:N OF N3840 MAR AND COT LCA 0200-5000M FG/BR
+SIG CLD:N OF N3840 MAR AND COT LCA BKN 002-008/012HFT AGL
+TURB:S OF N3700 LCA MOD SFC/FL040
+SIGMET APPLICABLE: AT TIME OF ISSUE NIL
+SECN II
+PSYS:18 N4200 W01300 H 1025HPA STNR NC
+CLD: N OF N3840 MAR AND COT BKN/SCT SC/CU 012-025/035HFT AGL
+WIND/T:    BRAGANCA        PORTO           VISEU          
+           N4145 W00645    N4115 W00840    N4045 W00750   
+1000FT AGL 220/004KT PS21  250/002KT PS21  300/008KT PS23 
+2000FT AGL 210/003KT PS19  210/009KT PS23  270/003KT PS21 
+5000FT AGL 180/007KT PS12  200/013KT PS16  150/007KT PS13 
+FL100      200/007KT PS06  200/007KT PS06  180/009KT PS06 
+FL150      210/004KT MS04  220/004KT MS03  220/004KT MS04 
+FZLVL:     12600FT AMSL    13100FT AMSL    12400FT AMSL   
+           LISBOA          EVORA           FARO           
+           N3845 W00908    N3830 W00752    N3700 W00800   
+1000FT AGL 350/008KT PS26  100/003KT PS27  110/014KT PS23 
+2000FT AGL 360/002KT PS24  070/002KT PS24  100/016KT PS22 
+5000FT AGL 120/009KT PS17  050/009KT PS16  080/017KT PS17 
+FL100      110/005KT PS06  080/011KT PS06  080/021KT PS07 
+FL150      050/003KT MS02  160/002KT MS03  060/004KT MS03 
+FZLVL:     13000FT AMSL    13400FT AMSL    13800FT AMSL   
+MNM QNH:1022HPA=</pre>
+</div>
+
+<script>
+		document.title = "nsWEBPIB - SIGMET/AIRMET"; 
+		</script><script>
+
+	window.submitQuerysigmet = function() {
+		var stations = $("#firs_opmet").val();
+		showLoading('divContent');
+		$("#divContent").load('pages/actuals/sigmet.php', {stations: stations});
+	};
+
+	$("#firs_opmet").keypress(function(e) {
+		if (e.which == 13) {
+			window.submitQuerysigmet(); 
+		}
+	});
+
+	$(function() {
+		window.fillMenu('default');
+	});
+	$("#divTR_InlineStrings").html("");window.showStationSearch = function(id) {
+	$.facebox.settings.opacity = 0.2;
+	$.facebox({ 
+		ajax: 'pages/popup/station_search.php?field=' + id 
+	});
+};
+</script>
