@@ -117,7 +117,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-346 testes. Devem passar a 100%.
+359 testes. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -125,6 +125,7 @@ python3 -m pytest
 - `tests/test_v1.py` — regressões da 1.0, oráculo, fronteira, relevo,
   janela horária e **a app completa** (via `streamlit.testing`)
 - `tests/test_v14.py` — campos OACI novos e SIGMETs do IPMA
+- `tests/test_v15.py` — qualificadores geográficos ligados por AND
 - `tests/conftest.py` — extrai o motor da app sem executar a UI. Os imports
   vêm da própria app (nunca de uma lista fixa — escondia imports em falta)
 
