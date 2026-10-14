@@ -3,7 +3,12 @@ name: Recolha GAMET LPPC
 on:
   schedule:
     - cron: "17 * * * *"     # de hora a hora (apanha emendas AMD/COR)
-  workflow_dispatch: {}      # permite correr à mão no separador Actions
+  workflow_dispatch:         # permite correr à mão no separador Actions
+    inputs:
+      guardar_pagina:
+        description: "Guardar também a página do IPMA tal como vem (diagnóstico)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -31,17 +36,18 @@ jobs:
       - name: Recolher
         env:
           GAMET_DIR: dados/gamets
+          GUARDAR_PAGINA: ${{ inputs.guardar_pagina && '1' || '0' }}
         run: python scripts/recolher_gamet.py
       - name: Guardar no ramo dados
         working-directory: dados
         run: |
           git config user.name  "recolha-gamet"
           git config user.email "recolha-gamet@users.noreply.github.com"
-          git add gamets
+          git add -A .
           if git diff --cached --quiet; then
             echo "Nada de novo."
           else
-            git commit -m "GAMET $(date -u +%Y-%m-%dT%H:%MZ)"
+            git commit -m "Recolha $(date -u +%Y-%m-%dT%H:%MZ)"
             git pull --rebase --autostash
             git push
           fi

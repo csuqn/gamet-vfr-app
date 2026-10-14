@@ -1,6 +1,7 @@
 """
-Recolhe o GAMET LPPC actual do IPMA e guarda-o em gamets/AAAA/MM/,
-uma vez por texto distinto (as emissões repetidas são ignoradas).
+Recolhe o GAMET e os SIGMETs LPPC actuais do IPMA e guarda-os em
+gamets/AAAA/MM/ e sigmets/AAAA/MM/, uma vez por texto distinto (as
+emissões repetidas são ignoradas).
 
 Corre de hora a hora no GitHub Actions — assim apanha também as emendas
 (GAMET AMD) e correcções (COR), não só as emissões de 6 em 6 horas.
@@ -40,10 +41,72 @@ def _carregar_rede():
     return mod
 
 
+_SIGMET_RE = re.compile(
+    r"(LPPC\s+(?:SIGMET|AIRMET)\s+\S+\s+VALID\s+\d{6}/\d{6}.+?=)", re.DOTALL)
+
+
+def _pagina_bruta(rede):
+    """A resposta tal como vem do IPMA (primeiro endpoint que responda)."""
+    for caminho in rede._GAMET_ENDPOINTS:
+        try:
+            r = requests.get(
+                rede._IPMA_BASE + caminho,
+                params=dict(rede._GAMET_PARAMS, _=int(time.time() * 1000)),
+                headers={"User-Agent": f"Mozilla/5.0 (compatible; GAMET-Decoder/{rede.APP_VERSION})",
+                         "Referer": f"{rede._IPMA_BASE}/",
+                         "X-Requested-With": "XMLHttpRequest",
+                         "Accept": "text/html, */*; q=0.01"},
+                timeout=10)
+        except requests.RequestException:
+            continue
+        if r.status_code == 200 and r.text.strip():
+            return r.text
+    return ""
+
+
+def _limpar(raw):
+    t = raw.replace("\\n", " ").replace("\\r", " ").replace('\\"', '"').replace("\\/", "/")
+    t = re.sub(r"<[^>]+>", " ", t).replace("&nbsp;", " ").replace("&amp;", "&")
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def _guardar(pasta, prefixo_validade, texto, agora):
+    texto = re.sub(r"\s+", " ", texto).strip()
+    h = hashlib.sha256(texto.encode()).hexdigest()[:10]
+    if list(pasta.rglob(f"*_{h}.txt")):
+        return None
+    m = re.search(r"VALID\s+(\d{6})/(\d{6})", texto)
+    validade = f"{m.group(1)}-{m.group(2)}" if m else "semvalidade"
+    destino = pasta / f"{agora:%Y}" / f"{agora:%m}" / f"{agora:%Y%m%dT%H%MZ}_{prefixo_validade}{validade}_{h}.txt"
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    destino.write_text(texto + "\n", encoding="utf-8")
+    return destino
+
+
+def recolher_sigmets(rede, agora):
+    raw = _pagina_bruta(rede)
+    if os.environ.get("GUARDAR_PAGINA") == "1" and raw:
+        pag = DESTINO.parent / "paginas" / f"{agora:%Y%m%dT%H%MZ}.html"
+        pag.parent.mkdir(parents=True, exist_ok=True)
+        pag.write_text(raw, encoding="utf-8")
+        print("Página guardada:", pag)
+    pasta = DESTINO.parent / "sigmets"
+    for texto in _SIGMET_RE.findall(_limpar(raw)):
+        tipo = "AIRMET" if " AIRMET " in texto else "SIGMET"
+        num = re.search(r"(?:SIGMET|AIRMET)\s+(\S+)", texto).group(1)
+        d = _guardar(pasta, f"{tipo}{num}_", texto, agora)
+        if d:
+            print("Novo", tipo + ":", d)
+
+
 def main() -> int:
     rede = _carregar_rede()
-    ok, texto = rede.fetch_gamet_ipma()
     agora = datetime.now(timezone.utc)
+    try:
+        recolher_sigmets(rede, agora)
+    except Exception as exc:  # noqa: BLE001 — a recolha do GAMET não pode parar por isto
+        print("Falha na recolha de SIGMETs:", exc)
+    ok, texto = rede.fetch_gamet_ipma()
     if not ok:
         # Registar a falha também é dado útil para o relatório
         log = DESTINO / "falhas.log"
