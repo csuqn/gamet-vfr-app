@@ -2,6 +2,8 @@
 
 **Briefing meteorológico VFR para Portugal Continental, a partir do GAMET.**
 
+### 👉 [Abrir a app](https://gamet-vfr-app-bxdwwklaarl2kdpiprmhu5.streamlit.app/)
+
 Uma app web que lê o GAMET da FIR de Lisboa, percebe o que ele diz e onde, e
 mostra num mapa onde se pode voar em VFR (**GO**), onde é preciso cautela
 (**MARGINAL**) e onde não se deve voar (**NO-GO**), zona a zona e aeródromo a
@@ -71,7 +73,7 @@ tempo (`11/15` = só das 11 às 15 UTC) e na extensão (`ISOL`, `OCNL`, `FRQ`,
 
 ## 3. Como usar a app
 
-1. **Abre a app.** O GAMET em vigor é carregado automaticamente do IPMA.
+1. **Abre a [app](https://gamet-vfr-app-bxdwwklaarl2kdpiprmhu5.streamlit.app/).** O GAMET em vigor é carregado automaticamente do IPMA.
    - Se o IPMA não responder, a app explica o que falhou. Podes colar o GAMET
      à mão na caixa de texto, ou indicar um endereço alternativo nas opções
      do painel "📡 GAMET do IPMA".
