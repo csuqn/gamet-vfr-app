@@ -79,6 +79,10 @@ tempo (`11/15` = só das 11 às 15 UTC) e na extensão (`ISOL`, `OCNL`, `FRQ`,
      à mão na caixa de texto, ou indicar um endereço alternativo nas opções
      do painel "📡 GAMET do IPMA".
    - O botão **🔄 Recarregar GAMET** vai buscar a versão mais recente.
+   - **Entre GAMETs:** o IPMA retira o GAMET anterior cerca de 45 minutos
+     antes de publicar o novo. Nesse intervalo a app carrega o último GAMET
+     do arquivo que ainda está em vigor, com um aviso bem visível, e os
+     SIGMETs em vigor (da página do IPMA e do arquivo).
 2. **Carrega em 🔍 Analisar GAMET.**
 3. **Lê o resultado**, de cima para baixo:
    - validade do GAMET e quanto tempo falta para expirar;
@@ -87,6 +91,13 @@ tempo (`11/15` = só das 11 às 15 UTC) e na extensão (`ISOL`, `OCNL`, `FRQ`,
    - consulta rápida, briefing por zonas, mapa, dados da Secção II e PDF.
 
 A app também funciona sem internet, com o GAMET colado à mão.
+
+**📚 Arquivo de GAMETs.** No painel com esse nome podes abrir qualquer GAMET
+recolhido desde 14/10/2026 (escolhe o dia e o período) e analisá-lo como se
+fosse o actual. É analisado com os SIGMETs que estiveram em vigor durante a
+sua validade — nunca com os de agora — e aparece sempre com o aviso "GAMET
+DO ARQUIVO — não é o GAMET actual". Serve para rever situações passadas,
+não para planear um voo.
 
 ## 4. Como ler o briefing
 
@@ -208,6 +219,10 @@ Algarve não afecta Lisboa.
   em que o GAMET é carregado (e indica a hora da verificação). Um SIGMET que
   saia depois disso só aparece ao carregares de novo. Com um GAMET colado à
   mão, só conta o campo `SIGMET APPLICABLE` do próprio GAMET.
+- **Arquivo:** é recolhido de 15 em 15 minutos, por isso um GAMET ou SIGMET
+  que tenha estado publicado menos tempo do que isso pode faltar. No recurso
+  entre GAMETs, um SIGMET emitido há menos de 15 minutos só aparece se a
+  página do IPMA o mostrar.
 - **AIRMETs** são mostrados mas não interpretados.
 - **Janelas horárias** (`11/15`) são anotadas, com indicação de se já
   começaram ou terminaram, mas não mudam a decisão: a previsão pode
@@ -234,7 +249,7 @@ Algarve não afecta Lisboa.
 
 ## 10. Qualidade e testes
 
-- **359 testes automáticos** cobrem a leitura do texto, a geometria, as
+- **378 testes automáticos** cobrem a leitura do texto, a geometria, as
   decisões, os dados aeronáuticos e a app completa. Cada erro alguma vez
   encontrado tem um teste que impede que volte a aparecer.
 - **Verificação cruzada:** em centenas de GAMETs gerados, a decisão de cada
@@ -253,7 +268,7 @@ Algarve não afecta Lisboa.
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
 streamlit run app.py      # a app
-python3 -m pytest         # os testes (359)
+python3 -m pytest         # os testes (378)
 ```
 
 | Ficheiro / pasta | Conteúdo |
@@ -264,7 +279,7 @@ python3 -m pytest         # os testes (359)
 | `scripts/analisar.py` | Análise automática de boletins reais |
 | `.github/workflows/` | Recolha contínua, de 15 em 15 minutos |
 | `CLAUDE.md` | Notas técnicas: arquitectura, princípios, armadilhas conhecidas |
-| ramo `dados` | Boletins recolhidos e relatórios diários |
+| ramo `dados` | Boletins recolhidos, `indice.json` (lido pela app) e relatórios diários |
 
 ## 12. Perguntas frequentes
 

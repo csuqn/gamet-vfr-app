@@ -117,7 +117,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-359 testes. Devem passar a 100%.
+378 testes. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -126,6 +126,8 @@ python3 -m pytest
   janela horária e **a app completa** (via `streamlit.testing`)
 - `tests/test_v14.py` — campos OACI novos e SIGMETs do IPMA
 - `tests/test_v15.py` — qualificadores geográficos ligados por AND
+- `tests/test_v16.py` — índice do arquivo, recurso ao arquivo e SIGMETs
+  históricos (inclui a app completa com a rede simulada)
 - `tests/conftest.py` — extrai o motor da app sem executar a UI. Os imports
   vêm da própria app (nunca de uma lista fixa — escondia imports em falta)
 
@@ -198,6 +200,27 @@ marca de água "API KEY REQUIRED".
 **Dia sem mês** — o GAMET indica o dia mas não o mês. `_build_utc_date()`
 procura o mês certo à volta da data actual; `replace(day=31)` rebentava
 quando o mês corrente não tinha dia 31.
+
+## Arquivo de GAMETs (1.6)
+
+A app lê o arquivo do ramo `dados` por `raw.githubusercontent.com`
+(`_ARQUIVO_BASE`; nunca pela API do GitHub, que tem limite de pedidos),
+através de `dados/indice.json`, que `scripts/recolher_gamet.py`
+(`construir_indice`) reconstrói das pastas no fim de cada volta.
+
+- **Recurso:** quando o fetch do IPMA não traz GAMET (o IPMA retira o
+  anterior ~45 min antes do novo), `gamet_de_recurso` carrega o último GAMET
+  arquivado em vigor — confirmado pela validade lida do próprio texto, não só
+  pelo nome do ficheiro. SIGMETs = arquivo ∪ página do IPMA, se respondeu
+  (`_IPMA_LAST["sem_gamet"]`). Corre no início de `# EXECUÇÃO`, porque o
+  motor só está definido aí (flag `_tentar_recurso` + `st.rerun()`).
+- **Consulta:** painel "📚 Arquivo de GAMETs". Um GAMET do arquivo usa os
+  SIGMETs arquivados que se **sobrepõem à sua validade**
+  (`boletins_do_periodo`; um SIGMET cancelado a meio conta).
+- **Origem do GAMET** em `st.session_state["gamet_fonte"]`: `ipma`,
+  `arquivo_recurso`, `arquivo_hist`, `historico` (histórico da sessão).
+  Só `ipma` e `arquivo_recurso` usam os SIGMETs de agora; texto editado ou
+  colado é sempre "manual" (só conta o `SIGMET APPLICABLE` do texto).
 
 ## Teste contínuo com GAMETs reais
 
