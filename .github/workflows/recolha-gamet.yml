@@ -1,22 +1,44 @@
 name: Recolha GAMET LPPC
 
+# Recolha em cadeia, sem depender do agendamento do GitHub.
+#
+# O agendamento (schedule) do GitHub é "melhor esforço": a 14/15-out-2026 o
+# cron horário correu só às 22:19Z, 00:36Z e 05:56Z, e depois de passar a
+# duas vezes por hora não correu NENHUMA vez em 7 horas. Por isso:
+#
+#   1. cada execução fica ligada ~5h30 e recolhe de 15 em 15 minutos;
+#   2. no fim, lança ela própria a execução seguinte (workflow_dispatch com o
+#      GITHUB_TOKEN, que o GitHub permite) — a cadeia não pára;
+#   3. o schedule fica só como rede de segurança: se a cadeia partir, basta
+#      uma execução agendada, mesmo atrasada, para a retomar.
+#
+# O grupo de concorrência garante que nunca correm duas recolhas ao mesmo
+# tempo (uma corre, no máximo uma fica à espera).
+# Repositório público: os minutos de GitHub Actions são gratuitos.
+
 on:
   schedule:
-    # Duas vezes por hora (aos :23 e aos :53). O GitHub trata os agendamentos
-    # como "melhor esforço" e atrasa ou salta execuções: a 14/15-out-2026 o
-    # cron horário só correu às 22:19Z, 00:36Z e 05:56Z. Um AMD/COR emitido e
-    # substituído dentro de um buraco desses perdia-se. Minutos fora da hora
-    # certa (:00) porque é aí que o GitHub tem mais carga.
-    - cron: "23,53 * * * *"
-  workflow_dispatch:         # permite correr à mão no separador Actions
+    - cron: "23,53 * * * *"   # rede de segurança
+  workflow_dispatch:
     inputs:
+      duracao_min:
+        description: "Minutos que esta execução fica a recolher (máx. 330)"
+        default: "330"
+      intervalo_s:
+        description: "Segundos entre recolhas"
+        default: "900"
+      encadear:
+        description: "No fim, lançar a execução seguinte (desligar só para testes)"
+        type: boolean
+        default: true
       guardar_pagina:
-        description: "Guardar também a página do IPMA tal como vem (diagnóstico)"
+        description: "Na primeira recolha, guardar também a página do IPMA tal como vem (diagnóstico)"
         type: boolean
         default: false
 
 permissions:
-  contents: write
+  contents: write   # gravar no ramo dados
+  actions: write    # lançar a execução seguinte
 
 concurrency:
   group: recolha-gamet
@@ -25,7 +47,7 @@ concurrency:
 jobs:
   recolher:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 350
     steps:
       - name: Código (main)
         uses: actions/checkout@v4
@@ -38,21 +60,45 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install requests
-      - name: Recolher
+
+      - name: Recolher em ciclo
         env:
           GAMET_DIR: dados/gamets
           GUARDAR_PAGINA: ${{ inputs.guardar_pagina && '1' || '0' }}
-        run: python scripts/recolher_gamet.py
-      - name: Guardar no ramo dados
-        working-directory: dados
+          DURACAO_MIN: ${{ inputs.duracao_min || '330' }}
+          INTERVALO_S: ${{ inputs.intervalo_s || '900' }}
         run: |
-          git config user.name  "recolha-gamet"
-          git config user.email "recolha-gamet@users.noreply.github.com"
-          git add -A .
-          if git diff --cached --quiet; then
-            echo "Nada de novo."
-          else
-            git commit -m "Recolha $(date -u +%Y-%m-%dT%H:%MZ)"
-            git pull --rebase --autostash
-            git push
-          fi
+          git -C dados config user.name  "recolha-gamet"
+          git -C dados config user.email "recolha-gamet@users.noreply.github.com"
+          [ "$DURACAO_MIN" -gt 330 ] && DURACAO_MIN=330
+          fim=$(( $(date +%s) + DURACAO_MIN * 60 ))
+          n=0
+          while :; do
+            n=$((n + 1))
+            echo "::group::Recolha $n — $(date -u +%H:%MZ)"
+            python scripts/recolher_gamet.py || echo "A recolha falhou nesta volta."
+            (
+              cd dados
+              git add -A .
+              if git diff --cached --quiet; then
+                echo "Nada de novo."
+              else
+                git commit -q -m "Recolha $(date -u +%Y-%m-%dT%H:%MZ)"
+                git pull -q --rebase --autostash && git push -q
+              fi
+            ) || echo "Não foi possível gravar nesta volta; fica para a próxima."
+            echo "::endgroup::"
+            GUARDAR_PAGINA=0   # a página só se guarda na primeira volta
+            [ "$(date +%s)" -ge "$fim" ] && break
+            sleep "$INTERVALO_S"
+          done
+          echo "Fim do ciclo: $n recolhas."
+
+      - name: Lançar a execução seguinte
+        # always(): mesmo que um passo anterior falhe, a cadeia continua.
+        # Nas execuções agendadas não há inputs (seriam null, e null == false
+        # nas expressões do GitHub), por isso o teste é pelo tipo de evento.
+        if: always() && (github.event_name != 'workflow_dispatch' || inputs.encadear)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run recolha-gamet.yml --repo "$GITHUB_REPOSITORY" --ref main

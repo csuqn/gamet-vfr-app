@@ -205,9 +205,13 @@ Ramos: `main` tem o código (é o que o Streamlit Cloud publica); `dados` tem
 os GAMETs recolhidos (`gamets/AAAA/MM/`) e os relatórios (`relatorios/`).
 Ficam separados para que cada recolha não reinicie a app publicada.
 
-- `.github/workflows/recolha-gamet.yml` — GitHub Actions, duas vezes por hora
-  (aos :23 e :53 — o GitHub atrasa ou salta execuções agendadas):
-  corre `scripts/recolher_gamet.py`, que usa o MESMO código de recolha da
+- `.github/workflows/recolha-gamet.yml` — GitHub Actions, **em cadeia**:
+  cada execução fica ligada ~5h30, recolhe de 15 em 15 minutos e, no fim,
+  lança a seguinte (`gh workflow run` com o GITHUB_TOKEN). O `schedule`
+  (:23 e :53) é só rede de segurança — o agendamento do GitHub não é fiável
+  (a 15-out-2026 esteve 7 h sem correr). O grupo de concorrência impede
+  recolhas em paralelo. Para testar sem encadear: `encadear=false` e
+  `duracao_min` curto. Cada volta corre `scripts/recolher_gamet.py`, que usa o MESMO código de recolha da
   app, e guarda cada GAMET distinto no ramo `dados` (inclui AMD/COR).
   Guarda também os SIGMET/AIRMET LPPC em `sigmets/AAAA/MM/` (blocos com
   formato inesperado vão para `sigmets/desconhecidos/`). Falhas de recolha

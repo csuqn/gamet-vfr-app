@@ -241,7 +241,7 @@ Algarve não afecta Lisboa.
   zona é comparada com um cálculo feito directamente ponto a ponto, em cada
   aeródromo.
 - **Teste contínuo com boletins reais:** desde Outubro de 2026, os GAMETs e
-  SIGMETs do IPMA são recolhidos duas vezes por hora pelo GitHub Actions e
+  SIGMETs do IPMA são recolhidos de 15 em 15 minutos pelo GitHub Actions e
   analisados todos os dias (um script automático e uma revisão manual). Os
   boletins e os relatórios diários estão no ramo [`dados`](../../tree/dados).
 - **Nenhuma alteração entra sem aprovação:** qualquer correcção é proposta
@@ -262,7 +262,7 @@ python3 -m pytest         # os testes (359)
 | `tests/` | Testes automáticos |
 | `scripts/recolher_gamet.py` | Recolha de GAMETs e SIGMETs (GitHub Actions) |
 | `scripts/analisar.py` | Análise automática de boletins reais |
-| `.github/workflows/` | Recolha duas vezes por hora |
+| `.github/workflows/` | Recolha contínua, de 15 em 15 minutos |
 | `CLAUDE.md` | Notas técnicas: arquitectura, princípios, armadilhas conhecidas |
 | ramo `dados` | Boletins recolhidos e relatórios diários |
 
