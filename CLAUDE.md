@@ -205,7 +205,8 @@ Ramos: `main` tem o código (é o que o Streamlit Cloud publica); `dados` tem
 os GAMETs recolhidos (`gamets/AAAA/MM/`) e os relatórios (`relatorios/`).
 Ficam separados para que cada recolha não reinicie a app publicada.
 
-- `.github/workflows/recolha-gamet.yml` — GitHub Actions, de hora a hora:
+- `.github/workflows/recolha-gamet.yml` — GitHub Actions, duas vezes por hora
+  (aos :23 e :53 — o GitHub atrasa ou salta execuções agendadas):
   corre `scripts/recolher_gamet.py`, que usa o MESMO código de recolha da
   app, e guarda cada GAMET distinto no ramo `dados` (inclui AMD/COR).
   Guarda também os SIGMET/AIRMET LPPC em `sigmets/AAAA/MM/` (blocos com
