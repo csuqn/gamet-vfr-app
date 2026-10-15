@@ -2,7 +2,12 @@ name: Recolha GAMET LPPC
 
 on:
   schedule:
-    - cron: "23 * * * *"     # de hora a hora (apanha emendas AMD/COR)
+    # Duas vezes por hora (aos :23 e aos :53). O GitHub trata os agendamentos
+    # como "melhor esforço" e atrasa ou salta execuções: a 14/15-out-2026 o
+    # cron horário só correu às 22:19Z, 00:36Z e 05:56Z. Um AMD/COR emitido e
+    # substituído dentro de um buraco desses perdia-se. Minutos fora da hora
+    # certa (:00) porque é aí que o GitHub tem mais carga.
+    - cron: "23,53 * * * *"
   workflow_dispatch:         # permite correr à mão no separador Actions
     inputs:
       guardar_pagina:
