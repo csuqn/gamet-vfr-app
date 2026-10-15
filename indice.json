@@ -1,0 +1,61 @@
+{
+ "gamets": [
+  {
+   "ficheiro": "gamets/20260321T1500Z_211500-212100_historico.txt",
+   "recolhido": "2026-03-21T15:00Z",
+   "inicio": "2026-03-21T15:00Z",
+   "fim": "2026-03-21T21:00Z",
+   "tipo": "GAMET"
+  },
+  {
+   "ficheiro": "gamets/20260906T0900Z_060900-061500_historico.txt",
+   "recolhido": "2026-09-06T09:00Z",
+   "inicio": "2026-09-06T09:00Z",
+   "fim": "2026-09-06T15:00Z",
+   "tipo": "GAMET"
+  },
+  {
+   "ficheiro": "gamets/2026/10/20261014T1825Z_141500-142100_15d8ce7342.txt",
+   "recolhido": "2026-10-14T18:25Z",
+   "inicio": "2026-10-14T15:00Z",
+   "fim": "2026-10-14T21:00Z",
+   "tipo": "GAMET"
+  },
+  {
+   "ficheiro": "gamets/2026/10/20261014T2219Z_142100-150300_9a8c7cbea7.txt",
+   "recolhido": "2026-10-14T22:19Z",
+   "inicio": "2026-10-14T21:00Z",
+   "fim": "2026-10-15T03:00Z",
+   "tipo": "GAMET"
+  },
+  {
+   "ficheiro": "gamets/2026/10/20261015T0556Z_150300-150900_1a6d936300.txt",
+   "recolhido": "2026-10-15T05:56Z",
+   "inicio": "2026-10-15T03:00Z",
+   "fim": "2026-10-15T09:00Z",
+   "tipo": "GAMET"
+  },
+  {
+   "ficheiro": "gamets/2026/10/20261015T1317Z_150900-151500_b3cfde9816.txt",
+   "recolhido": "2026-10-15T13:17Z",
+   "inicio": "2026-10-15T09:00Z",
+   "fim": "2026-10-15T15:00Z",
+   "tipo": "GAMET"
+  },
+  {
+   "ficheiro": "gamets/2026/10/20261015T1450Z_151500-152100_68a0284195.txt",
+   "recolhido": "2026-10-15T14:50Z",
+   "inicio": "2026-10-15T15:00Z",
+   "fim": "2026-10-15T21:00Z",
+   "tipo": "GAMET"
+  },
+  {
+   "ficheiro": "gamets/2026/10/20261015T2051Z_152100-160300_e14e58f1b2.txt",
+   "recolhido": "2026-10-15T20:51Z",
+   "inicio": "2026-10-15T21:00Z",
+   "fim": "2026-10-16T03:00Z",
+   "tipo": "GAMET"
+  }
+ ],
+ "sigmets": []
+}
