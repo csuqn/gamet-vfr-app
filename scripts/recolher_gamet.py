@@ -3,7 +3,7 @@ Recolhe o GAMET e os SIGMETs LPPC actuais do IPMA e guarda-os em
 gamets/AAAA/MM/ e sigmets/AAAA/MM/, uma vez por texto distinto (as
 emissões repetidas são ignoradas).
 
-Corre de hora a hora no GitHub Actions — assim apanha também as emendas
+Corre de 15 em 15 minutos no GitHub Actions — assim apanha também as emendas
 (GAMET AMD) e correcções (COR), não só as emissões de 6 em 6 horas.
 
 Usa o MESMO código de recolha da app (secção de rede de app.py),
