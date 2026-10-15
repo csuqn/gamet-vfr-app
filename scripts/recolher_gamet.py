@@ -111,7 +111,93 @@ def recolher_sigmets(rede, agora):
             print("Novo boletim:", d)
 
 
+# ---------------------------------------------------------------------
+# Índice do arquivo — lido pela app (secção "Arquivo" e recurso quando o
+# IPMA não tem GAMET publicado). Fica em dados/indice.json e é reconstruído
+# a partir das pastas em cada volta, por isso nunca fica dessincronizado.
+# A app lê-o por raw.githubusercontent.com, sem passar pela API do GitHub
+# (que tem limite de pedidos).
+# ---------------------------------------------------------------------
+import json
+
+_NOME_RE = re.compile(r"^(\d{8}T\d{4})Z_(?:(?:SIGMET|AIRMET)\S*?_)?(\d{6})-(\d{6})_")
+
+
+def _data_validade(ddhhmm, ref):
+    """dia/hora/minuto do GAMET → datetime UTC, no mês mais próximo de ref."""
+    d, h, mi = int(ddhhmm[:2]), int(ddhhmm[2:4]), int(ddhhmm[4:])
+    melhores = []
+    for dm in (-1, 0, 1):
+        ano, mes = ref.year, ref.month + dm
+        if mes < 1:
+            ano, mes = ano - 1, 12
+        if mes > 12:
+            ano, mes = ano + 1, 1
+        try:
+            melhores.append(datetime(ano, mes, d, h, mi, tzinfo=timezone.utc))
+        except ValueError:
+            continue
+    return min(melhores, key=lambda c: abs((c - ref).total_seconds())) if melhores else None
+
+
+def _entrada(f, base):
+    m = _NOME_RE.match(f.name)
+    if not m:
+        return None
+    rec = datetime.strptime(m.group(1), "%Y%m%dT%H%M").replace(tzinfo=timezone.utc)
+    ini = _data_validade(m.group(2), rec)
+    fim = _data_validade(m.group(3), ini or rec)
+    if ini and fim and fim <= ini:
+        fim += timedelta(days=1)
+    fmt = "%Y-%m-%dT%H:%MZ"
+    return {
+        "ficheiro": f.relative_to(base).as_posix(),
+        "recolhido": rec.strftime(fmt),
+        "inicio": ini.strftime(fmt) if ini else None,
+        "fim": fim.strftime(fmt) if fim else None,
+    }
+
+
+def construir_indice(base):
+    """Reconstrói base/indice.json; devolve True se mudou."""
+    gam, sig = [], []
+    for f in sorted((base / "gamets").rglob("*.txt")):
+        e = _entrada(f, base)
+        if e:
+            txt = f.read_text(encoding="utf-8")
+            e["tipo"] = "AMD" if " GAMET AMD " in f" {txt} " else ("COR" if " GAMET COR " in f" {txt} " else "GAMET")
+            gam.append(e)
+    pasta_sig = base / "sigmets"
+    if pasta_sig.exists():
+        for f in sorted(pasta_sig.rglob("*.txt")):
+            if "desconhecidos" in f.parts:
+                continue
+            e = _entrada(f, base)
+            if e:
+                e["texto"] = f.read_text(encoding="utf-8").strip()
+                sig.append(e)
+    gam.sort(key=lambda e: e["recolhido"])
+    sig.sort(key=lambda e: e["recolhido"])
+    novo = json.dumps({"gamets": gam, "sigmets": sig}, ensure_ascii=False, indent=1)
+    alvo = base / "indice.json"
+    if alvo.exists() and alvo.read_text(encoding="utf-8") == novo:
+        return False
+    alvo.write_text(novo, encoding="utf-8")
+    return True
+
+
 def main() -> int:
+    try:
+        return _recolher()
+    finally:
+        try:
+            if construir_indice(DESTINO.parent):
+                print("Índice actualizado.")
+        except Exception as exc:  # noqa: BLE001
+            print("Falha ao construir o índice:", exc)
+
+
+def _recolher() -> int:
     rede = _carregar_rede()
     agora = datetime.now(timezone.utc)
     try:

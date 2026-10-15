@@ -28,7 +28,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "1.5"
+APP_VERSION = "1.6"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
 st.title(f"✈️ LPPC GAMET – Motor Cartográfico v{APP_VERSION}")
@@ -108,7 +108,42 @@ def extract_gamet_from_html(raw: str) -> str:
     m = re.search(r"(LPPC\s+GAMET\s+(?:AMD\s+|COR\s+)?VALID\s+.+?=)", text, re.DOTALL)
     return m.group(1).strip() if m else ""
 
-_IPMA_LAST = {"raw": "", "at": None}   # última página recebida com GAMET
+# Última página recebida com GAMET ("raw") e, quando a página respondeu mas
+# ainda sem o GAMET novo, essa página ("sem_gamet") — traz os SIGMETs.
+_IPMA_LAST = {"raw": "", "at": None, "sem_gamet": ""}
+
+# Arquivo dos GAMETs/SIGMETs recolhidos de 15 em 15 min pelo GitHub Actions
+# (ramo "dados"). Lido por raw.githubusercontent.com — sem passar pela API
+# do GitHub, que tem limite de pedidos.
+_ARQUIVO_BASE = "https://raw.githubusercontent.com/csuqn/gamet-vfr-app/dados/"
+
+
+def fetch_arquivo(caminho: str) -> tuple:
+    """(ok, texto|erro) de um ficheiro do arquivo."""
+    try:
+        resp = requests.get(_ARQUIVO_BASE + caminho, timeout=8,
+                            headers={"User-Agent": f"GAMET-Decoder/{APP_VERSION}"})
+    except requests.RequestException as e:
+        return False, f"erro de ligação ({type(e).__name__})"
+    if resp.status_code != 200:
+        return False, f"HTTP {resp.status_code}"
+    return True, resp.text
+
+
+def fetch_arquivo_indice() -> tuple:
+    """(ok, índice|erro) — o índice é um JSON com listas 'gamets' e 'sigmets'."""
+    import json
+    ok, txt = fetch_arquivo("indice.json")
+    if not ok:
+        return False, txt
+    try:
+        dados = json.loads(txt)
+    except ValueError:
+        return False, "índice ilegível"
+    if not isinstance(dados, dict) or not isinstance(dados.get("gamets"), list):
+        return False, "índice com formato inesperado"
+    dados.setdefault("sigmets", [])
+    return True, dados
 
 _BULLETIN_RE = re.compile(
     r"(LPPC\s+(?:SIGMET|AIRMET)\s+\S+\s+VALID\s+\d{6}/\d{6}.+?=)", re.DOTALL)
@@ -145,6 +180,7 @@ def fetch_gamet_ipma(custom_url: str = "") -> tuple:
 
     attempts = []       # diagnóstico por URL
     reached_ok = False  # algum endpoint respondeu 200?
+    _IPMA_LAST["sem_gamet"] = ""
 
     for url in urls:
         # Se o URL já traz query string própria (ex.: colado do browser),
@@ -184,6 +220,10 @@ def fetch_gamet_ipma(custom_url: str = "") -> tuple:
             _IPMA_LAST["raw"] = resp.text
             _IPMA_LAST["at"] = datetime.now(timezone.utc)
             return True, gamet
+        # Página certa sem GAMET (janela antes da emissão): guarda-se a
+        # primeira que traga boletins LPPC, para não perder os SIGMETs
+        if not _IPMA_LAST["sem_gamet"] and extract_bulletins_from_html(resp.text):
+            _IPMA_LAST["sem_gamet"] = resp.text
         attempts.append(f"{url} → respondeu, mas sem GAMET do LPPC no conteúdo")
 
     detail = "\n".join(f"• {a}" for a in attempts)
@@ -205,43 +245,59 @@ def fetch_gamet_ipma(custom_url: str = "") -> tuple:
 # UI — carregamento automático
 # -------------------------------------------------
 
-# Auto-fetch ao arrancar se não há GAMET em sessão
-if "gamet_loaded" not in st.session_state:
-    with st.spinner("A carregar GAMET do Self-Briefing IPMA..."):
-        ok, result = fetch_gamet_ipma(st.session_state.get("ipma_custom_url", ""))
+def _carregar_do_ipma():
+    """Fetch do IPMA e actualização da sessão. Devolve (ok, texto|erro)."""
+    ok, result = fetch_gamet_ipma(st.session_state.get("ipma_custom_url", ""))
+    agora_txt = datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%MZ")
     if ok:
         st.session_state["gamet_loaded"]    = result
-        st.session_state["gamet_loaded_at"] = datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%MZ")
+        st.session_state["gamet_loaded_at"] = agora_txt
+        st.session_state["gamet_fonte"]     = "ipma"
+        st.session_state["ipma_boletins_fonte"] = "página do IPMA"
         st.session_state["ipma_boletins"]    = extract_bulletins_from_html(_IPMA_LAST["raw"])
         st.session_state["ipma_boletins_at"] = _IPMA_LAST["at"]
+        st.session_state.pop("gamet_fetch_error", None)
+        st.session_state.pop("_tentar_recurso", None)
     else:
         # Guardar o erro para o mostrar no expander — antes falhava em
         # silêncio e o utilizador só via a caixa de texto vazia
         st.session_state["gamet_fetch_error"] = result
+        # Recurso ao arquivo (último GAMET ainda em vigor). Só pode correr
+        # depois de o motor estar definido — ver o início de # EXECUÇÃO.
+        st.session_state["_tentar_recurso"] = True
+        # SIGMETs da página, se respondeu sem GAMET (janela antes da emissão)
+        st.session_state["_pagina_sem_gamet"] = extract_bulletins_from_html(_IPMA_LAST["sem_gamet"])
+        st.session_state["_pagina_sem_gamet_at"] = (
+            datetime.now(timezone.utc) if _IPMA_LAST["sem_gamet"] else None)
+    return ok, result
 
-with st.expander("📡 GAMET do IPMA", expanded=bool(st.session_state.get("gamet_fetch_error"))):
+
+# Auto-fetch ao arrancar se não há GAMET em sessão
+if "gamet_loaded" not in st.session_state and "gamet_fetch_error" not in st.session_state:
+    with st.spinner("A carregar GAMET do Self-Briefing IPMA..."):
+        _carregar_do_ipma()
+
+with st.expander("📡 GAMET do IPMA", expanded=bool(st.session_state.get("gamet_fetch_error"))
+                 and st.session_state.get("gamet_fonte") != "arquivo_recurso"):
     col_btn, col_next = st.columns([1, 2])
     with col_btn:
         if st.button("🔄 Recarregar GAMET"):
             with st.spinner("A carregar..."):
-                ok, result = fetch_gamet_ipma(st.session_state.get("ipma_custom_url", ""))
+                ok, result = _carregar_do_ipma()
             if ok:
-                st.session_state["gamet_loaded"]    = result
-                st.session_state["gamet_loaded_at"] = datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%MZ")
-                st.session_state["ipma_boletins"]    = extract_bulletins_from_html(_IPMA_LAST["raw"])
-                st.session_state["ipma_boletins_at"] = _IPMA_LAST["at"]
-                st.session_state.pop("gamet_fetch_error", None)
                 st.success("✅ GAMET actualizado!")
-            else:
-                st.session_state["gamet_fetch_error"] = result
-                st.error(result)
     with col_next:
         nxt = next_gamet_time()
         st.info(f"⏭️ Próximo GAMET esperado: **{nxt.strftime('%H:%MZ')}** "
                 f"(em {format_countdown(nxt)})")
 
     if st.session_state.get("gamet_fetch_error"):
-        st.error(st.session_state["gamet_fetch_error"])
+        if st.session_state.get("gamet_fonte") == "arquivo_recurso":
+            st.info("O IPMA não tem GAMET publicado neste momento — está "
+                    "carregado o último GAMET do arquivo ainda em vigor.\n\n"
+                    + st.session_state["gamet_fetch_error"])
+        else:
+            st.error(st.session_state["gamet_fetch_error"])
 
     if "gamet_loaded_at" in st.session_state:
         st.caption(f"⏱️ Carregado às {st.session_state['gamet_loaded_at']}")
@@ -262,6 +318,56 @@ with st.expander("📡 GAMET do IPMA", expanded=bool(st.session_state.get("gamet
         "Se o carregamento automático falhar, podes sempre colar o texto do "
         "GAMET manualmente na caixa abaixo — a app funciona na mesma."
     )
+
+# ---- Arquivo de GAMETs ----
+# Os GAMETs e SIGMETs recolhidos de 15 em 15 min pelo GitHub Actions. Para
+# rever situações passadas — NÃO para planear um voo com um GAMET antigo.
+@st.cache_data(ttl=300, show_spinner=False)
+def _indice_arquivo():
+    return fetch_arquivo_indice()
+
+
+with st.expander("📚 Arquivo de GAMETs"):
+    st.caption("GAMETs recolhidos automaticamente do IPMA desde 14/10/2026 "
+               "(com os SIGMETs emitidos). Serve para consultar e analisar "
+               "situações passadas — **não** para planear um voo.")
+    if st.button("📂 Abrir arquivo") or st.session_state.get("_arquivo_aberto"):
+        st.session_state["_arquivo_aberto"] = True
+        _ok_idx, _idx = _indice_arquivo()
+        if not _ok_idx:
+            st.error(f"Não foi possível ler o arquivo: {_idx}")
+        elif not _idx["gamets"]:
+            st.info("O arquivo ainda está vazio.")
+        else:
+            _por_dia = defaultdict(list)
+            for _e in _idx["gamets"]:
+                _por_dia[(_e.get("inicio") or _e["recolhido"])[:10]].append(_e)
+            _dias = sorted(_por_dia, reverse=True)
+            _dia = st.selectbox(
+                "Dia (início da validade)", _dias,
+                format_func=lambda d: f"{d[8:10]}/{d[5:7]}/{d[:4]} · {len(_por_dia[d])} GAMET(s)")
+            _lista = sorted(_por_dia[_dia], key=lambda e: (e.get("inicio") or "", e["recolhido"]),
+                            reverse=True)
+
+            def _rotulo(e):
+                ini, fim = e.get("inicio") or "", e.get("fim") or ""
+                tipo = "" if e.get("tipo", "GAMET") == "GAMET" else f" {e['tipo']}"
+                return (f"{ini[11:13]}–{fim[11:13]}Z{tipo} · recolhido "
+                        f"{e['recolhido'][8:10]}/{e['recolhido'][5:7]} {e['recolhido'][11:16]}Z")
+            _esc = st.selectbox("GAMET", range(len(_lista)), format_func=lambda i: _rotulo(_lista[i]))
+            if st.button("Carregar e analisar este GAMET"):
+                _ok_t, _txt = fetch_arquivo(_lista[_esc]["ficheiro"])
+                if not _ok_t:
+                    st.error(f"Não foi possível ler o GAMET: {_txt}")
+                else:
+                    _txt = re.sub(r"\s+", " ", _txt).strip()
+                    st.session_state["gamet_loaded"] = _txt
+                    st.session_state["gamet_loaded_at"] = f"arquivo ({_rotulo(_lista[_esc])})"
+                    st.session_state["gamet_fonte"] = "arquivo_hist"
+                    st.session_state["arquivo_entrada"] = _lista[_esc]
+                    st.session_state["arquivo_indice"] = _idx
+                    st.session_state["_active_gamet_text"] = _txt
+                    st.rerun()
 
 # Preencher text_area com GAMET carregado (ou vazio para input manual)
 _default = st.session_state.get("gamet_loaded", "")
@@ -2066,6 +2172,106 @@ def active_bulletins(bulletins, now=None):
     return sigmets, airmets
 
 
+# -------------------------------------------------
+# ARQUIVO — GAMETs e SIGMETs recolhidos (ramo "dados" do repositório)
+# -------------------------------------------------
+# O índice (dados/indice.json) é gerado pelo scripts/recolher_gamet.py a
+# cada recolha. Cada entrada traz o ficheiro, a hora de recolha e a validade
+# (início/fim em UTC). As funções abaixo são puras — a rede fica de fora —
+# para poderem ser testadas sem ligação.
+
+def _iso_utc(txt):
+    try:
+        return datetime.strptime(txt, "%Y-%m-%dT%H:%MZ").replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def ultimo_gamet_valido(indice, agora=None):
+    """
+    Entrada do índice do GAMET arquivado que está em vigor em `agora`, ou
+    None. Havendo vários (GAMET + AMD/COR), fica o de início mais recente e,
+    dentro desse, o recolhido por último — uma emenda é sempre recolhida
+    depois do original que corrige.
+    """
+    agora = agora or datetime.now(timezone.utc)
+    validos = []
+    for e in (indice or {}).get("gamets", []):
+        ini, fim = _iso_utc(e.get("inicio")), _iso_utc(e.get("fim"))
+        if ini and fim and ini <= agora < fim:
+            validos.append((ini, e.get("recolhido", ""), e))
+    if not validos:
+        return None
+    return max(validos, key=lambda t: (t[0], t[1]))[2]
+
+
+def boletins_do_periodo(indice, inicio, fim):
+    """
+    SIGMET e AIRMET arquivados cuja validade se sobrepõe a [inicio, fim).
+    Devolve (sigmets, airmets) — textos. Os boletins de cancelamento não
+    contam, mas um SIGMET cancelado a meio conta na mesma: esteve em vigor
+    durante parte do período, que é o que interessa para rever um GAMET
+    antigo (leitura conservadora). Validade ilegível também conta.
+    """
+    sigmets, airmets = [], []
+    for e in (indice or {}).get("sigmets", []):
+        txt = e.get("texto", "")
+        cab = re.match(r"LPPC\s+(SIGMET|AIRMET)\b", txt)
+        if not cab or re.search(r"\bCNL\s+(SIGMET|AIRMET)\b", txt):
+            continue
+        ini, fim_b = _iso_utc(e.get("inicio")), _iso_utc(e.get("fim"))
+        sobrepoe = (ini is None or fim_b is None or inicio is None or fim is None
+                    or (ini < fim and inicio < fim_b))
+        if sobrepoe:
+            (sigmets if cab.group(1) == "SIGMET" else airmets).append(txt)
+    return sigmets, airmets
+
+
+def boletins_arquivados(indice, agora=None, horas=24):
+    """
+    Textos dos SIGMET/AIRMET arquivados recolhidos nas últimas `horas`
+    (incluindo os CNL), para passar a active_bulletins() — que trata a
+    validade e os cancelamentos. O corte evita que um SIGMET de outro mês
+    com o mesmo dia seja lido como sendo deste (o boletim só traz o dia);
+    um SIGMET dura no máximo 6 h, por isso 24 h é folga larga.
+    """
+    agora = agora or datetime.now(timezone.utc)
+    out = []
+    for e in (indice or {}).get("sigmets", []):
+        rec = _iso_utc(e.get("recolhido"))
+        if e.get("texto") and (rec is None or agora - timedelta(hours=horas) <= rec <= agora + timedelta(hours=1)):
+            out.append(e["texto"])
+    return out
+
+
+def gamet_de_recurso(fetch_indice, fetch_texto, agora=None):
+    """
+    Recurso para a janela em que o IPMA já retirou o GAMET anterior e ainda
+    não publicou o novo (~45 min antes de cada emissão): o último GAMET
+    arquivado que continua em vigor.
+
+    fetch_indice() → (ok, indice|erro); fetch_texto(ficheiro) → (ok, texto|erro).
+    Devolve (texto, entrada, boletins_arquivados) ou (None, motivo, []).
+    O texto só é aceite se a validade lida do próprio GAMET também o der
+    como em vigor — não se confia apenas no nome do ficheiro.
+    """
+    agora = agora or datetime.now(timezone.utc)
+    ok, indice = fetch_indice()
+    if not ok:
+        return None, f"arquivo indisponível ({indice})", []
+    entrada = ultimo_gamet_valido(indice, agora)
+    if entrada is None:
+        return None, "nenhum GAMET em vigor no arquivo", []
+    ok, texto = fetch_texto(entrada["ficheiro"])
+    if not ok:
+        return None, f"não foi possível ler {entrada['ficheiro']} ({texto})", []
+    texto = texto.strip()
+    ini, fim = parse_validity(texto)[:2]
+    if not (ini and fim and ini <= agora < fim):
+        return None, "o GAMET arquivado já não está em vigor", []
+    return texto, entrada, boletins_arquivados(indice, agora)
+
+
 def apply_sigmet_override(regions, sigmet_text):
     """
     Quando existe um SIGMET activo aplicável ao GAMET, força NO-GO em todas
@@ -2492,6 +2698,30 @@ def generate_pdf(regions, gamet_text, fzlvl_min, qnh_min, validity_label) -> byt
 # EXECUÇÃO
 # -------------------------------------------------
 
+# Recurso ao arquivo quando o IPMA não tem GAMET (pedido no carregamento,
+# mas só aqui o motor — parse_validity — já está definido).
+if st.session_state.pop("_tentar_recurso", False):
+    _txt_r, _info_r, _bol_arq = gamet_de_recurso(fetch_arquivo_indice, fetch_arquivo)
+    if _txt_r:
+        st.session_state["gamet_loaded"] = _txt_r
+        st.session_state["gamet_loaded_at"] = (
+            datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%MZ") + " (arquivo)")
+        st.session_state["gamet_fonte"] = "arquivo_recurso"
+        st.session_state["arquivo_entrada"] = _info_r
+        # SIGMETs: os do arquivo (recolhidos de 15 em 15 min) mais os da
+        # página do IPMA, se respondeu — a união é a leitura conservadora
+        _pag = st.session_state.get("_pagina_sem_gamet") or []
+        st.session_state["ipma_boletins"] = _bol_arq + [b for b in _pag if b not in _bol_arq]
+        st.session_state["ipma_boletins_at"] = (st.session_state.get("_pagina_sem_gamet_at")
+                                                or datetime.now(timezone.utc))
+        st.session_state["ipma_boletins_fonte"] = (
+            "página do IPMA + arquivo" if _pag else "arquivo (recolha de 15 em 15 min)")
+        st.rerun()
+    else:
+        st.session_state["gamet_fetch_error"] = (
+            st.session_state.get("gamet_fetch_error", "") + f"\n\nArquivo: {_info_r}.")
+        st.rerun()   # o erro é mostrado lá em cima, no expander do IPMA
+
 if st.button("🔍 Analisar GAMET") and gamet_text.strip():
     st.session_state["_active_gamet_text"] = gamet_text.strip()
 
@@ -2525,40 +2755,76 @@ if st.session_state.get("_active_gamet_text"):
 
     has_sigmet, sigmet_text = extract_sigmet_applicable(gamet_text)
 
-    # SIGMETs lidos directamente da página do IPMA. Cobrem o caso que o
-    # GAMET não cobre: um SIGMET emitido DEPOIS do GAMET, que este ainda
-    # dá como "NIL". Só se aplicam ao GAMET que veio do IPMA nesta sessão
-    # (o mais recente): para um GAMET colado à mão ou do histórico, os
-    # SIGMETs de agora podem não ter nada a ver com ele.
+    # De onde veio o GAMET em análise. Só conta se for exactamente o texto
+    # carregado (se o utilizador o editou ou colou outro, é "manual").
+    _gamet_e_o_carregado = gamet_text.strip() == st.session_state.get("gamet_loaded", "").strip()
+    _fonte = st.session_state.get("gamet_fonte", "ipma") if _gamet_e_o_carregado else "manual"
+    _entrada_arq = st.session_state.get("arquivo_entrada") or {}
+
+    if _fonte == "arquivo_hist":
+        st.warning(
+            "📚 **GAMET DO ARQUIVO — não é o GAMET actual.** Recolhido às "
+            f"{_entrada_arq.get('recolhido', '?')}. Serve para rever uma situação "
+            "passada; não o uses para planear um voo.")
+    elif _fonte == "arquivo_recurso":
+        st.warning(
+            "🕓 **O IPMA ainda não publicou o novo GAMET** (o anterior é retirado "
+            "cerca de 45 min antes da emissão). A mostrar o **último GAMET "
+            "arquivado, ainda em vigor** (recolhido às "
+            f"{_entrada_arq.get('recolhido', '?')}). Recarrega dentro de alguns "
+            "minutos para obter o novo.")
+
+    # SIGMETs. Três casos:
+    #  · GAMET actual (IPMA ou recurso ao arquivo): os SIGMET/AIRMET em vigor
+    #    AGORA — lidos da página do IPMA e/ou do arquivo. Cobrem o caso que o
+    #    GAMET não cobre: um SIGMET emitido DEPOIS do GAMET.
+    #  · GAMET do arquivo: os SIGMETs arquivados que estiveram em vigor
+    #    durante a validade desse GAMET.
+    #  · GAMET colado à mão ou do histórico da sessão: não se sabe a que
+    #    momento corresponde — só conta o "SIGMET APPLICABLE" do próprio texto.
     _bol = st.session_state.get("ipma_boletins")
     _bol_at = st.session_state.get("ipma_boletins_at")
-    _gamet_e_o_carregado = gamet_text.strip() == st.session_state.get("gamet_loaded", "").strip()
     sig_ipma, air_ipma = ([], [])
-    if _bol is not None and _gamet_e_o_carregado:
+    _verificado = False
+    if _fonte in ("ipma", "arquivo_recurso") and _bol is not None:
         sig_ipma, air_ipma = active_bulletins(_bol)
+        _verificado = True
+        _onde = ("em vigor no IPMA" if _fonte == "ipma"
+                 else f"em vigor ({st.session_state.get('ipma_boletins_fonte', 'arquivo')})")
+    elif _fonte == "arquivo_hist" and st.session_state.get("arquivo_indice"):
+        sig_ipma, air_ipma = boletins_do_periodo(
+            st.session_state["arquivo_indice"],
+            _iso_utc(_entrada_arq.get("inicio")), _iso_utc(_entrada_arq.get("fim")))
+        _verificado = True
+        _onde = "durante a validade deste GAMET (arquivo)"
     if sig_ipma:
         dynamic_regions = apply_sigmet_override(
             dynamic_regions, " | ".join(b[:80] for b in sig_ipma))
         st.error(
-            f"🚨 **{len(sig_ipma)} SIGMET em vigor no IPMA**"
+            f"🚨 **{len(sig_ipma)} SIGMET {_onde}**"
             + ("" if has_sigmet else " — **não referido no GAMET**, provavelmente "
                "emitido depois dele") + ". A decisão foi forçada a NO-GO em toda a "
-            "área. Lê o SIGMET completo antes de voar:\n\n"
+            "área. Lê o SIGMET completo:\n\n"
             + "\n\n".join(f"`{b}`" for b in sig_ipma)
         )
     if air_ipma:
         st.warning(
-            f"⚠️ **{len(air_ipma)} AIRMET em vigor no IPMA.** A app mostra-o mas "
-            "não o interpreta — lê-o antes de voar:\n\n"
+            f"⚠️ **{len(air_ipma)} AIRMET {_onde}.** A app mostra-o mas "
+            "não o interpreta — lê-o:\n\n"
             + "\n\n".join(f"`{b}`" for b in air_ipma)
         )
-    if _bol is None or not _gamet_e_o_carregado:
+    if not _verificado:
         st.info("ℹ️ SIGMETs do IPMA **não verificados**: o GAMET em análise não "
-                "foi carregado do IPMA nesta sessão. Só conta o campo "
-                "\"SIGMET APPLICABLE\" do próprio GAMET.")
-    elif not sig_ipma and not air_ipma and _bol_at:
-        st.caption(f"✅ Sem SIGMET/AIRMET LPPC em vigor no IPMA "
-                   f"(verificado às {_bol_at.strftime('%H:%MZ')}).")
+                "foi carregado do IPMA nem do arquivo nesta sessão. Só conta o "
+                "campo \"SIGMET APPLICABLE\" do próprio GAMET.")
+    elif not sig_ipma and not air_ipma:
+        if _fonte == "arquivo_hist":
+            st.caption("✅ Nenhum SIGMET/AIRMET LPPC arquivado durante a validade "
+                       "deste GAMET.")
+        elif _bol_at:
+            st.caption(f"✅ Sem SIGMET/AIRMET LPPC em vigor "
+                       f"({st.session_state.get('ipma_boletins_fonte', 'página do IPMA')}, "
+                       f"verificado às {_bol_at.strftime('%H:%MZ')}).")
 
     if has_sigmet:
         dynamic_regions = apply_sigmet_override(dynamic_regions, sigmet_text)
@@ -2948,4 +3214,5 @@ if st.session_state.get("gamet_history"):
             with col_btn:
                 if st.button("Carregar", key=f"hist_{idx}"):
                     st.session_state["gamet_loaded"] = entry["text"]
+                    st.session_state["gamet_fonte"] = "historico"
                     st.rerun()
