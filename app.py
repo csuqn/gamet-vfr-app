@@ -28,7 +28,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "1.6"
+APP_VERSION = "2.0"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
 st.title(f"✈️ LPPC GAMET – Motor Cartográfico v{APP_VERSION}")
@@ -1561,6 +1561,27 @@ def parse_gamet(text):
                 fen = "BASE_AGL" if ref == "AGL" else "BASE_AMSL"
                 blocks.append(MetBlock(fen, poly, base_ft, qualifier, surface=surface, window=window))
 
+            # Cumulonimbos na linha de nuvens (2.0). Até à 1.6 "TCU/CB" em
+            # SIG CLD era lido só como tipo de nuvem: se o IPMA não pusesse
+            # também TS em SIGWX, a zona saía GO sem qualquer menção ao CB
+            # (GAMET real 160300/160900: "N OF N4000 AND E OF W00800
+            # ISOL/EMBD TCU/CB 030-040/XXXHFT AGL" → GO em Trás-os-Montes).
+            # Regra aprovada: CB isolado → MARGINAL; embebido, ocasional ou
+            # frequente → NO-GO. Sem qualificador → NO-GO (conservador).
+            # TCU sozinho continua a ser só o tipo de nuvem.
+            if re.search(r"\bCB\b", content):
+                if re.search(r"\bFRQ\b", content):
+                    cb_q = "FRQ"
+                elif re.search(r"\bOCNL\b", content):
+                    cb_q = "OCNL"
+                elif re.search(r"\bISOL\b", content):
+                    cb_q = "ISOL_EMBD" if re.search(r"\bEMBD\b", content) else "ISOL"
+                elif re.search(r"\bEMBD\b", content):
+                    cb_q = "EMBD"
+                else:
+                    cb_q = "GEN"
+                blocks.append(MetBlock("CB", poly, cb_q, qualifier, surface=surface, window=window))
+
         elif state == "SIGWX":
             # FIX: EMBD tratado separadamente e eleva risco
             embd = bool(re.search(r"\bEMBD\b", content))
@@ -1711,7 +1732,7 @@ _PHENOM_LABEL = {
     "VIS": "VIS", "BASE_AGL": "BASE", "BASE_AMSL": "BASE",
     "TS": "TS", "TURB": "TURB", "ICE": "ICE",
     "MT_OBSC": "MT OBSC", "VA": "VA",
-    "WSPD": "SFC WSPD", "MTW": "MTW", "WX": "SIGWX",
+    "WSPD": "SFC WSPD", "MTW": "MTW", "WX": "SIGWX", "CB": "CB",
 }
 
 
@@ -1896,7 +1917,7 @@ def compute_dynamic_regions(blocks):
                 and b.polygon.geom_type in ("Polygon", "MultiPolygon")
                 and b.phenomenon in ("VIS", "BASE_AGL", "BASE_AMSL", "TS",
                                        "TURB", "ICE", "MT_OBSC", "VA",
-                                       "WSPD", "MTW", "WX")]
+                                       "WSPD", "MTW", "WX", "CB")]
 
     def _empty_region():
         dec, vis, base, ts, turb, turb_layers, ice, ice_layers, mt_obsc, va, reasons = decision([])
@@ -2084,6 +2105,9 @@ def _consolidate_groups(regions, max_regioes=_MAX_REGIOES):
     return regions
 
 
+# Distância máxima a que uma bolsa residual se junta à região irmã (2.0)
+_BOLSA_MAX_KM = 25.0
+
 def _merge_slivers(regions, min_area_frac=0.015):
     """
     Absorve regiões residuais (< 1,5% da FIR) na vizinha compatível.
@@ -2108,10 +2132,28 @@ def _merge_slivers(regions, min_area_frac=0.015):
                 tuple(r["turb"]), tuple(r["ice"]),
                 tuple(r["mt_obsc"]), tuple(r["va"]))
 
+    def _bolsa_irma(a, b):
+        # Mesmo grupo de compute_dynamic_regions (mesma decisão, mesmos
+        # motivos e mesmas anotações) e a menos de _BOLSA_MAX_KM: é a mesma
+        # zona, partida só por uma reentrância da fronteira ou uma faixa
+        # estreita de outra decisão.
+        return (a.get("_grupo") is not None and a.get("_grupo") == b.get("_grupo")
+                and a["polygon"].distance(b["polygon"]) * 111.0 <= _BOLSA_MAX_KM)
+
     orfas = []
     for peq in pequenas:
+        # 0ª escolha (2.0): uma bolsa irmã — as mesmas causas e notas, a
+        # poucos km. Junta-se mesmo sem ser contígua (fica um multipolígono,
+        # como em _consolidate_groups): não se perde área nem se misturam
+        # motivos. Antes, uma bolsa GO de 45 km² em Castro Laboreiro,
+        # isolada pela fronteira e pela zona NO-GO a oeste de 8°10'W,
+        # aparecia como cartão próprio (GAMET real 160300/160900). Bolsas
+        # longe da irmã (ex.: faixa a norte de 42°N separada do resto por
+        # uma banda NO-GO) continuam a ser preservadas, como desde a v28.
+        candidatos = [g for g in grandes if _bolsa_irma(g, peq)]
         # 1ª escolha: mesma decisão e mesmas causas
-        candidatos = [g for g in grandes if _assinatura(g) == _assinatura(peq)]
+        if not candidatos:
+            candidatos = [g for g in grandes if _assinatura(g) == _assinatura(peq)]
         # 2ª escolha: mesma decisão (motivos podem diferir, decisão não)
         if not candidatos:
             candidatos = [g for g in grandes if g["decision"] == peq["decision"]]
@@ -2125,7 +2167,7 @@ def _merge_slivers(regions, min_area_frac=0.015):
                 else min(candidatos, key=lambda c: c["polygon"].distance(peq["polygon"])))
 
         fundido = unary_union([alvo["polygon"], peq["polygon"]])
-        if isinstance(fundido, MultiPolygon):
+        if isinstance(fundido, MultiPolygon) and not _bolsa_irma(alvo, peq):
             # Não são contíguos — fundir perderia área da FIR. Preservar o
             # fragmento como região autónoma; é preferível um cartão extra
             # a um buraco no mapa.
@@ -2446,6 +2488,20 @@ def decision(events):
         if decision_level == "GO":
             decision_level = "MARGINAL"
         reasons.append(f"MTW MOD{mtw_note} (onda de montanha)")
+
+    # ---- Cumulonimbos em SIG CLD (2.0) — mesma escala da trovoada:
+    # ISOL → MARGINAL; EMBD / OCNL / FRQ (ou sem qualificador) → NO-GO ----
+    cb_vals = [v for t, v, *_ in events if t == "CB"]
+    cb_max_risk = max((TS_RISK.get(v, 2) for v in cb_vals), default=0)
+    if cb_vals:
+        cb_desc = "/".join(sorted({_ts_label(v) for v in cb_vals}))
+        if cb_max_risk >= 2:
+            decision_level = "NO-GO"
+            reasons.append(f"CB {cb_desc} (cumulonimbos, risco alto)")
+        else:
+            if decision_level == "GO":
+                decision_level = "MARGINAL"
+            reasons.append(f"CB {cb_desc} (cumulonimbos)")
 
     # ---- Outros fenómenos severos de SIGWX — NO-GO ----
     wx_codes = sorted({c for t, v, *_ in events if t == "WX" for c in v.split("/")})

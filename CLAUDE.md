@@ -46,6 +46,9 @@ Três pormenores que já causaram erros reais:
 - Com bases AMSL as células são também partidas pela grelha de relevo, e
   se o briefing passar de 8 regiões juntam-se as bolsas com as mesmas
   causas (`_consolidate_groups`).
+- Uma bolsa residual (< 1,5% da FIR) junta-se à região com as mesmas causas
+  e notas se estiver a menos de `_BOLSA_MAX_KM` (25 km), mesmo sem ser
+  contígua (2.0). Mais longe continua a ser um cartão próprio.
 
 Não há sectores fixos. A app teve 3 sectores (Norte/Centro/Sul) até à v17;
 foram substituídos por geometria dinâmica porque marcavam um sector
@@ -65,6 +68,8 @@ definir `FIR_POLYGON` — não entram na decisão.
 | Base < 500 ft AGL | MARGINAL |
 | TS ISOL | MARGINAL |
 | TS OCNL / FRQ / EMBD / ISOL_EMBD / GEN | NO-GO |
+| CB em SIG CLD, ISOL | MARGINAL (desde a 2.0) |
+| CB em SIG CLD, EMBD / OCNL / FRQ / sem qualificador | NO-GO (desde a 2.0; TCU sozinho não conta) |
 | TURB ou ICE **SEV** (ou HVY) | NO-GO |
 | TURB ou ICE MOD | informativo, não altera decisão |
 | MTW (onda de montanha) SEV | NO-GO |
@@ -89,6 +94,11 @@ do IPMA nessa sessão. AIRMETs são mostrados mas não interpretados.
 
 Campos do modelo OACI (Anexo 3) suportados desde a 1.4: `SFC WSPD`, `MTW`
 e, em `SIGWX`, os fenómenos de `_SIGWX_SEVEROS` além da trovoada.
+
+Desde a 2.0 um CB em `SIG CLD` gera um fenómeno próprio (`CB`, com a escala
+de `TS_RISK`), mesmo sem TS em `SIGWX`. Até à 1.6 era só o tipo de nuvem, e o
+GAMET real 160300/160900 (`ISOL/EMBD TCU/CB` no NE, sem TS) dava GO em
+Trás-os-Montes. Não é lido como TS: os motivos dizem "CB …".
 
 ## Princípios que orientam o código
 
@@ -117,7 +127,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-378 testes. Devem passar a 100%.
+402 testes. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -128,6 +138,7 @@ python3 -m pytest
 - `tests/test_v15.py` — qualificadores geográficos ligados por AND
 - `tests/test_v16.py` — índice do arquivo, recurso ao arquivo e SIGMETs
   históricos (inclui a app completa com a rede simulada)
+- `tests/test_v20.py` — CB em SIG CLD (GAMET real 160300) e bolsas residuais
 - `tests/conftest.py` — extrai o motor da app sem executar a UI. Os imports
   vêm da própria app (nunca de uma lista fixa — escondia imports em falta)
 

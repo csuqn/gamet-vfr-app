@@ -43,7 +43,7 @@ def carregar_motor():
 # ---------------------------------------------------------------------
 CAMPOS = {
     "SFC VIS": {"VIS"}, "SIG VIS": {"VIS"},
-    "SIG CLD": {"BASE_AGL", "BASE_AMSL"},
+    "SIG CLD": {"BASE_AGL", "BASE_AMSL", "CB"},
     "SIGWX": {"TS", "WX"},
     "TURB": {"TURB"}, "ICE": {"ICE"},
     "MT OBSC": {"MT_OBSC"}, "VA": {"VA"},

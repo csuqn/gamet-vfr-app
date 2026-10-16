@@ -112,6 +112,12 @@ def test_campos_apos_sigmet_sao_ignorados(analyse):
 # ── INVARIANTES UNIVERSAIS ───────────────────────────────────────────
 GAMETS_VARIADOS = [
     "SECN I SFC VIS: NIL SIGWX: NIL SIG CLD: NIL",
+    # GAMET real 160300/160900 (2.0): CB embebido em SIG CLD sem TS em
+    # SIGWX, e bolsa GO de 45 km² em Castro Laboreiro
+    "SECN I SFC VIS:N OF N3840 AND W OF W00810 LCA 0200-5000M FG/BR "
+    "SIG CLD:N OF N3840 AND W OF W00810 LCA BKN 002-008/010HFT AGL "
+    "N OF N4000 AND E OF W00800 ISOL/EMBD TCU/CB 030-040/XXXHFT AGL "
+    "TURB:N OF N3800 COT AND MAR LCA MOD SFC/FL020",
     "SECN I SFC VIS: 800M SIGWX: FRQ TS",
     "SECN I SIG CLD: N OF N4030 BKN 002HFT AGL S OF N3845 ISOL TCU/CB 020HFT AGL",
     "SECN I MT OBSC N OF N4000 VA: S OF N3800 FL030/FL150",
@@ -267,9 +273,24 @@ def test_label_reflecte_localizacao_da_regiao(analyse, eng):
 
 
 @pytest.mark.parametrize("corpo", GAMETS_VARIADOS)
-def test_invariante_regioes_conexas(analyse, corpo):
+def test_invariante_regioes_conexas(analyse, eng, corpo):
+    """
+    Cada região é uma área contígua. Única excepção (2.0, aprovada pelo
+    Duarte): uma bolsa residual (< 1,5% da FIR) junta à região irmã — mesma
+    decisão, causas e notas — a menos de _BOLSA_MAX_KM, em vez de aparecer
+    como cartão próprio. Bolsas longe da irmã continuam separadas.
+    """
     for reg in analyse(build_gamet(corpo))["regions"]:
-        assert reg["polygon"].geom_type == "Polygon"
+        if reg["polygon"].geom_type == "Polygon":
+            continue
+        assert reg["polygon"].geom_type == "MultiPolygon"
+        partes = sorted(reg["polygon"].geoms, key=lambda g: -g.area)
+        for p in partes[1:]:
+            assert p.area < 0.015 * eng.FIR_POLYGON.area, \
+                f"bolsa de {p.area / eng.FIR_POLYGON.area:.1%} juntada a outra região"
+            dist_km = min(p.distance(q) for q in partes if q is not p) * 111.0
+            assert dist_km <= eng._BOLSA_MAX_KM, \
+                f"bolsa a {dist_km:.0f} km juntada a uma região distante"
 
 
 # ── SEPARAÇÃO POR CAUSAS (v28) ───────────────────────────────────────
