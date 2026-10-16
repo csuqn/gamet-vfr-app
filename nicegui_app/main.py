@@ -217,6 +217,16 @@ async def pagina():
                                 [[la, lo] for lo, la in p.exterior.coords],
                                 {"color": cor, "fillColor": cor, "fillOpacity": 0.35, "weight": 2}])
                             camada.run_method("bindTooltip", dica)
+                    # Aeródromos (círculo escuro) e pistas de ultraleves
+                    # (círculo branco), como no mapa da app Streamlit
+                    for nome, (la, lo) in M.AERODROMES.items():
+                        ul = nome in M.ULTRALIGHT_STRIPS
+                        ponto = m.generic_layer(name="circleMarker", args=[[la, lo], {
+                            "radius": 3 if ul else 4, "weight": 1.5, "color": "#0E151C",
+                            "fillColor": "#FFFFFF" if ul else "#0E151C", "fillOpacity": 1}])
+                        ponto.run_method("bindTooltip", f"{nome} · {'pista UL' if ul else 'aeródromo'}")
+                    # Enquadrar Portugal continental (o centro fixo cortava o sul)
+                    m.run_map_method("fitBounds", [[36.9, -9.9], [42.2, -6.1]])
                 with ui.tab_panel(t_vento).classes("p-0"):
                     if r["wind"]:
                         cols = [{"name": "n", "label": "Nível", "field": "n", "align": "left"}] + [
