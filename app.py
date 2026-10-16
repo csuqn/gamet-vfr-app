@@ -2925,19 +2925,6 @@ if st.session_state.get("_active_gamet_text"):
             "da tua aeronave:\n\n" + "\n".join(f"- {w}" for w in wind_warnings)
         )
 
-    # ---- Histórico (últimos 5) ----
-    if "gamet_history" not in st.session_state:
-        st.session_state["gamet_history"] = []
-    history = st.session_state["gamet_history"]
-    # Evitar duplicados consecutivos
-    if not history or history[0]["text"] != gamet_text.strip():
-        history.insert(0, {
-            "text":      gamet_text.strip(),
-            "timestamp": datetime.now(timezone.utc).strftime("%d/%m %H:%MZ"),
-            "label":     validity_label or datetime.now(timezone.utc).strftime("%d/%m %H:%MZ"),
-        })
-        st.session_state["gamet_history"] = history[:5]
-
     # ---- Veredicto global ----
     # Responde de imediato à pergunta principal — "posso voar?" — sem
     # obrigar a interpretar N cartões de região primeiro.
@@ -3271,18 +3258,3 @@ if st.session_state.get("_active_gamet_text"):
             for row in rows:
                 md += "| " + " | ".join(row) + " |\n"
             st.markdown(md)
-
-# ---- Histórico de GAMETs ----
-st.divider()
-if st.session_state.get("gamet_history"):
-    with st.expander("🕐 Histórico de GAMETs analisados", expanded=False):
-        history = st.session_state["gamet_history"]
-        for idx, entry in enumerate(history):
-            col_lbl, col_btn = st.columns([4, 1])
-            with col_lbl:
-                st.write(f"**{idx+1}.** {entry['label']} _(analisado {entry['timestamp']})_")
-            with col_btn:
-                if st.button("Carregar", key=f"hist_{idx}"):
-                    st.session_state["gamet_loaded"] = entry["text"]
-                    st.session_state["gamet_fonte"] = "historico"
-                    st.rerun()

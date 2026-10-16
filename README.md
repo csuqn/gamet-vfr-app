@@ -136,9 +136,6 @@ temperatura por níveis nas seis estações (Bragança, Porto, Viseu, Lisboa,
 **📄 PDF.** O briefing completo, com o mapa e o texto original do GAMET, para
 guardar ou imprimir.
 
-**🕐 Histórico.** Os últimos GAMETs analisados, para comparar ou voltar a
-abrir.
-
 ## 5. Exemplo real
 
 GAMET de 14/10/2026, válido das 15 às 21 UTC:

@@ -288,21 +288,18 @@ def test_app_gamet_do_arquivo_sem_sigmets(app_path):
     assert any("Nenhum SIGMET" in c.value for c in at.caption)
 
 
-def test_app_historico_da_sessao_nao_usa_sigmets_de_agora(app_path):
-    """REGRESSÃO (1.6): "Carregar" do histórico punha o GAMET antigo como
-    se fosse o carregado do IPMA, e aplicava-lhe os SIGMETs de agora."""
-    agora = datetime.now(timezone.utc)
+def test_app_sem_historico_da_sessao(app_path):
+    """2.1: o "Histórico de GAMETs analisados" foi retirado — a app não guarda
+    nada entre sessões, e para GAMETs antigos há o arquivo."""
     gamet = build_gamet("SECN I SFC VIS: N OF N4100 5000M BR")
     at = _app(app_path)
     at.session_state["gamet_loaded"] = gamet
     at.session_state["_active_gamet_text"] = gamet
-    at.session_state["gamet_fonte"] = "historico"
-    at.session_state["ipma_boletins"] = [_sig(8, agora - timedelta(hours=1), agora + timedelta(hours=3))]
-    at.session_state["ipma_boletins_at"] = agora
     at.run()
     assert not at.exception, [e.value for e in at.exception]
-    assert "SIGMET 8" not in " ".join(e.value for e in at.error)
-    assert any("não verificados" in i.value for i in at.info)
+    assert any("Briefing" in s.value for s in at.subheader)
+    assert not any("Histórico" in e.label for e in at.expander)
+    assert "gamet_history" not in at.session_state
 
 
 def test_app_recurso_ponta_a_ponta(app_path, monkeypatch):
