@@ -239,6 +239,8 @@ def test_pagina_sem_gamet_guarda_os_sigmets(net, monkeypatch):
 
 def _app(app_path):
     testing = pytest.importorskip("streamlit.testing.v1")
+    import streamlit
+    streamlit.cache_data.clear()   # o índice do arquivo fica em cache entre testes
     return testing.AppTest.from_file(str(app_path), default_timeout=180)
 
 
@@ -394,3 +396,28 @@ def test_recurso_ignora_sigmets_antigos_do_mesmo_dia(eng):
         _s(recente, agora - timedelta(hours=1), agora + timedelta(hours=2), agora - timedelta(minutes=50))]}
     _, _, bol = eng.gamet_de_recurso(lambda: (True, ind), lambda f: (True, texto), agora)
     assert bol == [recente]
+
+
+def test_app_arquivo_rotulos_so_com_validade(app_path, monkeypatch):
+    """2.1: a lista mostra só a validade (e AMD/COR), não a hora de recolha;
+    emendas repetidas para o mesmo período distinguem-se pela ordem."""
+    import requests
+    ini = datetime(2026, 10, 15, 9, 0, tzinfo=timezone.utc)
+    fim = ini + timedelta(hours=6)
+    indice = {"gamets": [
+        _g(ini, fim, ini - timedelta(minutes=10), "gamets/o.txt"),
+        _g(ini, fim, ini + timedelta(hours=1), "gamets/a1.txt", "AMD"),
+        _g(ini, fim, ini + timedelta(hours=3), "gamets/a2.txt", "AMD"),
+    ], "sigmets": []}
+    monkeypatch.setattr(requests, "get", lambda url, **kw: RespostaFalsa(
+        200, json.dumps(indice)) if url.endswith("indice.json") else RespostaFalsa(404))
+    at = _app(app_path)
+    at.session_state["gamet_loaded"] = "x"
+    at.run()
+    [b for b in at.button if "Abrir arquivo" in b.label][0].click()
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    sel = [s for s in at.selectbox if s.label == "GAMET"][0]
+    rotulos = list(sel.options)   # o AppTest já devolve os rótulos formatados
+    assert rotulos == ["09–15Z AMD (2.ª emissão)", "09–15Z AMD (1.ª emissão)", "09–15Z"]
+    assert not any("recolhido" in r for r in rotulos)

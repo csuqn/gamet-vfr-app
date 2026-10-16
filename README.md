@@ -249,7 +249,7 @@ Algarve não afecta Lisboa.
 
 ## 10. Qualidade e testes
 
-- **402 testes automáticos** cobrem a leitura do texto, a geometria, as
+- **403 testes automáticos** cobrem a leitura do texto, a geometria, as
   decisões, os dados aeronáuticos e a app completa. Cada erro alguma vez
   encontrado tem um teste que impede que volte a aparecer.
 - **Verificação cruzada:** em centenas de GAMETs gerados, a decisão de cada
@@ -268,7 +268,7 @@ Algarve não afecta Lisboa.
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
 streamlit run app.py      # a app
-python3 -m pytest         # os testes (402)
+python3 -m pytest         # os testes (403)
 ```
 
 | Ficheiro / pasta | Conteúdo |
