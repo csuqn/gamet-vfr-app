@@ -7,6 +7,7 @@ publicada. O motor é o MESMO (ver motor.py); aqui só muda a interface.
     pip install -r nicegui_app/requirements.txt
     python nicegui_app/main.py          # http://localhost:8080
 """
+import json
 import os
 import re
 from datetime import datetime, timezone
@@ -35,6 +36,10 @@ body { background:#0E151C; color:#E6EDF3; }
 .gv-txt { font-family:'IBM Plex Mono',monospace; font-size:12.5px; white-space:pre-wrap;
           word-break:break-word; background:#15202A; border:1px solid #22303C; border-radius:12px; padding:12px; }
 .q-field__native, .q-field__input { color:#E6EDF3 !important; }
+.leaflet-tooltip.gv-lbl { background: rgba(14,21,28,.85); color:#E6EDF3; border:0; box-shadow:none;
+  font-family:'IBM Plex Mono',monospace; font-size:10px; padding:0 4px; border-radius:3px; }
+.leaflet-tooltip.gv-lbl::before { display:none; }
+.gv-zoom-lo .leaflet-tooltip.gv-lbl { display:none; }
 """
 
 
@@ -217,16 +222,31 @@ async def pagina():
                                 [[la, lo] for lo, la in p.exterior.coords],
                                 {"color": cor, "fillColor": cor, "fillOpacity": 0.35, "weight": 2}])
                             camada.run_method("bindTooltip", dica)
-                    # Aeródromos (círculo escuro) e pistas de ultraleves
-                    # (círculo branco), como no mapa da app Streamlit
-                    for nome, (la, lo) in M.AERODROMES.items():
-                        ul = nome in M.ULTRALIGHT_STRIPS
-                        ponto = m.generic_layer(name="circleMarker", args=[[la, lo], {
-                            "radius": 3 if ul else 4, "weight": 1.5, "color": "#0E151C",
-                            "fillColor": "#FFFFFF" if ul else "#0E151C", "fillOpacity": 1}])
-                        ponto.run_method("bindTooltip", f"{nome} · {'pista UL' if ul else 'aeródromo'}")
-                    # Enquadrar Portugal continental (o centro fixo cortava o sul)
+                    # Aeródromos (círculo escuro) e pistas de ultraleves (círculo
+                    # branco), com nome e designador sempre visíveis a partir do
+                    # zoom 9 (mais longe sobrepunham-se). Criados de uma vez em
+                    # JavaScript — os tooltips permanentes não passavam pelo
+                    # run_method da camada genérica.
+                    pontos = [[la, lo, nome, nome in M.ULTRALIGHT_STRIPS]
+                              for nome, (la, lo) in M.AERODROMES.items()]
                     m.run_map_method("fitBounds", [[36.9, -9.9], [42.2, -6.1]])
+                    ui.run_javascript(f"""
+                        const pts = {json.dumps(pontos)};
+                        const go = () => {{
+                          const el = getElement({m.id});
+                          if (!el || !el.map || !window.L) return setTimeout(go, 200);
+                          const map = el.map;
+                          for (const [la, lo, nome, ul] of pts) {{
+                            L.circleMarker([la, lo], {{radius: ul ? 3 : 4, weight: 1.5, color: '#0E151C',
+                              fillColor: ul ? '#FFFFFF' : '#0E151C', fillOpacity: 1}})
+                             .bindTooltip(nome, {{permanent: true, direction: 'right', offset: [6, 0],
+                              className: 'gv-lbl'}})
+                             .addTo(map);
+                          }}
+                          const upd = () => map.getContainer().classList.toggle('gv-zoom-lo', map.getZoom() < 9);
+                          map.on('zoomend', upd); upd();
+                        }};
+                        go();""")
                 with ui.tab_panel(t_vento).classes("p-0"):
                     if r["wind"]:
                         cols = [{"name": "n", "label": "Nível", "field": "n", "align": "left"}] + [
