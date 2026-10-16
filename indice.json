@@ -69,6 +69,13 @@
    "inicio": "2026-10-16T09:00Z",
    "fim": "2026-10-16T15:00Z",
    "tipo": "GAMET"
+  },
+  {
+   "ficheiro": "gamets/2026/10/20261016T1440Z_161500-162100_eee437fbcd.txt",
+   "recolhido": "2026-10-16T14:40Z",
+   "inicio": "2026-10-16T15:00Z",
+   "fim": "2026-10-16T21:00Z",
+   "tipo": "GAMET"
   }
  ],
  "sigmets": []
