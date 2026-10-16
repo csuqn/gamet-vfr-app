@@ -39,7 +39,6 @@ body { background:#0E151C; color:#E6EDF3; }
 .leaflet-tooltip.gv-lbl { background: rgba(14,21,28,.85); color:#E6EDF3; border:0; box-shadow:none;
   font-family:'IBM Plex Mono',monospace; font-size:10px; padding:0 4px; border-radius:3px; }
 .leaflet-tooltip.gv-lbl::before { display:none; }
-.gv-zoom-lo .leaflet-tooltip.gv-lbl { display:none; }
 """
 
 
@@ -223,10 +222,8 @@ async def pagina():
                                 {"color": cor, "fillColor": cor, "fillOpacity": 0.35, "weight": 2}])
                             camada.run_method("bindTooltip", dica)
                     # Aeródromos (círculo escuro) e pistas de ultraleves (círculo
-                    # branco), com nome e designador sempre visíveis a partir do
-                    # zoom 9 (mais longe sobrepunham-se). Criados de uma vez em
-                    # JavaScript — os tooltips permanentes não passavam pelo
-                    # run_method da camada genérica.
+                    # branco). Nome e designador ao passar o rato (no telemóvel,
+                    # ao tocar no ponto). Criados de uma vez em JavaScript.
                     pontos = [[la, lo, nome, nome in M.ULTRALIGHT_STRIPS]
                               for nome, (la, lo) in M.AERODROMES.items()]
                     m.run_map_method("fitBounds", [[36.9, -9.9], [42.2, -6.1]])
@@ -239,12 +236,9 @@ async def pagina():
                           for (const [la, lo, nome, ul] of pts) {{
                             L.circleMarker([la, lo], {{radius: ul ? 3 : 4, weight: 1.5, color: '#0E151C',
                               fillColor: ul ? '#FFFFFF' : '#0E151C', fillOpacity: 1}})
-                             .bindTooltip(nome, {{permanent: true, direction: 'right', offset: [6, 0],
-                              className: 'gv-lbl'}})
+                             .bindTooltip(nome, {{direction: 'right', offset: [6, 0], className: 'gv-lbl'}})
                              .addTo(map);
                           }}
-                          const upd = () => map.getContainer().classList.toggle('gv-zoom-lo', map.getZoom() < 9);
-                          map.on('zoomend', upd); upd();
                         }};
                         go();""")
                 with ui.tab_panel(t_vento).classes("p-0"):
