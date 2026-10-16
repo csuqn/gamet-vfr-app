@@ -25,5 +25,11 @@ entre visitas (guardado no browser de cada utilizador).
 
 ## Alojar (gratuito)
 
-Hugging Face Spaces, tipo **Docker**, com o `Dockerfile` desta pasta (porta
-7860). A app adormece sem uso e demora alguns segundos a acordar.
+Render, serviço web gratuito (Docker), ligado directamente ao GitHub — cada
+push no ramo `prototipo/nicegui` volta a publicar. Não é preciso guardar
+nenhuma chave no repositório.
+
+- Dockerfile Path: `nicegui_app/Dockerfile` · Docker Build Context: `.` (raiz)
+- O Render define a porta (`PORT`); a app usa-a.
+- Plano gratuito: adormece após 15 min sem uso e demora ~1 min a acordar.
+  (O Hugging Face Spaces passou a exigir plano pago para apps Docker.)

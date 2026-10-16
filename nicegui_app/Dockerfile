@@ -1,4 +1,4 @@
-# Para alojar no Hugging Face Spaces (tipo "Docker") ou no Render.
+# Para alojar no Render (serviço web gratuito, Docker).
 # O motor vem do app.py na raiz do repositório — por isso a imagem copia
 # o repositório inteiro e não só esta pasta.
 FROM python:3.12-slim
