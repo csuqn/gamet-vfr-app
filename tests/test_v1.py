@@ -30,7 +30,10 @@ from conftest import build_gamet
 ])
 def test_formatos_de_base(eng, cld, fen, valor):
     blocks, *_ = eng.parse_gamet(build_gamet(f"SECN I SIG CLD: {cld}"))
-    assert [(b.phenomenon, b.value) for b in blocks] == [(fen, valor)]
+    # Desde a 2.0 um CB na linha também gera um bloco "CB" (regra aprovada,
+    # testada em test_v20.py); aqui só interessa a leitura da base.
+    bases = [(b.phenomenon, b.value) for b in blocks if b.phenomenon != "CB"]
+    assert bases == [(fen, valor)]
 
 
 def test_base_topo_nunca_le_o_topo(eng):
