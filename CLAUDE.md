@@ -127,7 +127,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-402 testes. Devem passar a 100%.
+403 testes. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -229,7 +229,8 @@ através de `dados/indice.json`, que `scripts/recolher_gamet.py`
   SIGMETs arquivados que se **sobrepõem à sua validade**
   (`boletins_do_periodo`; um SIGMET cancelado a meio conta).
 - **Origem do GAMET** em `st.session_state["gamet_fonte"]`: `ipma`,
-  `arquivo_recurso`, `arquivo_hist`, `historico` (histórico da sessão).
+  `arquivo_recurso`, `arquivo_hist`. (O "Histórico de GAMETs analisados" da
+  sessão foi retirado na 2.1 — para GAMETs antigos há o arquivo.)
   Só `ipma` e `arquivo_recurso` usam os SIGMETs de agora; texto editado ou
   colado é sempre "manual" (só conta o `SIGMET APPLICABLE` do texto).
 

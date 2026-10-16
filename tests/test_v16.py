@@ -239,6 +239,8 @@ def test_pagina_sem_gamet_guarda_os_sigmets(net, monkeypatch):
 
 def _app(app_path):
     testing = pytest.importorskip("streamlit.testing.v1")
+    import streamlit
+    streamlit.cache_data.clear()   # o índice do arquivo fica em cache entre testes
     return testing.AppTest.from_file(str(app_path), default_timeout=180)
 
 
@@ -286,21 +288,18 @@ def test_app_gamet_do_arquivo_sem_sigmets(app_path):
     assert any("Nenhum SIGMET" in c.value for c in at.caption)
 
 
-def test_app_historico_da_sessao_nao_usa_sigmets_de_agora(app_path):
-    """REGRESSÃO (1.6): "Carregar" do histórico punha o GAMET antigo como
-    se fosse o carregado do IPMA, e aplicava-lhe os SIGMETs de agora."""
-    agora = datetime.now(timezone.utc)
+def test_app_sem_historico_da_sessao(app_path):
+    """2.1: o "Histórico de GAMETs analisados" foi retirado — a app não guarda
+    nada entre sessões, e para GAMETs antigos há o arquivo."""
     gamet = build_gamet("SECN I SFC VIS: N OF N4100 5000M BR")
     at = _app(app_path)
     at.session_state["gamet_loaded"] = gamet
     at.session_state["_active_gamet_text"] = gamet
-    at.session_state["gamet_fonte"] = "historico"
-    at.session_state["ipma_boletins"] = [_sig(8, agora - timedelta(hours=1), agora + timedelta(hours=3))]
-    at.session_state["ipma_boletins_at"] = agora
     at.run()
     assert not at.exception, [e.value for e in at.exception]
-    assert "SIGMET 8" not in " ".join(e.value for e in at.error)
-    assert any("não verificados" in i.value for i in at.info)
+    assert any("Briefing" in s.value for s in at.subheader)
+    assert not any("Histórico" in e.label for e in at.expander)
+    assert "gamet_history" not in at.session_state
 
 
 def test_app_recurso_ponta_a_ponta(app_path, monkeypatch):
@@ -394,3 +393,28 @@ def test_recurso_ignora_sigmets_antigos_do_mesmo_dia(eng):
         _s(recente, agora - timedelta(hours=1), agora + timedelta(hours=2), agora - timedelta(minutes=50))]}
     _, _, bol = eng.gamet_de_recurso(lambda: (True, ind), lambda f: (True, texto), agora)
     assert bol == [recente]
+
+
+def test_app_arquivo_rotulos_so_com_validade(app_path, monkeypatch):
+    """2.1: a lista mostra só a validade (e AMD/COR), não a hora de recolha;
+    emendas repetidas para o mesmo período distinguem-se pela ordem."""
+    import requests
+    ini = datetime(2026, 10, 15, 9, 0, tzinfo=timezone.utc)
+    fim = ini + timedelta(hours=6)
+    indice = {"gamets": [
+        _g(ini, fim, ini - timedelta(minutes=10), "gamets/o.txt"),
+        _g(ini, fim, ini + timedelta(hours=1), "gamets/a1.txt", "AMD"),
+        _g(ini, fim, ini + timedelta(hours=3), "gamets/a2.txt", "AMD"),
+    ], "sigmets": []}
+    monkeypatch.setattr(requests, "get", lambda url, **kw: RespostaFalsa(
+        200, json.dumps(indice)) if url.endswith("indice.json") else RespostaFalsa(404))
+    at = _app(app_path)
+    at.session_state["gamet_loaded"] = "x"
+    at.run()
+    [b for b in at.button if "Abrir arquivo" in b.label][0].click()
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    sel = [s for s in at.selectbox if s.label == "GAMET"][0]
+    rotulos = list(sel.options)   # o AppTest já devolve os rótulos formatados
+    assert rotulos == ["09–15Z AMD (2.ª emissão)", "09–15Z AMD (1.ª emissão)", "09–15Z"]
+    assert not any("recolhido" in r for r in rotulos)

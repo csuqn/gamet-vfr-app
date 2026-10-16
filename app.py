@@ -28,7 +28,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "2.0"
+APP_VERSION = "2.1"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
 st.title(f"✈️ LPPC GAMET – Motor Cartográfico v{APP_VERSION}")
@@ -349,11 +349,27 @@ with st.expander("📚 Arquivo de GAMETs"):
             _lista = sorted(_por_dia[_dia], key=lambda e: (e.get("inicio") or "", e["recolhido"]),
                             reverse=True)
 
+            # Rótulo = validade (+ AMD/COR). Se houver mais do que uma emenda
+            # para o mesmo período, numeram-se pela ordem de emissão.
+            _total = defaultdict(int)
+            for _e in _lista:
+                _total[(_e.get("inicio"), _e.get("fim"), _e.get("tipo", "GAMET"))] += 1
+            _vistos = defaultdict(int)
+            _rotulos = {}
+            for _e in sorted(_lista, key=lambda e: e["recolhido"]):
+                ini, fim = _e.get("inicio") or "", _e.get("fim") or ""
+                tipo = _e.get("tipo", "GAMET")
+                chave = (_e.get("inicio"), _e.get("fim"), tipo)
+                _vistos[chave] += 1
+                rot = f"{ini[11:13]}–{fim[11:13]}Z"
+                if tipo != "GAMET":
+                    rot += f" {tipo}"
+                if _total[chave] > 1:
+                    rot += f" ({_vistos[chave]}.ª emissão)"
+                _rotulos[_e["ficheiro"]] = rot
+
             def _rotulo(e):
-                ini, fim = e.get("inicio") or "", e.get("fim") or ""
-                tipo = "" if e.get("tipo", "GAMET") == "GAMET" else f" {e['tipo']}"
-                return (f"{ini[11:13]}–{fim[11:13]}Z{tipo} · recolhido "
-                        f"{e['recolhido'][8:10]}/{e['recolhido'][5:7]} {e['recolhido'][11:16]}Z")
+                return _rotulos[e["ficheiro"]]
             _esc = st.selectbox("GAMET", range(len(_lista)), format_func=lambda i: _rotulo(_lista[i]))
             if st.button("Carregar e analisar este GAMET"):
                 _ok_t, _txt = fetch_arquivo(_lista[_esc]["ficheiro"])
@@ -2819,15 +2835,13 @@ if st.session_state.get("_active_gamet_text"):
 
     if _fonte == "arquivo_hist":
         st.warning(
-            "📚 **GAMET DO ARQUIVO — não é o GAMET actual.** Recolhido às "
-            f"{_entrada_arq.get('recolhido', '?')}. Serve para rever uma situação "
-            "passada; não o uses para planear um voo.")
+            "📚 **GAMET DO ARQUIVO — não é o GAMET actual.** Serve para rever "
+            "uma situação passada; não o uses para planear um voo.")
     elif _fonte == "arquivo_recurso":
         st.warning(
             "🕓 **O IPMA ainda não publicou o novo GAMET** (o anterior é retirado "
             "cerca de 45 min antes da emissão). A mostrar o **último GAMET "
-            "arquivado, ainda em vigor** (recolhido às "
-            f"{_entrada_arq.get('recolhido', '?')}). Recarrega dentro de alguns "
+            "arquivado, ainda em vigor**. Recarrega dentro de alguns "
             "minutos para obter o novo.")
 
     # SIGMETs. Três casos:
@@ -2910,19 +2924,6 @@ if st.session_state.get("_active_gamet_text"):
             "pontual, não por área). Confirma os limites de vento cruzado "
             "da tua aeronave:\n\n" + "\n".join(f"- {w}" for w in wind_warnings)
         )
-
-    # ---- Histórico (últimos 5) ----
-    if "gamet_history" not in st.session_state:
-        st.session_state["gamet_history"] = []
-    history = st.session_state["gamet_history"]
-    # Evitar duplicados consecutivos
-    if not history or history[0]["text"] != gamet_text.strip():
-        history.insert(0, {
-            "text":      gamet_text.strip(),
-            "timestamp": datetime.now(timezone.utc).strftime("%d/%m %H:%MZ"),
-            "label":     validity_label or datetime.now(timezone.utc).strftime("%d/%m %H:%MZ"),
-        })
-        st.session_state["gamet_history"] = history[:5]
 
     # ---- Veredicto global ----
     # Responde de imediato à pergunta principal — "posso voar?" — sem
@@ -3257,18 +3258,3 @@ if st.session_state.get("_active_gamet_text"):
             for row in rows:
                 md += "| " + " | ".join(row) + " |\n"
             st.markdown(md)
-
-# ---- Histórico de GAMETs ----
-st.divider()
-if st.session_state.get("gamet_history"):
-    with st.expander("🕐 Histórico de GAMETs analisados", expanded=False):
-        history = st.session_state["gamet_history"]
-        for idx, entry in enumerate(history):
-            col_lbl, col_btn = st.columns([4, 1])
-            with col_lbl:
-                st.write(f"**{idx+1}.** {entry['label']} _(analisado {entry['timestamp']})_")
-            with col_btn:
-                if st.button("Carregar", key=f"hist_{idx}"):
-                    st.session_state["gamet_loaded"] = entry["text"]
-                    st.session_state["gamet_fonte"] = "historico"
-                    st.rerun()

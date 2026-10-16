@@ -136,9 +136,6 @@ temperatura por níveis nas seis estações (Bragança, Porto, Viseu, Lisboa,
 **📄 PDF.** O briefing completo, com o mapa e o texto original do GAMET, para
 guardar ou imprimir.
 
-**🕐 Histórico.** Os últimos GAMETs analisados, para comparar ou voltar a
-abrir.
-
 ## 5. Exemplo real
 
 GAMET de 14/10/2026, válido das 15 às 21 UTC:
@@ -249,7 +246,7 @@ Algarve não afecta Lisboa.
 
 ## 10. Qualidade e testes
 
-- **402 testes automáticos** cobrem a leitura do texto, a geometria, as
+- **403 testes automáticos** cobrem a leitura do texto, a geometria, as
   decisões, os dados aeronáuticos e a app completa. Cada erro alguma vez
   encontrado tem um teste que impede que volte a aparecer.
 - **Verificação cruzada:** em centenas de GAMETs gerados, a decisão de cada
@@ -268,7 +265,7 @@ Algarve não afecta Lisboa.
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
 streamlit run app.py      # a app
-python3 -m pytest         # os testes (402)
+python3 -m pytest         # os testes (403)
 ```
 
 | Ficheiro / pasta | Conteúdo |
