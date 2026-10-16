@@ -5,7 +5,7 @@ da trovoada) e SIGMETs lidos directamente da página do IPMA.
 from datetime import datetime, timezone, timedelta
 
 import pytest
-from conftest import build_gamet
+from conftest import build_gamet, veredicto
 
 
 # ---------------------------------------------------------------------
@@ -138,4 +138,4 @@ def test_app_aplica_sigmet_nao_referido_no_gamet(app_path):
     assert not at.exception, [e.value for e in at.exception]
     erros = " ".join(e.value for e in at.error)
     assert "SIGMET em vigor no IPMA" in erros and "não referido no GAMET" in erros
-    assert "NO-GO em 100% da FIR" in erros
+    assert "NO-GO em 100% da FIR" in veredicto(at)

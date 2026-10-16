@@ -74,21 +74,26 @@ tempo (`11/15` = só das 11 às 15 UTC) e na extensão (`ISOL`, `OCNL`, `FRQ`,
 
 ## 3. Como usar a app
 
-1. **Abre a [app](https://gamet-vfr-app-bxdwwklaarl2kdpiprmhu5.streamlit.app/).** O GAMET em vigor é carregado automaticamente do IPMA.
+1. **Abre a [app](https://gamet-vfr-app-bxdwwklaarl2kdpiprmhu5.streamlit.app/).** O GAMET em vigor é carregado do IPMA e analisado logo — o briefing aparece no topo.
+   - A app foi desenhada primeiro para o telemóvel (tema escuro, que se lê
+     bem ao sol); no computador os cartões das zonas ficam lado a lado.
    - Se o IPMA não responder, a app explica o que falhou. Podes colar o GAMET
-     à mão na caixa de texto, ou indicar um endereço alternativo nas opções
-     do painel "📡 GAMET do IPMA".
+     à mão na caixa de texto (no fundo da página), ou indicar um endereço
+     alternativo no painel "📡 Ligação ao IPMA".
    - O botão **🔄 Recarregar GAMET** vai buscar a versão mais recente.
    - **Entre GAMETs:** o IPMA retira o GAMET anterior cerca de 45 minutos
      antes de publicar o novo. Nesse intervalo a app carrega o último GAMET
      do arquivo que ainda está em vigor, com um aviso bem visível, e os
      SIGMETs em vigor (da página do IPMA e do arquivo).
-2. **Carrega em 🔍 Analisar GAMET.**
-3. **Lê o resultado**, de cima para baixo:
-   - validade do GAMET e quanto tempo falta para expirar;
+2. **Lê o resultado**, de cima para baixo:
+   - faixa com a validade, o tempo que falta para expirar e o estado dos
+     SIGMETs (`NIL`, `ACTIVO` ou `N/VERIF.` quando não foi possível verificar);
    - avisos importantes (SIGMET, texto ilegível, vento forte);
-   - veredicto global (ex.: "🔴 NO-GO em 11% da FIR");
-   - consulta rápida, briefing por zonas, mapa, dados da Secção II e PDF.
+   - veredicto global (ex.: "NO-GO em 11% da FIR"), com uma barra das três decisões;
+   - o teu aeródromo, os cartões das zonas e, em separadores, o mapa, o vento
+     e temperatura, a Secção II, o texto do GAMET e a legenda;
+   - o PDF.
+3. **🔍 Analisar GAMET** (no fundo) só é preciso se colares ou editares o texto.
 
 A app também funciona sem internet, com o GAMET colado à mão.
 
@@ -113,24 +118,25 @@ não para planear um voo.
 - ⏳ **GAMET a expirar ou fora de validade:** espera pelo próximo, ou confirma
   que estás a ver o actual.
 
-**✈️ Consulta rápida.** Escolhe um aeródromo ou pista de ultraleves (52
+**✈️ O meu aeródromo.** Escolhe um aeródromo ou pista de ultraleves (52
 pontos, com coordenadas oficiais do eVFR) e vês logo a decisão nesse local e
 os motivos. A app lembra-se do último que escolheste.
 
-**📋 Briefing por zonas.** Um cartão por zona, da pior para a melhor:
+**📋 Briefing por regiões.** Um cartão por zona, da pior para a melhor:
 - **decisão** (GO / MARGINAL / NO-GO) e percentagem da área;
 - **nome da zona**, pelos aeródromos que lá caem (ex.: "Braga, Porto, Vila
   Real +5");
-- **valores** de visibilidade, base das nuvens, trovoada, turbulência e gelo;
+- **valores** de visibilidade, base das nuvens e CB/trovoada em destaque;
+  turbulência, gelo, VA e MT OBSC por baixo, quando existem;
 - **motivos da decisão**, ou seja, que regra a tornou NO-GO ou MARGINAL;
 - **alcance restrito**: avisos que só se aplicam a parte do que está desenhado
   (ex.: "só sobre o mar", "apenas 11–15Z — já terminou").
 
-**🗺️ Mapa interactivo.** As zonas a verde, laranja e vermelho sobre o mapa,
+**🗺️ Mapa** (separador). As zonas a verde, âmbar e vermelho sobre o mapa,
 com todos os aeródromos e pistas. Podes aproximar e clicar.
 
-**🌡️ Secção II.** Nível de congelação mínimo, QNH mínimo e tabela de vento e
-temperatura por níveis nas seis estações (Bragança, Porto, Viseu, Lisboa,
+**🌡️ Secção II e Vento/Temp** (separadores). Nível de congelação mínimo, QNH
+mínimo e tabela de vento e temperatura por níveis nas seis estações (Bragança, Porto, Viseu, Lisboa,
 Évora e Faro).
 
 **📄 PDF.** O briefing completo, com o mapa e o texto original do GAMET, para
@@ -246,7 +252,7 @@ Algarve não afecta Lisboa.
 
 ## 10. Qualidade e testes
 
-- **403 testes automáticos** cobrem a leitura do texto, a geometria, as
+- **413 testes automáticos** cobrem a leitura do texto, a geometria, as
   decisões, os dados aeronáuticos e a app completa. Cada erro alguma vez
   encontrado tem um teste que impede que volte a aparecer.
 - **Verificação cruzada:** em centenas de GAMETs gerados, a decisão de cada
@@ -265,7 +271,7 @@ Algarve não afecta Lisboa.
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
 streamlit run app.py      # a app
-python3 -m pytest         # os testes (403)
+python3 -m pytest         # os testes (413)
 ```
 
 | Ficheiro / pasta | Conteúdo |

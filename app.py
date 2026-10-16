@@ -1,4 +1,5 @@
 import streamlit as st
+import html
 import math
 import re
 import io
@@ -28,10 +29,74 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "2.1"
+APP_VERSION = "2.2"
 
-st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
-st.title(f"✈️ LPPC GAMET – Motor Cartográfico v{APP_VERSION}")
+st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
+
+# Aspecto (2.2): pensado primeiro para o telemóvel. Cores da decisão com
+# brilhos diferentes (não só matiz) e sempre com o nome escrito ao lado.
+_CSS = """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+html, body, .stApp, .stMarkdown, button, input, select, textarea, label {
+  font-family: 'IBM Plex Sans', system-ui, sans-serif !important; }
+code, pre, .gv-mono { font-family: 'IBM Plex Mono', ui-monospace, monospace !important; }
+#MainMenu, footer { visibility: hidden; }
+header[data-testid="stHeader"] { background: transparent; }
+.block-container { padding: 0.75rem 1rem 3rem; max-width: 1100px; }
+h3 { font-size: 0.8rem !important; letter-spacing: 0.1em; text-transform: uppercase;
+     color: #8FA3B5 !important; font-family: 'IBM Plex Mono', monospace !important;
+     font-weight: 600 !important; padding: 0.6rem 0 0.2rem !important; }
+.gv-head { display:flex; align-items:center; gap:10px; padding: 6px 0 12px;
+  border-bottom: 1px solid #22303C; margin-bottom: 4px; }
+.gv-head b { font-size: 17px; letter-spacing: .04em; display:block; color:#E6EDF3; }
+.gv-head small { font-family:'IBM Plex Mono',monospace; font-size:11px; color:#8FA3B5; letter-spacing:.06em; }
+.gv-faixa { display:grid; grid-template-columns: repeat(3, minmax(0,1fr));
+  border:1px solid #22303C; border-radius:12px; overflow:hidden; margin: 4px 0 10px; }
+.gv-faixa div { padding: 9px 12px; display:flex; flex-direction:column; gap:2px; }
+.gv-faixa div + div { border-left:1px solid #22303C; }
+.gv-k { font-family:'IBM Plex Mono',monospace; font-size:10px; letter-spacing:.08em; color:#8FA3B5; }
+.gv-v { font-family:'IBM Plex Mono',monospace; font-size:14px; font-weight:600; color:#E6EDF3; }
+.gv-card { border-radius:14px; background:#15202A; border:1px solid #22303C; overflow:hidden; }
+.gv-veredicto { padding:16px; display:flex; flex-direction:column; gap:12px; margin: 6px 0 12px; border-radius:14px; }
+.gv-veredicto .gv-big { font-size:30px; font-weight:700; letter-spacing:.02em; }
+.gv-barra { display:flex; height:10px; border-radius:5px; overflow:hidden; background:#22303C; }
+.gv-leg { display:flex; gap:14px; flex-wrap:wrap; font-family:'IBM Plex Mono',monospace; font-size:12px; color:#D8DEE4; }
+.gv-chip { flex-shrink:0; padding:5px 10px; border-radius:8px; font-weight:700; font-size:13px;
+  letter-spacing:.04em; border:1px solid; white-space:nowrap; }
+.gv-GO       { background:#11301F; color:#6FD39A; border-color:#23683F; }
+.gv-MARGINAL { background:#3D3110; color:#F5CF6B; border-color:#7A6420; }
+.gv-NO-GO    { background:#3A1414; color:#FF8A80; border-color:#7A2A26; }
+.gv-regioes { display:grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap:12px; }
+.gv-rtop { display:flex; align-items:center; justify-content:space-between; gap:10px;
+  padding:12px 14px; }
+.gv-rnome { font-weight:600; font-size:15px; color:#E6EDF3; line-height:1.3; }
+.gv-metr { display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); border-top:1px solid #22303C; }
+.gv-metr div { padding:9px 14px; display:flex; flex-direction:column; gap:2px; }
+.gv-metr div + div { border-left:1px solid #22303C; }
+.gv-det { padding:9px 14px 11px; border-top:1px solid #22303C; font-size:13px; color:#C9D3DC; line-height:1.5; }
+.gv-det .gv-mono { font-size:12px; color:#B7C4D0; }
+.gv-ad { display:flex; align-items:center; justify-content:space-between; gap:12px; padding: 2px 2px 8px; }
+.gv-tile { border-radius:12px; background:#15202A; border:1px solid #22303C; padding:12px 14px; }
+.gv-tile .gv-v { font-size:20px; }
+.gv-nota { font-size:12px; line-height:1.5; color:#8FA3B5; margin-top: 18px; }
+div[data-testid="stDownloadButton"] button, div[data-testid="stButton"] button { min-height: 44px; }
+</style>
+"""
+st.markdown(_CSS, unsafe_allow_html=True)
+st.markdown(
+    '<div class="gv-head">'
+    '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#7CC4FF" '
+    'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+    '<path d="M2 16l20-6-20-6 4 6-4 6z"></path><path d="M6 10h8"></path></svg>'
+    f'<div><b>LPPC GAMET</b><small>BRIEFING VFR · v{APP_VERSION}</small></div></div>',
+    unsafe_allow_html=True)
+
+# Ordem no ecrã: briefing primeiro, controlos (texto, arquivo, ligação ao
+# IPMA) no fim. Os contentores são criados já nesta ordem e preenchidos
+# depois — o Streamlit mostra-os pela ordem em que foram criados.
+_c_brief = st.container()
+_c_ctrl = st.container()
 
 # -------------------------------------------------
 # IPMA SELF-BRIEFING — fetch automático
@@ -253,6 +318,8 @@ def _carregar_do_ipma():
         st.session_state["gamet_loaded"]    = result
         st.session_state["gamet_loaded_at"] = agora_txt
         st.session_state["gamet_fonte"]     = "ipma"
+        # Analisa logo — no telemóvel não deve ser preciso carregar num botão
+        st.session_state["_active_gamet_text"] = result.strip()
         st.session_state["ipma_boletins_fonte"] = "página do IPMA"
         st.session_state["ipma_boletins"]    = extract_bulletins_from_html(_IPMA_LAST["raw"])
         st.session_state["ipma_boletins_at"] = _IPMA_LAST["at"]
@@ -277,122 +344,124 @@ if "gamet_loaded" not in st.session_state and "gamet_fetch_error" not in st.sess
     with st.spinner("A carregar GAMET do Self-Briefing IPMA..."):
         _carregar_do_ipma()
 
-with st.expander("📡 GAMET do IPMA", expanded=bool(st.session_state.get("gamet_fetch_error"))
-                 and st.session_state.get("gamet_fonte") != "arquivo_recurso"):
-    col_btn, col_next = st.columns([1, 2])
-    with col_btn:
-        if st.button("🔄 Recarregar GAMET"):
-            with st.spinner("A carregar..."):
-                ok, result = _carregar_do_ipma()
-            if ok:
-                st.success("✅ GAMET actualizado!")
-    with col_next:
-        nxt = next_gamet_time()
-        st.info(f"⏭️ Próximo GAMET esperado: **{nxt.strftime('%H:%MZ')}** "
-                f"(em {format_countdown(nxt)})")
+with _c_ctrl:
+    st.subheader("GAMET e arquivo")
+    with st.expander("📡 Ligação ao IPMA", expanded=bool(st.session_state.get("gamet_fetch_error"))
+                     and st.session_state.get("gamet_fonte") != "arquivo_recurso"):
+        col_btn, col_next = st.columns([1, 2])
+        with col_btn:
+            if st.button("🔄 Recarregar GAMET"):
+                with st.spinner("A carregar..."):
+                    ok, result = _carregar_do_ipma()
+                if ok:
+                    st.success("✅ GAMET actualizado!")
+        with col_next:
+            nxt = next_gamet_time()
+            st.info(f"⏭️ Próximo GAMET esperado: **{nxt.strftime('%H:%MZ')}** "
+                    f"(em {format_countdown(nxt)})")
 
-    if st.session_state.get("gamet_fetch_error"):
-        if st.session_state.get("gamet_fonte") == "arquivo_recurso":
-            st.info("O IPMA não tem GAMET publicado neste momento — está "
-                    "carregado o último GAMET do arquivo ainda em vigor.\n\n"
-                    + st.session_state["gamet_fetch_error"])
-        else:
-            st.error(st.session_state["gamet_fetch_error"])
+        if st.session_state.get("gamet_fetch_error"):
+            if st.session_state.get("gamet_fonte") == "arquivo_recurso":
+                st.info("O IPMA não tem GAMET publicado neste momento — está "
+                        "carregado o último GAMET do arquivo ainda em vigor.\n\n"
+                        + st.session_state["gamet_fetch_error"])
+            else:
+                st.error(st.session_state["gamet_fetch_error"])
 
-    if "gamet_loaded_at" in st.session_state:
-        st.caption(f"⏱️ Carregado às {st.session_state['gamet_loaded_at']}")
+        if "gamet_loaded_at" in st.session_state:
+            st.caption(f"⏱️ Carregado às {st.session_state['gamet_loaded_at']}")
 
-    # Permite apontar para um endpoint novo sem editar o código — útil
-    # quando o IPMA muda o caminho do serviço
-    custom = st.text_input(
-        "🔧 URL alternativo do IPMA (opcional)",
-        value=st.session_state.get("ipma_custom_url", ""),
-        placeholder=f"{_IPMA_BASE}/novo_endpoint.php",
-        help="Se o IPMA mudar o endereço do serviço, cola aqui o URL correcto. "
-             "Deixa vazio para tentar os endpoints conhecidos.",
+        # Permite apontar para um endpoint novo sem editar o código — útil
+        # quando o IPMA muda o caminho do serviço
+        custom = st.text_input(
+            "🔧 URL alternativo do IPMA (opcional)",
+            value=st.session_state.get("ipma_custom_url", ""),
+            placeholder=f"{_IPMA_BASE}/novo_endpoint.php",
+            help="Se o IPMA mudar o endereço do serviço, cola aqui o URL correcto. "
+                 "Deixa vazio para tentar os endpoints conhecidos.",
+        )
+        if custom != st.session_state.get("ipma_custom_url", ""):
+            st.session_state["ipma_custom_url"] = custom
+
+        st.caption(
+            "Se o carregamento automático falhar, podes sempre colar o texto do "
+            "GAMET manualmente na caixa abaixo — a app funciona na mesma."
+        )
+
+    # ---- Arquivo de GAMETs ----
+    # Os GAMETs e SIGMETs recolhidos de 15 em 15 min pelo GitHub Actions. Para
+    # rever situações passadas — NÃO para planear um voo com um GAMET antigo.
+    @st.cache_data(ttl=300, show_spinner=False)
+    def _indice_arquivo():
+        return fetch_arquivo_indice()
+
+
+    with st.expander("📚 Arquivo de GAMETs"):
+        st.caption("GAMETs recolhidos automaticamente do IPMA desde 14/10/2026 "
+                   "(com os SIGMETs emitidos). Serve para consultar e analisar "
+                   "situações passadas — **não** para planear um voo.")
+        if st.button("📂 Abrir arquivo") or st.session_state.get("_arquivo_aberto"):
+            st.session_state["_arquivo_aberto"] = True
+            _ok_idx, _idx = _indice_arquivo()
+            if not _ok_idx:
+                st.error(f"Não foi possível ler o arquivo: {_idx}")
+            elif not _idx["gamets"]:
+                st.info("O arquivo ainda está vazio.")
+            else:
+                _por_dia = defaultdict(list)
+                for _e in _idx["gamets"]:
+                    _por_dia[(_e.get("inicio") or _e["recolhido"])[:10]].append(_e)
+                _dias = sorted(_por_dia, reverse=True)
+                _dia = st.selectbox(
+                    "Dia (início da validade)", _dias,
+                    format_func=lambda d: f"{d[8:10]}/{d[5:7]}/{d[:4]} · {len(_por_dia[d])} GAMET(s)")
+                _lista = sorted(_por_dia[_dia], key=lambda e: (e.get("inicio") or "", e["recolhido"]),
+                                reverse=True)
+
+                # Rótulo = validade (+ AMD/COR). Se houver mais do que uma emenda
+                # para o mesmo período, numeram-se pela ordem de emissão.
+                _total = defaultdict(int)
+                for _e in _lista:
+                    _total[(_e.get("inicio"), _e.get("fim"), _e.get("tipo", "GAMET"))] += 1
+                _vistos = defaultdict(int)
+                _rotulos = {}
+                for _e in sorted(_lista, key=lambda e: e["recolhido"]):
+                    ini, fim = _e.get("inicio") or "", _e.get("fim") or ""
+                    tipo = _e.get("tipo", "GAMET")
+                    chave = (_e.get("inicio"), _e.get("fim"), tipo)
+                    _vistos[chave] += 1
+                    rot = f"{ini[11:13]}–{fim[11:13]}Z"
+                    if tipo != "GAMET":
+                        rot += f" {tipo}"
+                    if _total[chave] > 1:
+                        rot += f" ({_vistos[chave]}.ª emissão)"
+                    _rotulos[_e["ficheiro"]] = rot
+
+                def _rotulo(e):
+                    return _rotulos[e["ficheiro"]]
+                _esc = st.selectbox("GAMET", range(len(_lista)), format_func=lambda i: _rotulo(_lista[i]))
+                if st.button("Carregar e analisar este GAMET"):
+                    _ok_t, _txt = fetch_arquivo(_lista[_esc]["ficheiro"])
+                    if not _ok_t:
+                        st.error(f"Não foi possível ler o GAMET: {_txt}")
+                    else:
+                        _txt = re.sub(r"\s+", " ", _txt).strip()
+                        st.session_state["gamet_loaded"] = _txt
+                        st.session_state["gamet_loaded_at"] = f"arquivo ({_rotulo(_lista[_esc])})"
+                        st.session_state["gamet_fonte"] = "arquivo_hist"
+                        st.session_state["arquivo_entrada"] = _lista[_esc]
+                        st.session_state["arquivo_indice"] = _idx
+                        st.session_state["_active_gamet_text"] = _txt
+                        st.rerun()
+
+    # Preencher text_area com GAMET carregado (ou vazio para input manual)
+    _default = st.session_state.get("gamet_loaded", "")
+
+    gamet_text = st.text_area(
+        "Texto do GAMET (LPPC) — carregado automaticamente ou cole aqui",
+        value=_default,
+        height=200,
     )
-    if custom != st.session_state.get("ipma_custom_url", ""):
-        st.session_state["ipma_custom_url"] = custom
-
-    st.caption(
-        "Se o carregamento automático falhar, podes sempre colar o texto do "
-        "GAMET manualmente na caixa abaixo — a app funciona na mesma."
-    )
-
-# ---- Arquivo de GAMETs ----
-# Os GAMETs e SIGMETs recolhidos de 15 em 15 min pelo GitHub Actions. Para
-# rever situações passadas — NÃO para planear um voo com um GAMET antigo.
-@st.cache_data(ttl=300, show_spinner=False)
-def _indice_arquivo():
-    return fetch_arquivo_indice()
-
-
-with st.expander("📚 Arquivo de GAMETs"):
-    st.caption("GAMETs recolhidos automaticamente do IPMA desde 14/10/2026 "
-               "(com os SIGMETs emitidos). Serve para consultar e analisar "
-               "situações passadas — **não** para planear um voo.")
-    if st.button("📂 Abrir arquivo") or st.session_state.get("_arquivo_aberto"):
-        st.session_state["_arquivo_aberto"] = True
-        _ok_idx, _idx = _indice_arquivo()
-        if not _ok_idx:
-            st.error(f"Não foi possível ler o arquivo: {_idx}")
-        elif not _idx["gamets"]:
-            st.info("O arquivo ainda está vazio.")
-        else:
-            _por_dia = defaultdict(list)
-            for _e in _idx["gamets"]:
-                _por_dia[(_e.get("inicio") or _e["recolhido"])[:10]].append(_e)
-            _dias = sorted(_por_dia, reverse=True)
-            _dia = st.selectbox(
-                "Dia (início da validade)", _dias,
-                format_func=lambda d: f"{d[8:10]}/{d[5:7]}/{d[:4]} · {len(_por_dia[d])} GAMET(s)")
-            _lista = sorted(_por_dia[_dia], key=lambda e: (e.get("inicio") or "", e["recolhido"]),
-                            reverse=True)
-
-            # Rótulo = validade (+ AMD/COR). Se houver mais do que uma emenda
-            # para o mesmo período, numeram-se pela ordem de emissão.
-            _total = defaultdict(int)
-            for _e in _lista:
-                _total[(_e.get("inicio"), _e.get("fim"), _e.get("tipo", "GAMET"))] += 1
-            _vistos = defaultdict(int)
-            _rotulos = {}
-            for _e in sorted(_lista, key=lambda e: e["recolhido"]):
-                ini, fim = _e.get("inicio") or "", _e.get("fim") or ""
-                tipo = _e.get("tipo", "GAMET")
-                chave = (_e.get("inicio"), _e.get("fim"), tipo)
-                _vistos[chave] += 1
-                rot = f"{ini[11:13]}–{fim[11:13]}Z"
-                if tipo != "GAMET":
-                    rot += f" {tipo}"
-                if _total[chave] > 1:
-                    rot += f" ({_vistos[chave]}.ª emissão)"
-                _rotulos[_e["ficheiro"]] = rot
-
-            def _rotulo(e):
-                return _rotulos[e["ficheiro"]]
-            _esc = st.selectbox("GAMET", range(len(_lista)), format_func=lambda i: _rotulo(_lista[i]))
-            if st.button("Carregar e analisar este GAMET"):
-                _ok_t, _txt = fetch_arquivo(_lista[_esc]["ficheiro"])
-                if not _ok_t:
-                    st.error(f"Não foi possível ler o GAMET: {_txt}")
-                else:
-                    _txt = re.sub(r"\s+", " ", _txt).strip()
-                    st.session_state["gamet_loaded"] = _txt
-                    st.session_state["gamet_loaded_at"] = f"arquivo ({_rotulo(_lista[_esc])})"
-                    st.session_state["gamet_fonte"] = "arquivo_hist"
-                    st.session_state["arquivo_entrada"] = _lista[_esc]
-                    st.session_state["arquivo_indice"] = _idx
-                    st.session_state["_active_gamet_text"] = _txt
-                    st.rerun()
-
-# Preencher text_area com GAMET carregado (ou vazio para input manual)
-_default = st.session_state.get("gamet_loaded", "")
-
-gamet_text = st.text_area(
-    "Texto do GAMET (LPPC) — carregado automaticamente ou cole aqui",
-    value=_default,
-    height=200,
-)
 
 # -------------------------------------------------
 # GEOGRAFIA — área do GAMET, costa e fronteira
@@ -2767,6 +2836,124 @@ def generate_pdf(regions, gamet_text, fzlvl_min, qnh_min, validity_label) -> byt
 
 
 # -------------------------------------------------
+# UI — COMPONENTES HTML (2.2)
+# -------------------------------------------------
+# Funções puras que devolvem HTML para o briefing (testáveis sem Streamlit).
+# Todo o texto vindo do GAMET passa por html.escape. As classes gv-* estão
+# em _CSS, no início da app.
+
+_DEC_ORDEM = ("NO-GO", "MARGINAL", "GO")
+_DEC_BARRA = {"NO-GO": "#E5534B", "MARGINAL": "#E3B341", "GO": "#3FB970"}
+_DEC_FUNDO = {"NO-GO": ("#3A1414", "#7A2A26", "#FF8A80"),
+              "MARGINAL": ("#3D3110", "#7A6420", "#F5CF6B"),
+              "GO": ("#11301F", "#23683F", "#6FD39A")}
+
+
+def _e(txt):
+    return html.escape(str(txt), quote=True)
+
+
+def html_chip(dec):
+    return f'<span class="gv-chip gv-{_e(dec)}">{_e(dec)}</span>'
+
+
+def html_faixa(validade, expira, sigmet, sigmet_dec=None):
+    """Faixa de 3 colunas: validade, tempo até expirar, estado dos SIGMETs.
+    sigmet_dec colore o valor do SIGMET (NO-GO = activo, GO = nenhum)."""
+    cor = _DEC_FUNDO[sigmet_dec][2] if sigmet_dec in _DEC_FUNDO else "#E6EDF3"
+    return (
+        '<div class="gv-faixa">'
+        f'<div><span class="gv-k">VÁLIDO</span><span class="gv-v">{_e(validade)}</span></div>'
+        f'<div><span class="gv-k">EXPIRA</span><span class="gv-v">{_e(expira)}</span></div>'
+        f'<div><span class="gv-k">SIGMET</span><span class="gv-v" style="color:{cor}">{_e(sigmet)}</span></div>'
+        '</div>')
+
+
+def html_veredicto(area_por_dec, area_total):
+    """Cartão do veredicto global: pior decisão, % da FIR e barra."""
+    pct = {d: 100 * area_por_dec.get(d, 0) / area_total for d in _DEC_ORDEM}
+    pior = next((d for d in _DEC_ORDEM if area_por_dec.get(d)), "GO")
+    fundo, borda, cor = _DEC_FUNDO[pior]
+    if pior == "GO":
+        titulo = (f'<span class="gv-big" style="color:{cor}">GO</span> '
+                  '<span>— condições favoráveis em toda a FIR</span>')
+    else:
+        titulo = (f'<span class="gv-big" style="color:{cor}">{pior}</span> '
+                  f'<span class="gv-mono">em {pct[pior]:.0f}% da FIR</span>')
+    barra = "".join(
+        f'<div style="width:{pct[d]:.2f}%;background:{_DEC_BARRA[d]}"></div>'
+        for d in _DEC_ORDEM if area_por_dec.get(d))
+    leg = "".join(f"<span>{d} {pct[d]:.0f}%</span>" for d in _DEC_ORDEM if area_por_dec.get(d))
+    rotulo = ", ".join(f"{d} {pct[d]:.0f}%" for d in _DEC_ORDEM if area_por_dec.get(d))
+    return (
+        f'<div class="gv-veredicto" style="background:{fundo};border:1px solid {borda}">'
+        f'<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">{titulo}</div>'
+        f'<div class="gv-barra" role="img" aria-label="{_e(rotulo)}">{barra}</div>'
+        f'<div class="gv-leg">{leg}</div></div>')
+
+
+def _camadas(vals, layers, parcial):
+    txt = ", ".join(
+        f"{v} ({layers[i]}){_trend_icon(layers[i])}" if i < len(layers) and layers[i] else v
+        for i, v in enumerate(vals))
+    return txt + (" (parte da zona)" if parcial else "")
+
+
+def _cb_ts(region):
+    if region.get("ts"):
+        return ", ".join(_ts_label(v) for v in region["ts"])
+    if any(str(r).startswith("CB") for r in region.get("reasons", [])):
+        return "CB"
+    return "—"
+
+
+def html_regiao(region, pct, notas=()):
+    """Cartão de uma região: nome, % da FIR, decisão, VIS/BASE/CB-TS e o resto."""
+    vis = f"{region['vis']}M" if region.get("vis") is not None else "—"
+    base = f"{region['base']}FT" if region.get("base") is not None else "—"
+    det = []
+    if region.get("turb"):
+        det.append(f"TURB {_camadas(region['turb'], region.get('turb_layers', []), region.get('turb_parcial'))}")
+    if region.get("ice"):
+        det.append(f"ICE {_camadas(region['ice'], region.get('ice_layers', []), region.get('ice_parcial'))}")
+    if region.get("va"):
+        det.append("VA — CINZAS VULCÂNICAS")
+    if region.get("mt_obsc"):
+        det.append("MT OBSC — MONTANHAS OBSCURECIDAS")
+    partes = []
+    if region.get("reasons"):
+        partes.append(" · ".join(_e(r) for r in region["reasons"]))
+    if det:
+        partes.append('<span class="gv-mono">' + " · ".join(_e(d) for d in det) + "</span>")
+    if notas:
+        partes.append('<span class="gv-mono">Alcance restrito: '
+                      + " · ".join(_e(n) for n in notas) + "</span>")
+    det_html = ('<div class="gv-det">' + "<br>".join(partes) + "</div>") if partes else ""
+    return (
+        '<div class="gv-card">'
+        '<div class="gv-rtop"><div style="display:flex;flex-direction:column;gap:2px;min-width:0">'
+        f'<span class="gv-rnome">{_e(region["label"])}</span>'
+        f'<span class="gv-k">{pct:.0f}% DA FIR</span></div>{html_chip(region["decision"])}</div>'
+        '<div class="gv-metr">'
+        f'<div><span class="gv-k">VIS</span><span class="gv-v">{_e(vis)}</span></div>'
+        f'<div><span class="gv-k">BASE AGL</span><span class="gv-v">{_e(base)}</span></div>'
+        f'<div><span class="gv-k">CB/TS</span><span class="gv-v">{_e(_cb_ts(region))}</span></div>'
+        f'</div>{det_html}</div>')
+
+
+def html_aerodromo(nome, region):
+    """Resultado da consulta rápida: zona e decisão do aeródromo escolhido."""
+    if region is None:
+        return (f'<div class="gv-ad"><span class="gv-det" style="border:0;padding:0">'
+                f'{_e(nome)} está fora da área coberta por este GAMET.</span></div>')
+    motivos = "; ".join(region.get("reasons") or []) or "sem fenómenos significativos"
+    return (
+        '<div class="gv-ad"><div style="display:flex;flex-direction:column;gap:2px;min-width:0">'
+        f'<span style="font-size:14px;color:#E6EDF3">{_e(nome)}: {_e(region["decision"])}</span>'
+        f'<span class="gv-mono" style="font-size:12px;color:#8FA3B5">{_e(motivos)}</span></div>'
+        f'{html_chip(region["decision"])}</div>')
+
+# -------------------------------------------------
 # EXECUÇÃO
 # -------------------------------------------------
 
@@ -2780,6 +2967,7 @@ if st.session_state.pop("_tentar_recurso", False):
             datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%MZ") + " (arquivo)")
         st.session_state["gamet_fonte"] = "arquivo_recurso"
         st.session_state["arquivo_entrada"] = _info_r
+        st.session_state["_active_gamet_text"] = _txt_r.strip()
         # SIGMETs: os do arquivo (recolhidos de 15 em 15 min) mais os da
         # página do IPMA, se respondeu — a união é a leitura conservadora
         _pag = st.session_state.get("_pagina_sem_gamet") or []
@@ -2794,33 +2982,43 @@ if st.session_state.pop("_tentar_recurso", False):
             st.session_state.get("gamet_fetch_error", "") + f"\n\nArquivo: {_info_r}.")
         st.rerun()   # o erro é mostrado lá em cima, no expander do IPMA
 
-if st.button("🔍 Analisar GAMET") and gamet_text.strip():
-    st.session_state["_active_gamet_text"] = gamet_text.strip()
+with _c_ctrl:
+    if st.button("🔍 Analisar GAMET", width="stretch") and gamet_text.strip():
+        st.session_state["_active_gamet_text"] = gamet_text.strip()
+        st.rerun()
 
+# O bloco do briefing vai para _c_brief (topo do ecrã). Indentação de 2
+# espaços no "with" para não reindentar a legenda, que é um texto longo.
 if st.session_state.get("_active_gamet_text"):
+  with _c_brief:
     gamet_text = st.session_state["_active_gamet_text"]
+    _agora = datetime.now(timezone.utc)
+
+    # A faixa (validade · expira · SIGMET) fica no topo, mas o estado dos
+    # SIGMETs só se sabe mais abaixo — reserva-se o lugar.
+    _faixa_box = st.container()
 
     # ---- Validade ----
     validity_label = ""
+    _faixa_val, _faixa_exp = "—", "—"
     start_dt, end_dt, active = parse_validity(gamet_text)
     if start_dt and end_dt:
         fmt = "%d/%H%MZ"
         validity_label = f"Válido: {start_dt.strftime(fmt)} – {end_dt.strftime(fmt)}"
-        label = f"⏱️ {validity_label}"
+        _faixa_val = f"{start_dt:%d} {start_dt:%H}–{end_dt:%H}Z"
         if active:
-            # Mostrar quanto tempo falta — ajuda a decidir se vale a pena
-            # esperar pelo próximo GAMET antes de planear o voo
-            restante = end_dt - datetime.now(timezone.utc)
-            minutos = max(0, int(restante.total_seconds() // 60))
+            # Quanto tempo falta — ajuda a decidir se vale a pena esperar
+            # pelo próximo GAMET antes de planear o voo
+            minutos = max(0, int((end_dt - _agora).total_seconds() // 60))
             horas, mins = divmod(minutos, 60)
-            tempo = f"{horas}h{mins:02d}m" if horas else f"{mins} min"
+            _faixa_exp = f"{horas}h{mins:02d}m" if horas else f"{mins} min"
             if minutos <= 30:
-                st.warning(f"{label} ⏳ Expira em **{tempo}** — o próximo "
-                           f"GAMET está prestes a ser emitido")
-            else:
-                st.success(f"{label} ✅ Em vigor · expira em {tempo}")
+                st.warning(f"⏳ O GAMET expira em **{_faixa_exp}** — o próximo "
+                           f"está prestes a ser emitido.")
         else:
-            st.warning(label + " ⚠️ FORA DO PERÍODO DE VALIDADE — dados podem estar desatualizados")
+            _faixa_exp = "EXPIRADO" if end_dt <= _agora else "AINDA NÃO"
+            st.warning(f"⏱️ {validity_label} — ⚠️ **FORA DO PERÍODO DE VALIDADE**: "
+                       "os dados podem estar desactualizados.")
 
     blocks, fzlvl_min, qnh_min, wind_data = parse_gamet(gamet_text)
     dynamic_regions = compute_dynamic_regions(blocks)
@@ -2907,6 +3105,16 @@ if st.session_state.get("_active_gamet_text"):
             f"Texto reportado: {sigmet_text}"
         )
 
+    if has_sigmet or sig_ipma:
+        _faixa_sig, _faixa_sig_dec = "ACTIVO", "NO-GO"
+    elif _verificado:
+        _faixa_sig, _faixa_sig_dec = "NIL", "GO"
+    else:
+        _faixa_sig, _faixa_sig_dec = "N/VERIF.", None
+    with _faixa_box:
+        st.markdown(html_faixa(_faixa_val, _faixa_exp, _faixa_sig, _faixa_sig_dec),
+                    unsafe_allow_html=True)
+
     if looks_unparseable(gamet_text):
         st.error(
             "⚠️ **Nenhum campo meteorológico reconhecido no texto.** "
@@ -2931,212 +3139,118 @@ if st.session_state.get("_active_gamet_text"):
     _area_fir = FIR_POLYGON.area
     _area_por_dec = {}
     for _reg in dynamic_regions:
-        _d = _reg["decision"]
-        _area_por_dec[_d] = _area_por_dec.get(_d, 0) + _reg["polygon"].area
+        _area_por_dec[_reg["decision"]] = _area_por_dec.get(_reg["decision"], 0) + _reg["polygon"].area
+    st.markdown(html_veredicto(_area_por_dec, _area_fir), unsafe_allow_html=True)
 
-    _pior = next((d for d in ("NO-GO", "MARGINAL", "GO") if d in _area_por_dec), "GO")
-    _pct_pior = 100 * _area_por_dec.get(_pior, 0) / _area_fir
-
-    if _pior == "GO":
-        st.success("### ✅ GO — condições favoráveis em toda a FIR")
-    else:
-        _partes = [
-            f"**{d}** {100 * _area_por_dec[d] / _area_fir:.0f}%"
-            for d in ("NO-GO", "MARGINAL", "GO") if d in _area_por_dec
-        ]
-        _resumo = " · ".join(_partes)
-        if _pior == "NO-GO":
-            st.error(f"### 🔴 NO-GO em {_pct_pior:.0f}% da FIR\n\n{_resumo}")
-        else:
-            st.warning(f"### ⚠️ MARGINAL em {_pct_pior:.0f}% da FIR\n\n{_resumo}")
-
-    # ---- Consulta rápida por aeródromo ----
-    st.subheader("✈️ Consulta Rápida")
+    # ---- O meu aeródromo ----
     airport_options = ["— Seleccionar —"] + sorted(AERODROMES.keys())
-    # Manter a escolha entre análises — quem voa sempre do mesmo aeródromo
-    # não tem de o seleccionar de cada vez
+    # A escolha fica memorizada entre análises — quem voa sempre do mesmo
+    # sítio não tem de o seleccionar de cada vez
     _guardado = st.session_state.get("aerodromo_preferido", "— Seleccionar —")
     _idx = airport_options.index(_guardado) if _guardado in airport_options else 0
     selected_airport = st.selectbox(
-        "Aeródromo de partida/chegada:",
+        "O meu aeródromo",
         options=airport_options,
         index=_idx,
         help="Mostra a decisão VFR exacta para esse aeródromo, com base na "
-             "geometria real do GAMET — não numa aproximação por sector. "
-             "A escolha fica memorizada para as próximas análises. "
-             "Coordenadas aproximadas — confirma sempre na AIP Portugal em vigor.",
+             "geometria real do GAMET. A escolha fica memorizada nesta sessão.",
     )
     if selected_airport != _guardado:
         st.session_state["aerodromo_preferido"] = selected_airport
     if selected_airport != "— Seleccionar —":
         lat, lon = AERODROMES[selected_airport]
-        found = find_region_for_point(dynamic_regions, lat, lon)
-        if found:
-            dec = found["decision"]
-            icon = {"GO": "✅", "MARGINAL": "⚠️", "NO-GO": "🔴"}.get(dec, "❔")
-            if dec == "NO-GO":
-                st.error(f"{icon} **{selected_airport}: {dec}**")
-            elif dec == "MARGINAL":
-                st.warning(f"{icon} **{selected_airport}: {dec}**")
+        st.markdown(html_aerodromo(selected_airport,
+                                   find_region_for_point(dynamic_regions, lat, lon)),
+                    unsafe_allow_html=True)
+
+    # ---- Briefing por regiões (geometria real do GAMET) ----
+    st.subheader(f"Briefing por regiões · {len(dynamic_regions)}")
+    _cartoes = []
+    for region in dynamic_regions:
+        _pct = 100 * region["polygon"].area / FIR_POLYGON.area
+        # Anotações que restringem o alcance real do aviso — o fenómeno não
+        # cobre necessariamente toda a área desenhada
+        _notas = annotate_window_notes(region.get("notas"), start_dt)
+        _cartoes.append(html_regiao(region, _pct, _notas))
+    st.markdown('<div class="gv-regioes">' + "".join(_cartoes) + "</div>",
+                unsafe_allow_html=True)
+
+    # ---- Resto do briefing, em separadores ----
+    tab_mapa, tab_vento, tab_s2, tab_txt, tab_leg = st.tabs(
+        ["Mapa", "Vento/Temp", "Secção II", "Texto GAMET", "Legenda"])
+
+    with tab_mapa:
+        if _FOLIUM_OK:
+            fmap = folium.Map(location=[39.5, -8.2], zoom_start=6, tiles="OpenStreetMap")
+            for region in dynamic_regions:
+                poly = region["polygon"]
+                color = _DEC_BARRA.get(region["decision"], "#888")
+                geoms = poly.geoms if isinstance(poly, MultiPolygon) else [poly]
+                tooltip = (f"{region['label']}: {region['decision']}"
+                           + (f" — {'; '.join(region['reasons'])}" if region["reasons"] else ""))
+                for g in geoms:
+                    if g.is_empty or not hasattr(g, "exterior") or g.exterior is None:
+                        continue
+                    folium.Polygon(
+                        locations=[[la, lo] for lo, la in zip(*g.exterior.xy)],
+                        color=color, fill=True, fill_color=color, fill_opacity=0.35,
+                        weight=2, tooltip=tooltip,
+                    ).add_to(fmap)
+            for name, (lat, lon) in CITIES.items():
+                folium.CircleMarker(location=[lat, lon], radius=3, color="#0E151C",
+                                    fill=True, fill_color="#0E151C", fill_opacity=0.9,
+                                    tooltip=name).add_to(fmap)
+            # st.iframe substitui st.components.v1.html (descontinuado)
+            if hasattr(st, "iframe"):
+                st.iframe(fmap._repr_html_(), height=460)
             else:
-                st.success(f"{icon} **{selected_airport}: {dec}**")
-            if found["reasons"]:
-                st.caption("Motivos: " + "; ".join(found["reasons"]))
+                st.components.v1.html(fmap._repr_html_(), height=460)
         else:
-            st.info(f"{selected_airport} está fora da FIR LPPC coberta por este GAMET.")
+            st.warning("Folium não instalado — mapa estático disponível no PDF.")
 
-    # ---- Briefing (zonas dinâmicas — geometria real do GAMET) ----
-    st.subheader("📋 Briefing")
-    st.caption(
-        "As zonas são calculadas a partir da geometria real do GAMET "
-        "(não de sectores fixos) — cada região reflecte exactamente a área "
-        "coberta pelos fenómenos meteorológicos reportados. "
-        "Ordenadas da situação mais grave para a menos grave."
-    )
-
-    # Grelha por linhas: cria um novo conjunto de colunas a cada 3 regiões.
-    # Antes usava-se um único st.columns(...) com cols[i % n], o que fazia
-    # a 4.ª região empilhar por baixo da 1.ª — a ordem de leitura deixava
-    # de seguir a gravidade e um NO-GO podia aparecer visualmente abaixo
-    # de um GO.
-    POR_LINHA = 3
-    cols = []
-
-    for i, region in enumerate(dynamic_regions):
-        if i % POR_LINHA == 0:
-            restantes = len(dynamic_regions) - i
-            cols = st.columns(min(POR_LINHA, restantes))
-        col = cols[i % POR_LINHA]
-
-        dec         = region["decision"]
-        vis         = region["vis"]
-        base        = region["base"]
-        ts          = region["ts"]
-        turb        = region["turb"]
-        turb_layers = region["turb_layers"]
-        ice         = region["ice"]
-        ice_layers  = region["ice_layers"]
-        mt_obsc     = region["mt_obsc"]
-        va_vals     = region["va"]
-        reasons     = region["reasons"]
-        pct         = 100 * region["polygon"].area / FIR_POLYGON.area
-
-        with col:
-            st.markdown(f"### {region['label']}")
-            st.caption(f"{pct:.0f}% da FIR")
-
-            if dec == "NO-GO":
-                st.error("🔴 NO-GO")
-            elif dec == "MARGINAL":
-                st.warning("⚠️ MARGINAL")
+    with tab_vento:
+        if wind_data:
+            header = ["Nível"] + [s["station"] for s in wind_data]
+            rows = []
+            for lvl in _WIND_LEVELS:
+                row = [lvl]
+                for s in wind_data:
+                    entry = s["levels"].get(lvl)
+                    if entry:
+                        sign = "+" if entry["temp"] >= 0 else ""
+                        row.append(f"{entry['dir']:03d}°/{entry['spd']:03d}kt "
+                                   f"{sign}{entry['temp']}°C")
+                    else:
+                        row.append("—")
+                rows.append(row)
+            if _PANDAS_OK:
+                st.dataframe(pd.DataFrame(rows, columns=header),
+                             width="stretch", hide_index=True)
             else:
-                st.success("✅ GO")
-
-            st.write(f"👁️ VIS: {vis} m"       if vis  is not None else "👁️ VIS: —")
-            st.write(f"☁️ BASE: {base} ft AGL" if base is not None else "☁️ BASE: —")
-            st.write(f"⛈️ TS: {', '.join(_ts_label(v) for v in ts)}" if ts else "⛈️ TS: —")
-
-            if turb:
-                turb_str = ", ".join(
-                    f"{v} ({turb_layers[idx]}){_trend_icon(turb_layers[idx])}" if idx < len(turb_layers) and turb_layers[idx] else v
-                    for idx, v in enumerate(turb)
-                )
-                if region.get("turb_parcial"):
-                    turb_str += " *(parte da zona)*"
-                st.write(f"🌪 TURB: {turb_str}")
-            else:
-                st.write("🌪 TURB: —")
-
-            if ice:
-                ice_str = ", ".join(
-                    f"{v} ({ice_layers[idx]}){_trend_icon(ice_layers[idx])}" if idx < len(ice_layers) and ice_layers[idx] else v
-                    for idx, v in enumerate(ice)
-                )
-                if region.get("ice_parcial"):
-                    ice_str += " *(parte da zona)*"
-                st.write(f"❄️ ICE: {ice_str}")
-            else:
-                st.write("❄️ ICE: —")
-
-            st.write("🌋 VA: ⚠️ CINZAS VULCÂNICAS" if va_vals else "🌋 VA: —")
-            st.write("⛰️ MT OBSC: ⚠️ MONTANHAS OBSCURECIDAS" if mt_obsc else "⛰️ MT OBSC: —")
-
-            if reasons:
-                with st.expander("ℹ️ Motivos da decisão", expanded=True):
-                    for r in reasons:
-                        st.write(f"• {r}")
-
-            # Anotações que restringem o alcance real do aviso — o
-            # fenómeno não cobre necessariamente toda a área desenhada
-            notas = annotate_window_notes(region.get("notas"), start_dt)
-            if notas:
-                st.caption("**Alcance restrito:**  \n" +
-                           "  \n".join(f"· {n}" for n in notas))
-
-    # ---- Mapa Interativo (Folium) ----
-    st.subheader("🗺️ Mapa Interativo")
-    st.caption("Zonas desenhadas com a geometria real do GAMET.")
-    fcolors = {"GO": "#2ecc71", "MARGINAL": "#e67e22", "NO-GO": "#e74c3c"}
-
-    if _FOLIUM_OK:
-        fmap = folium.Map(
-            location=[39.5, -8.5],
-            zoom_start=6,
-            tiles="OpenStreetMap",
-        )
-
-        for region in dynamic_regions:
-            poly = region["polygon"]
-            dec  = region["decision"]
-            color = fcolors.get(dec, "#888")
-            geoms = poly.geoms if isinstance(poly, MultiPolygon) else [poly]
-            tooltip = f"{region['label']}: {dec}" + (f" — {'; '.join(region['reasons'])}" if region["reasons"] else "")
-            for g in geoms:
-                if g.is_empty or not hasattr(g, "exterior") or g.exterior is None:
-                    continue
-                coords = [[lat, lon] for lon, lat in zip(*g.exterior.xy)]
-                folium.Polygon(
-                    locations=coords,
-                    color=color,
-                    fill=True,
-                    fill_color=color,
-                    fill_opacity=0.35,
-                    weight=2,
-                    tooltip=tooltip,
-                ).add_to(fmap)
-
-        for name, (lat, lon) in CITIES.items():
-            folium.CircleMarker(
-                location=[lat, lon],
-                radius=4,
-                color="black",
-                fill=True,
-                fill_color="black",
-                fill_opacity=0.8,
-                tooltip=name,
-            ).add_to(fmap)
-        # st.iframe substitui st.components.v1.html (descontinuado); manter
-        # o antigo como recurso para versões do Streamlit sem st.iframe.
-        if hasattr(st, "iframe"):
-            st.iframe(fmap._repr_html_(), height=500)
+                md = "| " + " | ".join(header) + " |\n"
+                md += "| " + " | ".join(["---"] * len(header)) + " |\n"
+                for row in rows:
+                    md += "| " + " | ".join(row) + " |\n"
+                st.markdown(md)
         else:
-            st.components.v1.html(fmap._repr_html_(), height=500)
-    else:
-        st.warning("Folium não instalado — mapa estático disponível no PDF.")
+            st.caption("Este GAMET não traz vento e temperatura por níveis.")
 
-    # ---- Informação Secção II ----
-    if fzlvl_min or qnh_min:
-        st.subheader("🌡️ Dados Adicionais (Secção II)")
-        c1, c2 = st.columns(2)
-        with c1:
-            if fzlvl_min:
-                st.info(f"🧊 Nível de gelo mínimo (FZLVL): **{fzlvl_min} ft AMSL**")
-        with c2:
-            if qnh_min:
-                st.info(f"🌡️ QNH mínimo: **{qnh_min} hPa**")
+    with tab_s2:
+        _t1 = f"{qnh_min} hPa" if qnh_min else "—"
+        _t2 = f"{fzlvl_min} ft AMSL" if fzlvl_min else "—"
+        st.markdown(
+            '<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">'
+            f'<div class="gv-tile"><span class="gv-k">QNH MÍN.</span><br><span class="gv-v">{_e(_t1)}</span></div>'
+            f'<div class="gv-tile"><span class="gv-k">ISO 0 °C MÍN. (FZLVL)</span><br><span class="gv-v">{_e(_t2)}</span></div>'
+            '</div>', unsafe_allow_html=True)
 
-    # ---- Legenda ----
-    with st.expander("📖 Legenda do Briefing", expanded=False):
+    with tab_txt:
+        try:
+            st.code(gamet_text, language=None, wrap_lines=True)
+        except TypeError:   # Streamlit antigo, sem wrap_lines
+            st.code(gamet_text, language=None)
+
+    with tab_leg:
         st.markdown("""
 ### 📐 Referência técnica
 
@@ -3219,42 +3333,14 @@ if st.session_state.get("_active_gamet_text"):
 """)
 
     # ---- Exportar PDF ----
-    st.subheader("📄 Exportar Briefing")
     with st.spinner("A gerar PDF..."):
         pdf_bytes = generate_pdf(dynamic_regions, gamet_text, fzlvl_min, qnh_min, validity_label)
-    fname = f"briefing_lppc_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%MZ')}.pdf"
     st.download_button(
-        label="⬇️ Descarregar Briefing PDF",
+        label="⬇️ Descarregar briefing (PDF)",
         data=pdf_bytes,
-        file_name=fname,
+        file_name=f"briefing_lppc_{_agora.strftime('%Y%m%d_%H%MZ')}.pdf",
         mime="application/pdf",
+        width="stretch",
     )
-
-    # ---- Vento por níveis ----
-    if wind_data:
-        st.subheader("💨 Vento e Temperatura por Níveis")
-        levels = _WIND_LEVELS
-        header = ["Nível"] + [s["station"] for s in wind_data]
-        rows = []
-        for lvl in levels:
-            row = [lvl]
-            for s in wind_data:
-                entry = s["levels"].get(lvl)
-                if entry:
-                    sign = "+" if entry["temp"] >= 0 else ""
-                    row.append(
-                        f"{entry['dir']:03d}°/{entry['spd']:03d}kt "
-                        f"{sign}{entry['temp']}°C"
-                    )
-                else:
-                    row.append("—")
-            rows.append(row)
-        if _PANDAS_OK:
-            df = pd.DataFrame(rows, columns=header)
-            st.dataframe(df, use_container_width=True, hide_index=True)
-        else:
-            md = "| " + " | ".join(header) + " |\n"
-            md += "| " + " | ".join(["---"] * len(header)) + " |\n"
-            for row in rows:
-                md += "| " + " | ".join(row) + " |\n"
-            st.markdown(md)
+    st.markdown('<p class="gv-nota">Ferramenta de apoio à decisão. Não substitui o '
+                'briefing oficial nem o juízo do piloto.</p>', unsafe_allow_html=True)
