@@ -49,6 +49,9 @@ Três pormenores que já causaram erros reais:
 - Uma bolsa residual (< 1,5% da FIR) junta-se à região com as mesmas causas
   e notas se estiver a menos de `_BOLSA_MAX_KM` (25 km), mesmo sem ser
   contígua (2.0). Mais longe continua a ser um cartão próprio.
+- Qualificadores seguidos, com ou sem AND (`BTN N3840 AND N4100 E OF W00800`),
+  são uma só área (2.3). A janela `HH/HH` pertence à subentrada que vem a
+  seguir; uma subentrada sem janela vale para todo o período.
 
 Não há sectores fixos. A app teve 3 sectores (Norte/Centro/Sul) até à v17;
 foram substituídos por geometria dinâmica porque marcavam um sector
@@ -127,7 +130,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-403 testes. Devem passar a 100%.
+427 testes. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -139,6 +142,8 @@ python3 -m pytest
 - `tests/test_v16.py` — índice do arquivo, recurso ao arquivo e SIGMETs
   históricos (inclui a app completa com a rede simulada)
 - `tests/test_v20.py` — CB em SIG CLD (GAMET real 160300) e bolsas residuais
+- `tests/test_v23.py` — qualificadores seguidos sem AND (`BTN … AND … E OF …`)
+  e janela horária de cada subentrada (GAMETs reais 160900, 162100, 170300)
 - `tests/conftest.py` — extrai o motor da app sem executar a UI. Os imports
   vêm da própria app (nunca de uma lista fixa — escondia imports em falta)
 
