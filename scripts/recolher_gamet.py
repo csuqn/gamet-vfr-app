@@ -41,8 +41,11 @@ def _carregar_rede():
     return mod
 
 
+# Mesmo padrão da app (_BULLETIN_RE): o "=" final é opcional — os SIGMETs
+# reais de 17-out-2026 vinham sem ele e foram parar a desconhecidos/.
 _SIGMET_RE = re.compile(
-    r"(LPPC\s+(?:SIGMET|AIRMET)\s+\S+\s+VALID\s+\d{6}/\d{6}.+?=)", re.DOTALL)
+    r"(LPPC\s+(?:SIGMET|AIRMET)\s+\S+\s+VALID\s+\d{6}/\d{6}.*?"
+    r"(?:=|(?=\s*LPPC\s+(?:SIGMET|AIRMET|GAMET)\s)|\s*$))", re.DOTALL)
 
 
 def _pagina_bruta(rede):
@@ -101,7 +104,7 @@ def recolher_sigmets(rede, agora):
             continue
         m = _SIGMET_RE.search(texto)
         if m:
-            texto = m.group(1)
+            texto = m.group(1).strip()
             tipo = "AIRMET" if " AIRMET " in f" {texto} " else "SIGMET"
             num = re.search(r"(?:SIGMET|AIRMET)\s+(\S+)", texto).group(1)
             d = _guardar(pasta, f"{tipo}{num}_", texto, agora)
@@ -210,7 +213,11 @@ def _recolher() -> int:
         log = DESTINO / "falhas.log"
         log.parent.mkdir(parents=True, exist_ok=True)
         with log.open("a", encoding="utf-8") as f:
-            f.write(f"{agora:%Y-%m-%dT%H:%MZ} {texto.splitlines()[0]}\n")
+            # Primeira linha + o diagnóstico por endpoint (HTTP xxx, erro de
+            # ligação…) — só a primeira linha não dizia porque falhou
+            detalhe = " | ".join(l.strip("• ").strip() for l in texto.splitlines()[1:] if l.strip())
+            f.write(f"{agora:%Y-%m-%dT%H:%MZ} {texto.splitlines()[0]}"
+                    + (f" [{detalhe}]" if detalhe else "") + "\n")
         print("FALHA:", texto)
         return 0          # não falhar o workflow — a falha fica registada
 

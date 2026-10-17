@@ -29,7 +29,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "2.6"
+APP_VERSION = "2.7"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -210,8 +210,14 @@ def fetch_arquivo_indice() -> tuple:
     dados.setdefault("sigmets", [])
     return True, dados
 
+# O "=" final NÃO é obrigatório: os primeiros SIGMET/AIRMET reais na página
+# do IPMA (17-out-2026, SIGMET T01 e AIRMET 1) vinham sem ele, e até à 2.6 o
+# "=" obrigatório fazia a app não os ver e dizer "sem SIGMET" (erro
+# optimista). O boletim acaba no "=", no início do boletim seguinte ou no fim
+# do bloco.
 _BULLETIN_RE = re.compile(
-    r"(LPPC\s+(?:SIGMET|AIRMET)\s+\S+\s+VALID\s+\d{6}/\d{6}.+?=)", re.DOTALL)
+    r"(LPPC\s+(?:SIGMET|AIRMET)\s+\S+\s+VALID\s+\d{6}/\d{6}.*?"
+    r"(?:=|(?=\s*LPPC\s+(?:SIGMET|AIRMET|GAMET)\s)|\s*$))", re.DOTALL)
 
 
 def extract_bulletins_from_html(raw: str) -> list:
@@ -227,8 +233,9 @@ def extract_bulletins_from_html(raw: str) -> list:
     out = []
     for bl in blocos:
         for m in _BULLETIN_RE.finditer(_limpar(bl)):
-            if m.group(1) not in out:
-                out.append(m.group(1))
+            b = m.group(1).strip()
+            if b not in out:
+                out.append(b)
     return out
 
 
