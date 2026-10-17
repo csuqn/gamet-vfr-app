@@ -17,7 +17,7 @@ Passos:
 4. O teste novo usa o GAMET real e falha no `main`? (Corre-o contra o
    `app.py` do main.) Se passa no main, não prova nada → **REJEITADO**.
 5. Comparação de versões sobre TODOS os GAMETs do arquivo:
-   `python3 scripts/comparar_versoes.py --base <app.py do main> --nova app.py --dir dados/gamets`
+   `python3 scripts/comparar_versoes.py --base <app.py do main> --nova app.py --dir dados/gamets --indice dados/indice.json`
    - Para cada decisão **MAIS PERMISSIVA**, vai ao texto do GAMET e às
      coordenadas e prova que a nova está certa. Uma que não consigas provar
      sem margem → **DÚVIDA**.

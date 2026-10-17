@@ -2469,17 +2469,49 @@ def _coord(m):
 
 
 def _buffer_nm(geom, nm):
-    """Buffer em milhas náuticas, corrigindo a longitude pela latitude."""
+    """
+    Buffer de pelo menos `nm` milhas náuticas reais em toda a geometria. A
+    longitude é corrigida pelo cos da latitude MAIS A NORTE da geometria (o
+    menor cos), para que a margem nunca fique abaixo de `nm` em lado nenhum.
+    """
     from shapely import affinity
-    k = math.cos(math.radians(geom.centroid.y))
+    _, miny, _, maxy = geom.bounds
+    k = math.cos(math.radians(max(abs(miny), abs(maxy)) + nm * _NM_GRAUS))
     g = affinity.scale(geom, xfact=k, yfact=1, origin=(0, 0))
-    g = g.buffer(nm * _NM_GRAUS, quad_segs=8)
+    g = g.buffer(nm * _NM_GRAUS, quad_segs=32)
     return affinity.scale(g, xfact=1 / k, yfact=1, origin=(0, 0))
 
 
 def sigmet_id(texto):
     m = re.match(r"\s*LPPC\s+(?:SIGMET|AIRMET)\s+(\S+)", texto or "")
     return m.group(1) if m else None
+
+
+_FIM_AREA_RE = re.compile(r"\b(?:SFC|TOP|ABV|BLW|FL\d{3}|STNR|MOV|INTSF|WKN|NC|FCST|OBS|AT)\b")
+
+
+def _area_wi(seg):
+    """
+    Área de UM troço "WI …" (polígono ou círculo). Devolve a geometria ou None
+    se houver alguma coisa que não se perceba (cai para toda a área).
+    """
+    m = re.match(r"\s*(\d{1,3})\s*NM\s+OF\s+([NS]\d{4}\s*[EW]\d{5})\s*$", seg)
+    if m:
+        c = _COORD_RE.search(m.group(2))
+        return _buffer_nm(Point(_coord(c.groups())), int(m.group(1)))
+    # Polígono: tudo o que não for coordenada completa ou separador é motivo
+    # para não confiar na área (ex.: "N39 W007" sem minutos).
+    if _COORD_RE.sub(" ", seg).replace("-", " ").strip():
+        return None
+    pts = list(dict.fromkeys(_coord(c) for c in _COORD_RE.findall(seg)))
+    if len(pts) < 3:
+        return None
+    pol = Polygon(pts)
+    if not pol.is_valid or pol.area == 0:
+        # Vértices fora de ordem (polígono que se cruza): a envolvente convexa
+        # cobre todos os pontos — nunca fica menor do que o publicado.
+        pol = Polygon(pts).convex_hull
+    return pol if pol.area > 0 else None
 
 
 def area_sigmet(texto, ref=None):
@@ -2494,22 +2526,25 @@ def area_sigmet(texto, ref=None):
     if re.search(r"\bENTIRE FIR\b|\bLINE\b", corpo):
         return None, "toda a área"
 
-    geom, desc = None, ""
-    m = re.search(r"\bWI\s+(\d{1,3})\s*NM\s+OF\s+([NS]\d{4}\s*[EW]\d{5})", corpo)
-    if m:
-        c = _COORD_RE.search(m.group(2))
-        geom = _buffer_nm(Point(_coord(c.groups())), int(m.group(1)))
-        desc = f"círculo de {m.group(1)} NM"
-    elif re.search(r"\bWI\s+[NS]\d{4}", corpo):
-        trecho = re.split(r"\b(?:SFC|TOP|ABV|BLW|FL\d{3}|STNR|MOV|INTSF|WKN|NC)\b", corpo.split("WI", 1)[1])[0]
-        pts = [_coord(c) for c in _COORD_RE.findall(trecho)]
-        unicos = list(dict.fromkeys(pts))
-        if len(unicos) < 3:
-            return None, "toda a área (polígono ilegível)"
-        geom = Polygon(unicos).buffer(0)
-        if geom.is_empty or geom.area == 0:
-            return None, "toda a área (polígono ilegível)"
-        desc = "polígono"
+    wis = [m.end() for m in re.finditer(r"\bWI\b", corpo)]
+    if wis:
+        # Todas as áreas "WI" (a observada e, com "FCST AT hhmmZ WI …", a
+        # prevista): a envolvente de todas cobre também o caminho entre elas.
+        partes = []
+        for i, ini in enumerate(wis):
+            fim_seg = wis[i + 1] - 2 if i + 1 < len(wis) else len(corpo)
+            seg = corpo[ini:fim_seg]
+            seg = _FIM_AREA_RE.split(seg)[0]
+            g = _area_wi(seg)
+            if g is None:
+                return None, "toda a área (área ilegível)"
+            partes.append(g)
+        geom = unary_union(partes)
+        if len(partes) > 1:
+            geom = geom.convex_hull
+        desc = "círculo" if "NM OF" in corpo and len(partes) == 1 else "polígono"
+        if len(partes) > 1:
+            desc = "área observada + prevista"
     else:
         geom = extract_polygon(corpo)
         if geom is None:
@@ -2518,7 +2553,7 @@ def area_sigmet(texto, ref=None):
 
     # Movimento: estende a área na direcção indicada durante toda a validade
     if re.search(r"\bMOV\b", corpo):
-        mv = re.search(r"\bMOV\s+([NSEW]{1,3})\s+(\d{1,3})\s*KT", corpo)
+        mv = re.search(r"\bMOV\s+([NSEW]{1,3})\s+(\d{1,3})\s*KT\b", corpo)
         val = re.search(r"VALID\s+(\d{2})(\d{2})(\d{2})/(\d{2})(\d{2})(\d{2})", t)
         if not mv or mv.group(1) not in _RUMO or not val:
             return None, "toda a área (movimento ilegível)"
@@ -2533,7 +2568,7 @@ def area_sigmet(texto, ref=None):
         from shapely import affinity
         dist = int(mv.group(2)) * (fim - ini).total_seconds() / 3600 * _NM_GRAUS
         rumo = math.radians(_RUMO[mv.group(1)])
-        k = math.cos(math.radians(geom.centroid.y))
+        k = math.cos(math.radians(max(abs(geom.bounds[1]), abs(geom.bounds[3]))))
         movido = affinity.translate(geom, xoff=dist * math.sin(rumo) / k,
                                     yoff=dist * math.cos(rumo))
         geom = unary_union([geom, movido]).convex_hull
@@ -2541,6 +2576,26 @@ def area_sigmet(texto, ref=None):
 
     geom = _clean_poly(FIR_POLYGON.intersection(_buffer_nm(geom, _SIGMET_MARGEM_NM)))
     return geom, f"{desc} + {_SIGMET_MARGEM_NM} NM"
+
+
+_LIGACAO_SIGMET = {"AND", "SIGMET", "SIGMETS", "LPPC", "NR", "NO", "Nº"}
+
+
+def ids_sigmet_aplicavel(sigmet_text):
+    """
+    Identificadores no campo "SIGMET APPLICABLE" do GAMET. Devolve a lista,
+    ou None se houver alguma palavra que não se perceba (→ toda a área).
+    """
+    ids = []
+    for tok in re.split(r"[\s,;/]+", (sigmet_text or "").upper()):
+        tok = tok.strip(".:=()")
+        if not tok or tok in _LIGACAO_SIGMET:
+            continue
+        if re.fullmatch(r"[A-Z]{0,2}\d{1,3}", tok):
+            ids.append(tok)
+        else:
+            return None
+    return ids
 
 
 def blocos_sigmet(sigmets, has_sigmet, sigmet_text, ref=None):
@@ -2566,7 +2621,7 @@ def blocos_sigmet(sigmets, has_sigmet, sigmet_text, ref=None):
             blocos.append(MetBlock("SIGMET", geom, f"{rot} — {d}"))
             descr.append(f"SIGMET {rot}: NO-GO na sua área ({d})")
     if has_sigmet:
-        ids = [x for x in re.findall(r"\b([A-Z]?\d{1,2})\b", sigmet_text or "")]
+        ids = ids_sigmet_aplicavel(sigmet_text)
         if not ids or any(i not in disponiveis for i in ids):
             blocos.append(MetBlock("SIGMET", FIR_POLYGON,
                                    f"{sigmet_text[:40]} (GAMET, sem área) — toda a área"))

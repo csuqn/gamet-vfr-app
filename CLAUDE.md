@@ -141,7 +141,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-474 testes. Devem passar a 100%.
+479 testes. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -335,7 +335,8 @@ Tarefa agendada às 08:00 (Lisboa). Cadeia:
 4. Para cada erro do parser confirmado: `editor` (ramo `proposta/...` com
    teste do GAMET real) → PR → check "Testes" (GitHub Actions) →
    `revisor` (independente; inclui `scripts/comparar_versoes.py` sobre todo o
-   arquivo, que lista as decisões que ficam MAIS PERMISSIVAS).
+   arquivo, que lista as decisões que ficam MAIS PERMISSIVAS; com `--indice`
+   inclui os SIGMETs arquivados).
 5. Relatório e mensagem ao Duarte.
 
 **Merge automático (decisão do Duarte, 17-out-2026):** um PR entra no

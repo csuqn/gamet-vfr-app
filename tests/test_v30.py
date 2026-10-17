@@ -108,3 +108,59 @@ def test_gamet_refere_sigmet_sem_texto_completo_vale_toda_a_area(eng):
     g = build_gamet("SECN I SFC VIS: N OF N4100 5000M BR", validity="171500/172100", sigmet="T05")
     assert {x["decision"] for x in _r(eng, [T02], gamet=g)["regioes"]} == {"NO-GO"}
     assert {x["decision"] for x in eng.analisar_gamet(g, "manual", agora=AGORA)["regioes"]} == {"NO-GO"}
+
+
+# ---------------------------------------------------------------------
+# Casos apontados pelo revisor (17-out-2026): nunca uma área menor do que a
+# do SIGMET sem cair para toda a área.
+# ---------------------------------------------------------------------
+QUADRADO = "N3900 W00800 - N3900 W00700 - N4000 W00700 - N4000 W00800"
+
+
+def test_fcst_at_inclui_a_posicao_prevista(eng):
+    corpo = ("EMBD TS OBS WI N3840 W00930 - N3840 W00900 - N3900 W00900 - N3900 W00930 "
+             "TOP FL300 FCST AT 1800Z WI N4005 W00720 - N4005 W00710 - N4015 W00710 - "
+             "N4015 W00720")
+    r = _r(eng, [_s(corpo)])
+    assert _dec(eng, r, 38.83, -9.25) == "NO-GO"      # posição observada
+    assert _dec(eng, r, 40.17, -7.25) == "NO-GO"      # posição prevista
+    assert _dec(eng, r, 39.5, -8.2) == "NO-GO"        # caminho entre as duas
+
+
+def test_poligono_que_se_cruza_usa_a_envolvente(eng):
+    bem, _ = eng.area_sigmet(_s(f"EMBD TS FCST WI {QUADRADO} TOP FL300 STNR NC"))
+    laco, _ = eng.area_sigmet(_s("EMBD TS FCST WI N3900 W00800 - N4000 W00700 - "
+                                 "N3900 W00700 - N4000 W00800 TOP FL300 STNR NC"))
+    assert laco.area >= bem.area * 0.999
+
+
+def test_coordenada_sem_minutos_cai_para_toda_a_area(eng):
+    geom, _ = eng.area_sigmet(_s("EMBD TS FCST WI N3900 W00800 - N39 W007 - N4000 W00700 - "
+                                 "N4000 W00800 TOP FL300 STNR NC"))
+    assert geom is None
+
+
+def test_identificador_desconhecido_no_gamet_vale_toda_a_area(eng):
+    for campo in ("T02 AND AB3X", "T02 AND T003", "T02, 103", "T02 E MAIS"):
+        g = build_gamet("SECN I SFC VIS: N OF N4100 5000M BR", validity="171500/172100",
+                        sigmet=campo)
+        dec = {x["decision"] for x in _r(eng, [T02], gamet=g)["regioes"]}
+        assert dec == {"NO-GO"}, campo
+
+
+def test_margem_nunca_abaixo_de_10_nm(eng):
+    import math
+    from shapely.geometry import Point
+    geom, _ = eng.area_sigmet(T02)
+    pol = eng.Polygon([(-7.75, 41.8333), (-7.8833, 39.6667), (-6.8833, 39.6667),
+                       (-6.15, 41.7167)])
+    # Pontos a 9,9 NM do bordo (haversine), em várias direcções, têm de estar
+    # dentro da área (onde ela estiver dentro da FIR).
+    for ang in range(0, 360, 15):
+        for vx, vy in list(pol.exterior.coords)[:-1]:
+            a = math.radians(ang)
+            dlat = 9.9 / 60 * math.cos(a)
+            dlon = 9.9 / 60 * math.sin(a) / math.cos(math.radians(vy))
+            p = Point(vx + dlon, vy + dlat)
+            if eng.FIR_POLYGON.contains(p):
+                assert geom.buffer(1e-9).contains(p), (vx, vy, ang)
