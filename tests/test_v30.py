@@ -164,3 +164,20 @@ def test_margem_nunca_abaixo_de_10_nm(eng):
             p = Point(vx + dlon, vy + dlat)
             if eng.FIR_POLYGON.contains(p):
                 assert geom.buffer(1e-9).contains(p), (vx, vy, ang)
+
+
+def test_movimento_conta_desde_a_observacao_anterior_a_validade(eng):
+    # Observado às 13Z, válido 14–18Z, MOV E 15KT: às 18Z andou 5 h × 15 = 75 NM
+    corpo = ("EMBD TS OBS AT 1300Z WI N3900 W00930 - N3900 W00915 - N3915 W00915 - "
+             "N3915 W00930 TOP FL300 MOV E 15KT NC")
+    r = _r(eng, [_s(corpo)])
+    import math
+    k = math.cos(math.radians(39.1))
+    ponto = (39.1, -(9 + 15 / 60) + 78 / 60 / k)       # 78 NM: fora de 4 h (60+10), dentro de 5 h (75+10)
+    assert _dec(eng, r, *ponto) == "NO-GO"
+
+
+def test_hora_da_observacao_ilegivel_com_movimento_vale_toda_a_area(eng):
+    corpo = ("EMBD TS OBS AT 13Z WI N3900 W00930 - N3900 W00915 - N3915 W00915 - "
+             "N3915 W00930 TOP FL300 MOV E 15KT NC")
+    assert eng.area_sigmet(_s(corpo))[0] is None

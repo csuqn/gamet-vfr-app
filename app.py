@@ -2565,8 +2565,22 @@ def area_sigmet(texto, ref=None):
             return None, "toda a área (validade ilegível)"
         if fim <= ini:
             fim += timedelta(days=1)
+        # A posição dada pode ser de uma observação ANTERIOR ao início da
+        # validade ("OBS AT 1300Z" com VALID 1400/1800): o movimento conta a
+        # partir da mais cedo das duas. Hora ilegível → toda a área.
+        inicio_mov = ini
+        if re.search(r"\b(?:OBS|FCST)\s+AT\b", corpo):
+            for hh, mm in re.findall(r"\b(?:OBS|FCST)\s+AT\s+(\d{2})(\d{2})Z\b", corpo):
+                h = ini.replace(hour=int(hh), minute=int(mm))
+                if h > ini + timedelta(hours=12):
+                    h -= timedelta(days=1)
+                elif h < ini - timedelta(hours=12):
+                    h += timedelta(days=1)
+                inicio_mov = min(inicio_mov, h)
+            if not re.findall(r"\b(?:OBS|FCST)\s+AT\s+\d{4}Z\b", corpo):
+                return None, "toda a área (hora da observação ilegível)"
         from shapely import affinity
-        dist = int(mv.group(2)) * (fim - ini).total_seconds() / 3600 * _NM_GRAUS
+        dist = int(mv.group(2)) * (fim - inicio_mov).total_seconds() / 3600 * _NM_GRAUS
         rumo = math.radians(_RUMO[mv.group(1)])
         k = math.cos(math.radians(max(abs(geom.bounds[1]), abs(geom.bounds[3]))))
         movido = affinity.translate(geom, xoff=dist * math.sin(rumo) / k,

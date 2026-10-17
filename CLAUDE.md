@@ -93,7 +93,8 @@ SIGMET punha NO-GO em toda a FIR, porque a app só tinha o campo
 completo (página do IPMA e arquivo), usa a área dele: `area_sigmet()` lê
 `WI <polígono>`, `WI nnNM OF <ponto>` e os qualificadores do GAMET
 (`N OF …`, `BTN …`), junta `_SIGMET_MARGEM_NM` (10 NM) e, com `MOV dir nnKT`,
-estende a área na direcção do movimento durante toda a validade.
+estende a área na direcção do movimento desde a hora da observação
+(`OBS AT`, se anterior) até ao fim da validade.
 `blocos_sigmet()` transforma cada SIGMET num `MetBlock("SIGMET")`, que entra
 em `compute_dynamic_regions` como qualquer fenómeno (decisão NO-GO).
 Continua a ser **toda a área** quando: a área não é legível, há `ENTIRE FIR`
@@ -141,7 +142,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-479 testes. Devem passar a 100%.
+481 testes. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
