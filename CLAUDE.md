@@ -130,7 +130,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-427 testes. Devem passar a 100%.
+436 testes. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -144,6 +144,7 @@ python3 -m pytest
 - `tests/test_v20.py` — CB em SIG CLD (GAMET real 160300) e bolsas residuais
 - `tests/test_v23.py` — qualificadores seguidos sem AND (`BTN … AND … E OF …`)
   e janela horária de cada subentrada (GAMETs reais 160900, 162100, 170300)
+- `tests/test_v25.py` — VIS sem unidade (`LCA 5000 RA`, GAMET real 161500)
 - `tests/conftest.py` — extrai o motor da app sem executar a UI. Os imports
   vêm da própria app (nunca de uma lista fixa — escondia imports em falta)
 

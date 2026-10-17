@@ -28,7 +28,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "2.3"
+APP_VERSION = "2.5"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
 st.title(f"✈️ LPPC GAMET – Motor Cartográfico v{APP_VERSION}")
@@ -1567,6 +1567,17 @@ def parse_gamet(text):
                 if vis_content[max(0, pos - 5):pos].rstrip().endswith("-"):
                     continue
                 val = int(m.group(1))
+                if 100 <= val <= 9999:
+                    blocks.append(MetBlock("VIS", poly, val, qualifier, surface=surface, window=window))
+
+            # Valor sem unidade, com 4 algarismos como no modelo OACI
+            # ("LCA 5000 RA", GAMETs reais 160900 e 161500). Até à 2.4 era
+            # ignorado em silêncio: com 5000 não muda nada, mas um
+            # "LCA 1200 BR" desapareceria (erro optimista).
+            for m in re.finditer(r"(?<![\w/.\-])(\d{4})(?:-(\d{4}))?(?![\w/\-])", vis_content):
+                if _already_consumed(m.start()):
+                    continue
+                val = min(int(g) for g in m.groups() if g)
                 if 100 <= val <= 9999:
                     blocks.append(MetBlock("VIS", poly, val, qualifier, surface=surface, window=window))
 
