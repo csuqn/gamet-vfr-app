@@ -28,7 +28,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "2.1"
+APP_VERSION = "2.3"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", layout="wide")
 st.title(f"✈️ LPPC GAMET – Motor Cartográfico v{APP_VERSION}")
@@ -1368,9 +1368,13 @@ def parse_gamet(text):
     # do N de N3840 passava a cobrir todo o W de W00815, Algarve incluído).
     # O AND fica temporariamente como "&&" para as regras abaixo não o
     # verem como conteúdo meteorológico.
+    # Qualificadores seguidos SEM o AND ("BTN N3840 AND N4100 E OF W00800",
+    # GAMET real de 16-out-2026) também são uma só área: até à 2.2 o segundo
+    # ia para outra linha e o BTN perdia-se (a faixa passava a ir de costa a
+    # costa). Por isso o AND entre eles é opcional.
     secn1 = re.sub(
         r"((?:[NSEW]\s+OF\s+[NWE]\d{4,5}|BTN\s+[NWE]\d{4,5}\s+AND\s+[NWE]\d{4,5}))"
-        r"\s+AND\s+(?=(?:[NSEW]\s+OF\s+[NWE]\d{4,5}|BTN\s+[NWE]\d{4,5}))",
+        r"\s+(?:AND\s+)?(?=(?:[NSEW]\s+OF\s+[NWE]\d{4,5}|BTN\s+[NWE]\d{4,5}))",
         r"\1 && ", secn1)
     secn1 = re.sub(r"(\w)\s+(N\s+OF\s+N\d{4})", r"\1\n\2", secn1)
     secn1 = re.sub(r"(\w)\s+(S\s+OF\s+N\d{4})", r"\1\n\2", secn1)
@@ -1380,6 +1384,18 @@ def parse_gamet(text):
     secn1 = secn1.replace(" && ", " AND ")
 
     lines = [l.strip() for l in secn1.splitlines() if l.strip()]
+
+    # A janela "HH/HH" de uma subentrada vem ANTES do seu qualificador
+    # ("... AGL 12/15 N OF N4000 ..."), por isso a quebra injectada acima
+    # deixava-a no fim da linha anterior e a subentrada herdava a janela da
+    # anterior (GAMET real 160900/161500: CB das 12–15Z mostrado como
+    # "apenas 09–11Z"). Passa para o início da linha a que pertence.
+    _qual_ini = re.compile(r"(?:[NSEW]\s+OF\s+[NWE]\d{4,5}|BTN\s+[NWE]\d{4,5})")
+    for i in range(len(lines) - 1):
+        mj = re.search(r"(?<=[\s:])(\d{2}/\d{2})$", lines[i])
+        if mj and _qual_ini.match(lines[i + 1]):
+            lines[i] = lines[i][:mj.start()].rstrip()
+            lines[i + 1] = f"{mj.group(1)} {lines[i + 1]}"
 
     state = "IDLE"
     blocks = []
@@ -1490,6 +1506,11 @@ def parse_gamet(text):
             h1, h2 = int(wm.group(1)), int(wm.group(2))
             if h1 <= 23 and h2 <= 23:
                 current_window = f"{h1:02d}–{h2:02d}Z"
+        elif _qual_ini.match(content):
+            # Subentrada nova sem janela própria vale para todo o período —
+            # não herda a da anterior (senão um NO-GO em vigor podia
+            # aparecer como "ainda não começou").
+            current_window = ""
         window = current_window
 
         # ---- PARSE por estado ----
