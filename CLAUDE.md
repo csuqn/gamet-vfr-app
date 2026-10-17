@@ -150,6 +150,8 @@ python3 -m pytest
 - `tests/test_v23.py` — qualificadores seguidos sem AND (`BTN … AND … E OF …`)
   e janela horária de cada subentrada (GAMETs reais 160900, 162100, 170300)
 - `tests/test_v25.py` — VIS sem unidade (`LCA 5000 RA`, GAMET real 161500)
+- `tests/test_v27.py` — SIGMET/AIRMET sem "=" final (boletins reais de
+  17-out-2026: SIGMET T01, AIRMET 1)
 - `tests/conftest.py` — extrai o motor da app sem executar a UI. Os imports
   vêm da própria app (nunca de uma lista fixa — escondia imports em falta)
 
