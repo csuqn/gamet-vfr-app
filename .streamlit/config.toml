@@ -1,0 +1,13 @@
+# Tema "aeronáutico": fundo escuro (lê-se bem ao sol e não encandeia ao fim
+# do dia), azul de instrumento como cor de acção. As cores da decisão
+# (verde/âmbar/vermelho) estão no CSS da app, em _CSS.
+[theme]
+base = "dark"
+primaryColor = "#7CC4FF"
+backgroundColor = "#0E151C"
+secondaryBackgroundColor = "#15202A"
+textColor = "#E6EDF3"
+font = "sans serif"
+
+[client]
+toolbarMode = "minimal"

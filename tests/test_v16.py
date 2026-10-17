@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import build_gamet
+from conftest import build_gamet, veredicto
 
 RAIZ = Path(__file__).resolve().parent.parent
 FMT = "%Y-%m-%dT%H:%MZ"
@@ -268,7 +268,7 @@ def test_app_gamet_do_arquivo_usa_sigmets_da_sua_validade(app_path):
     assert "GAMET DO ARQUIVO" in avisos
     assert "durante a validade deste GAMET" in erros and "SIGMET 4" in erros
     assert "SIGMET 8" not in erros
-    assert "NO-GO em 100% da FIR" in erros
+    assert "NO-GO em 100% da FIR" in veredicto(at)
 
 
 def test_app_gamet_do_arquivo_sem_sigmets(app_path):
@@ -284,7 +284,7 @@ def test_app_gamet_do_arquivo_sem_sigmets(app_path):
     at.session_state["arquivo_indice"] = {"gamets": [], "sigmets": []}
     at.run()
     assert not at.exception, [e.value for e in at.exception]
-    assert "NO-GO em 100%" not in " ".join(e.value for e in at.error)
+    assert "NO-GO em 100%" not in veredicto(at) and veredicto(at)
     assert any("Nenhum SIGMET" in c.value for c in at.caption)
 
 
@@ -333,7 +333,7 @@ def test_app_recurso_ponta_a_ponta(app_path, monkeypatch):
     assert not at.exception, [e.value for e in at.exception]
     assert "ainda não publicou o novo GAMET" in " ".join(w.value for w in at.warning)
     erros = " ".join(e.value for e in at.error)
-    assert "SIGMET 5" in erros and "NO-GO em 100% da FIR" in erros
+    assert "SIGMET 5" in erros and "NO-GO em 100% da FIR" in veredicto(at)
 
 
 def test_app_sem_ipma_nem_arquivo_falha_em_voz_alta(app_path, monkeypatch):

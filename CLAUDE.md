@@ -130,7 +130,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-427 testes. Devem passar a 100%.
+446 testes. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -142,8 +142,11 @@ python3 -m pytest
 - `tests/test_v16.py` — índice do arquivo, recurso ao arquivo e SIGMETs
   históricos (inclui a app completa com a rede simulada)
 - `tests/test_v20.py` — CB em SIG CLD (GAMET real 160300) e bolsas residuais
+- `tests/test_v22.py` — componentes HTML do briefing (2.2), faixa do SIGMET e
+  análise automática ao abrir
 - `tests/test_v23.py` — qualificadores seguidos sem AND (`BTN … AND … E OF …`)
   e janela horária de cada subentrada (GAMETs reais 160900, 162100, 170300)
+- `tests/test_v25.py` — VIS sem unidade (`LCA 5000 RA`, GAMET real 161500)
 - `tests/conftest.py` — extrai o motor da app sem executar a UI. Os imports
   vêm da própria app (nunca de uma lista fixa — escondia imports em falta)
 
@@ -197,6 +200,23 @@ O IPMA já mudou o caminho (era `/showsigmet.php` na raiz até à migração
 para single-page app). O fetch tenta 7 endpoints em sequência, aceita HTML
 e JSON, e a app tem um campo de URL alternativo para o utilizador corrigir
 sem editar código.
+
+## Interface (2.2)
+
+Tema escuro "aeronáutico" em `.streamlit/config.toml`; o resto do aspecto
+está em `_CSS` (início da app). Pensada primeiro para o telemóvel.
+
+- Ordem no ecrã: briefing (`_c_brief`) no topo, controlos (`_c_ctrl`: texto,
+  arquivo, ligação ao IPMA) no fim. Os contentores são criados no início e
+  preenchidos depois — o Streamlit mostra-os pela ordem de criação.
+- O GAMET do IPMA (ou do recurso ao arquivo) é analisado logo ao abrir.
+- Faixa, veredicto, cartões e aeródromo são HTML gerado por funções puras
+  (`html_faixa`, `html_veredicto`, `html_regiao`, `html_aerodromo`, secção
+  `# UI — COMPONENTES HTML`), com `html.escape` em todo o texto. Os testes da
+  app lêem o veredicto com `conftest.veredicto(at)`.
+- A faixa nunca diz `NIL` se os SIGMETs não foram verificados (`N/VERIF.`).
+- Alertas (SIGMET, AIRMET, validade, texto ilegível, vento) continuam a ser
+  `st.error`/`st.warning` nativos.
 
 ## Armadilhas conhecidas
 
