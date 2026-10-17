@@ -138,4 +138,6 @@ def test_app_aplica_sigmet_nao_referido_no_gamet(app_path):
     assert not at.exception, [e.value for e in at.exception]
     erros = " ".join(e.value for e in at.error)
     assert "SIGMET em vigor no IPMA" in erros and "não referido no GAMET" in erros
-    assert "NO-GO em 100% da FIR" in veredicto(at)
+    # 3.0: o SIGMET ("N OF N4000") vale só na sua área (+10 NM), não na FIR toda
+    v = veredicto(at)
+    assert v.startswith("NO-GO em") and "100%" not in v, v

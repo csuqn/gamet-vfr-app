@@ -29,7 +29,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "2.7"
+APP_VERSION = "3.0"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -1858,6 +1858,7 @@ _PHENOM_LABEL = {
     "TS": "TS", "TURB": "TURB", "ICE": "ICE",
     "MT_OBSC": "MT OBSC", "VA": "VA",
     "WSPD": "SFC WSPD", "MTW": "MTW", "WX": "SIGWX", "CB": "CB",
+    "SIGMET": "SIGMET",
 }
 
 
@@ -2042,7 +2043,7 @@ def compute_dynamic_regions(blocks):
                 and b.polygon.geom_type in ("Polygon", "MultiPolygon")
                 and b.phenomenon in ("VIS", "BASE_AGL", "BASE_AMSL", "TS",
                                        "TURB", "ICE", "MT_OBSC", "VA",
-                                       "WSPD", "MTW", "WX", "CB")]
+                                       "WSPD", "MTW", "WX", "CB", "SIGMET")]
 
     def _empty_region():
         dec, vis, base, ts, turb, turb_layers, ice, ice_layers, mt_obsc, va, reasons = decision([])
@@ -2439,6 +2440,213 @@ def gamet_de_recurso(fetch_indice, fetch_texto, agora=None):
     return texto, entrada, boletins_arquivados(indice, agora)
 
 
+# -------------------------------------------------
+# ÁREA DO SIGMET (3.0)
+# -------------------------------------------------
+# Um SIGMET completo (lido da página do IPMA ou do arquivo) traz a área:
+# "WI N4150 W00745 - N3940 W00753 - …" (polígono), "WI 10NM OF N3845 W00930"
+# (círculo), "N OF N4000", "BTN … AND …"… A app aplica NO-GO só nessa área,
+# alargada por _SIGMET_MARGEM_NM e, se o SIGMET se desloca ("MOV E 15KT"),
+# estendida na direcção do movimento durante toda a validade.
+# Na dúvida — área que a app não percebe, "ENTIRE FIR", "LINE", "MOV" sem
+# direcção/velocidade legível — fica NO-GO em toda a área (o erro optimista
+# é inaceitável). O campo "SIGMET APPLICABLE" do GAMET só traz o
+# identificador: conta como toda a área, salvo se o SIGMET completo com esse
+# identificador estiver disponível.
+
+_SIGMET_MARGEM_NM = 10
+_NM_GRAUS = 1 / 60                      # 1 NM ≈ 1' de latitude
+_COORD_RE = re.compile(r"([NS])(\d{2})(\d{2})\s*([EW])(\d{3})(\d{2})")
+_RUMO = {"N": 0, "NNE": 22.5, "NE": 45, "ENE": 67.5, "E": 90, "ESE": 112.5,
+         "SE": 135, "SSE": 157.5, "S": 180, "SSW": 202.5, "SW": 225,
+         "WSW": 247.5, "W": 270, "WNW": 292.5, "NW": 315, "NNW": 337.5}
+
+
+def _coord(m):
+    lat = int(m[1]) + int(m[2]) / 60
+    lon = int(m[4]) + int(m[5]) / 60
+    return (-lon if m[3] == "W" else lon, -lat if m[0] == "S" else lat)
+
+
+def _buffer_nm(geom, nm):
+    """
+    Buffer de pelo menos `nm` milhas náuticas reais em toda a geometria. A
+    longitude é corrigida pelo cos da latitude MAIS A NORTE da geometria (o
+    menor cos), para que a margem nunca fique abaixo de `nm` em lado nenhum.
+    """
+    from shapely import affinity
+    _, miny, _, maxy = geom.bounds
+    k = math.cos(math.radians(max(abs(miny), abs(maxy)) + nm * _NM_GRAUS))
+    g = affinity.scale(geom, xfact=k, yfact=1, origin=(0, 0))
+    g = g.buffer(nm * _NM_GRAUS, quad_segs=32)
+    return affinity.scale(g, xfact=1 / k, yfact=1, origin=(0, 0))
+
+
+def sigmet_id(texto):
+    m = re.match(r"\s*LPPC\s+(?:SIGMET|AIRMET)\s+(\S+)", texto or "")
+    return m.group(1) if m else None
+
+
+_FIM_AREA_RE = re.compile(r"\b(?:SFC|TOP|ABV|BLW|FL\d{3}|STNR|MOV|INTSF|WKN|NC|FCST|OBS|AT)\b")
+
+
+def _area_wi(seg):
+    """
+    Área de UM troço "WI …" (polígono ou círculo). Devolve a geometria ou None
+    se houver alguma coisa que não se perceba (cai para toda a área).
+    """
+    m = re.match(r"\s*(\d{1,3})\s*NM\s+OF\s+([NS]\d{4}\s*[EW]\d{5})\s*$", seg)
+    if m:
+        c = _COORD_RE.search(m.group(2))
+        return _buffer_nm(Point(_coord(c.groups())), int(m.group(1)))
+    # Polígono: tudo o que não for coordenada completa ou separador é motivo
+    # para não confiar na área (ex.: "N39 W007" sem minutos).
+    if _COORD_RE.sub(" ", seg).replace("-", " ").strip():
+        return None
+    pts = list(dict.fromkeys(_coord(c) for c in _COORD_RE.findall(seg)))
+    if len(pts) < 3:
+        return None
+    pol = Polygon(pts)
+    if not pol.is_valid or pol.area == 0:
+        # Vértices fora de ordem (polígono que se cruza): a envolvente convexa
+        # cobre todos os pontos — nunca fica menor do que o publicado.
+        pol = Polygon(pts).convex_hull
+    return pol if pol.area > 0 else None
+
+
+def area_sigmet(texto, ref=None):
+    """
+    Área de um SIGMET já recortada à área do GAMET, com margem e movimento.
+    Devolve (polígono, descrição). Polígono None = toda a área (não percebida
+    ou o próprio SIGMET diz que é toda a FIR). Polígono vazio = fora da área.
+    """
+    t = re.sub(r"\s+", " ", normalize(texto or ""))
+    corpo = re.split(r"LISBOA FIR(?:/MAINLAND AREA)?", t, maxsplit=1)
+    corpo = corpo[1] if len(corpo) > 1 else t
+    if re.search(r"\bENTIRE FIR\b|\bLINE\b", corpo):
+        return None, "toda a área"
+
+    wis = [m.end() for m in re.finditer(r"\bWI\b", corpo)]
+    if wis:
+        # Todas as áreas "WI" (a observada e, com "FCST AT hhmmZ WI …", a
+        # prevista): a envolvente de todas cobre também o caminho entre elas.
+        partes = []
+        for i, ini in enumerate(wis):
+            fim_seg = wis[i + 1] - 2 if i + 1 < len(wis) else len(corpo)
+            seg = corpo[ini:fim_seg]
+            seg = _FIM_AREA_RE.split(seg)[0]
+            g = _area_wi(seg)
+            if g is None:
+                return None, "toda a área (área ilegível)"
+            partes.append(g)
+        geom = unary_union(partes)
+        if len(partes) > 1:
+            geom = geom.convex_hull
+        desc = "círculo" if "NM OF" in corpo and len(partes) == 1 else "polígono"
+        if len(partes) > 1:
+            desc = "área observada + prevista"
+    else:
+        geom = extract_polygon(corpo)
+        if geom is None:
+            return None, "toda a área"
+        desc = "área"
+
+    # Movimento: estende a área na direcção indicada durante toda a validade
+    if re.search(r"\bMOV\b", corpo):
+        mv = re.search(r"\bMOV\s+([NSEW]{1,3})\s+(\d{1,3})\s*KT\b", corpo)
+        val = re.search(r"VALID\s+(\d{2})(\d{2})(\d{2})/(\d{2})(\d{2})(\d{2})", t)
+        if not mv or mv.group(1) not in _RUMO or not val:
+            return None, "toda a área (movimento ilegível)"
+        ref = ref or datetime.now(timezone.utc)
+        g = [int(x) for x in val.groups()]
+        ini = _build_utc_date(g[0], g[1], g[2], ref)
+        fim = _build_utc_date(g[3], g[4], g[5], ini) if ini else None
+        if not ini or not fim:
+            return None, "toda a área (validade ilegível)"
+        if fim <= ini:
+            fim += timedelta(days=1)
+        # A posição dada pode ser de uma observação ANTERIOR ao início da
+        # validade ("OBS AT 1300Z" com VALID 1400/1800): o movimento conta a
+        # partir da mais cedo das duas. Hora ilegível → toda a área.
+        inicio_mov = ini
+        for m_at in re.finditer(r"\b(?:OBS|FCST)\s+AT\b", corpo):
+            hm = re.match(r"\s+(\d{2})(\d{2})Z\b", corpo[m_at.end():])
+            if not hm or int(hm.group(1)) > 23 or int(hm.group(2)) > 59:
+                return None, "toda a área (hora da observação ilegível)"
+            h = ini.replace(hour=int(hm.group(1)), minute=int(hm.group(2)))
+            if h > ini + timedelta(hours=12):
+                h -= timedelta(days=1)
+            elif h < ini - timedelta(hours=12):
+                h += timedelta(days=1)
+            inicio_mov = min(inicio_mov, h)
+        from shapely import affinity
+        dist = int(mv.group(2)) * (fim - inicio_mov).total_seconds() / 3600 * _NM_GRAUS
+        rumo = math.radians(_RUMO[mv.group(1)])
+        k = math.cos(math.radians(max(abs(geom.bounds[1]), abs(geom.bounds[3]))))
+        movido = affinity.translate(geom, xoff=dist * math.sin(rumo) / k,
+                                    yoff=dist * math.cos(rumo))
+        geom = unary_union([geom, movido]).convex_hull
+        desc += f", deslocação {mv.group(1)} {mv.group(2)} kt"
+
+    geom = _clean_poly(FIR_POLYGON.intersection(_buffer_nm(geom, _SIGMET_MARGEM_NM)))
+    return geom, f"{desc} + {_SIGMET_MARGEM_NM} NM"
+
+
+_LIGACAO_SIGMET = {"AND", "SIGMET", "SIGMETS", "LPPC", "NR", "NO", "Nº"}
+
+
+def ids_sigmet_aplicavel(sigmet_text):
+    """
+    Identificadores no campo "SIGMET APPLICABLE" do GAMET. Devolve a lista,
+    ou None se houver alguma palavra que não se perceba (→ toda a área).
+    """
+    ids = []
+    for tok in re.split(r"[\s,;/]+", (sigmet_text or "").upper()):
+        tok = tok.strip(".:=()")
+        if not tok or tok in _LIGACAO_SIGMET:
+            continue
+        if re.fullmatch(r"[A-Z]{0,2}\d{1,3}", tok):
+            ids.append(tok)
+        else:
+            return None
+    return ids
+
+
+def blocos_sigmet(sigmets, has_sigmet, sigmet_text, ref=None):
+    """
+    MetBlocks "SIGMET" para compute_dynamic_regions, e a descrição de cada um.
+    sigmets: textos completos em vigor. has_sigmet/sigmet_text: o campo
+    "SIGMET APPLICABLE" do GAMET.
+    """
+    blocos, descr = [], []
+    disponiveis = {}
+    for s in sigmets:
+        sid = sigmet_id(s) or "?"
+        disponiveis[sid] = s
+        try:
+            geom, d = area_sigmet(s, ref)
+        except Exception:  # noqa: BLE001 — um SIGMET mal escrito nunca tira o briefing
+            geom, d = None, "toda a área (SIGMET com formato inesperado)"
+        fen = re.search(r"\b(EMBD TS|OBSC TS|FRQ TS|SQL TS|SEV TURB|SEV ICE|SEV MTW|HVY DS|HVY SS|VA|TC|RDOACT CLD)\b", s)
+        rot = f"{sid}" + (f" ({fen.group(1)})" if fen else "")
+        if geom is None:
+            blocos.append(MetBlock("SIGMET", FIR_POLYGON, f"{rot} — toda a área"))
+            descr.append(f"SIGMET {rot}: {d}")
+        elif geom.is_empty:
+            descr.append(f"SIGMET {rot}: fora da área do GAMET")
+        else:
+            blocos.append(MetBlock("SIGMET", geom, f"{rot} — {d}"))
+            descr.append(f"SIGMET {rot}: NO-GO na sua área ({d})")
+    if has_sigmet:
+        ids = ids_sigmet_aplicavel(sigmet_text)
+        if not ids or any(i not in disponiveis for i in ids):
+            blocos.append(MetBlock("SIGMET", FIR_POLYGON,
+                                   f"{sigmet_text[:40]} (GAMET, sem área) — toda a área"))
+            descr.append("SIGMET referido no GAMET sem o texto completo disponível: "
+                         "NO-GO em toda a área")
+    return blocos, descr
+
+
 def apply_sigmet_override(regions, sigmet_text):
     """
     Quando existe um SIGMET activo aplicável ao GAMET, força NO-GO em todas
@@ -2634,6 +2842,13 @@ def decision(events):
         decision_level = "NO-GO"
         desc = ", ".join(f"{c} ({_SIGWX_SEVEROS.get(c, c)})" for c in wx_codes)
         reasons.append(f"SIGWX {desc}")
+
+    # ---- SIGMET em vigor (3.0): NO-GO na área do SIGMET (+ margem) ----
+    sig_vals = sorted({v for t, v, *_ in events if t == "SIGMET"})
+    if sig_vals:
+        decision_level = "NO-GO"
+        for v in sig_vals:
+            reasons.append(f"SIGMET {v}")
 
     return decision_level, vis, base, ts_vals, turb_vals, turb_layers, ice_vals, ice_layers, mt_obsc, va_vals, reasons
 
@@ -2915,7 +3130,6 @@ def analisar_gamet(texto, fonte="manual", boletins=None, boletins_at=None,
                                 "VALIDADE**: os dados podem estar desactualizados."))
 
     blocks, fz, qnh, wind = parse_gamet(texto)
-    regioes = compute_dynamic_regions(blocks)
     has_sigmet, sigmet_text = extract_sigmet_applicable(texto)
 
     if fonte == "arquivo_hist":
@@ -2935,6 +3149,8 @@ def analisar_gamet(texto, fonte="manual", boletins=None, boletins_at=None,
     #    desse GAMET.
     #  · Colado ou editado: não se sabe a que momento corresponde — só conta o
     #    "SIGMET APPLICABLE" do próprio texto.
+    # Desde a 3.0 cada SIGMET completo põe NO-GO só na sua área (+ margem);
+    # sem área legível, ou só com o identificador do GAMET, toda a área.
     sig, air, verificado, onde = [], [], False, ""
     if fonte in ("ipma", "arquivo_recurso") and boletins is not None:
         sig, air = active_bulletins(boletins, agora)
@@ -2946,13 +3162,17 @@ def analisar_gamet(texto, fonte="manual", boletins=None, boletins_at=None,
                                        _iso_utc(entrada.get("fim")))
         verificado = True
         onde = "durante a validade deste GAMET (arquivo)"
+
+    sblocos, sdescr = blocos_sigmet(sig, has_sigmet, sigmet_text, agora)
+    regioes = compute_dynamic_regions(blocks + sblocos)
+
     if sig:
-        regioes = apply_sigmet_override(regioes, " | ".join(b[:80] for b in sig))
         av.append(("erro",
                    f"🚨 **{len(sig)} SIGMET {onde}**"
                    + ("" if has_sigmet else " — **não referido no GAMET**, provavelmente "
-                      "emitido depois dele") + ". A decisão foi forçada a NO-GO em toda a "
-                   "área. Lê o SIGMET completo:\n\n" + "\n\n".join(f"`{b}`" for b in sig)))
+                      "emitido depois dele") + ".\n\n"
+                   + "\n".join(f"- {d}" for d in sdescr)
+                   + "\n\nLê o SIGMET completo:\n\n" + "\n\n".join(f"`{b}`" for b in sig)))
     if air:
         av.append(("aviso", f"⚠️ **{len(air)} AIRMET {onde}.** A app mostra-o mas "
                             "não o interpreta — lê-o:\n\n" + "\n\n".join(f"`{b}`" for b in air)))
@@ -2970,13 +3190,13 @@ def analisar_gamet(texto, fonte="manual", boletins=None, boletins_at=None,
                              f"verificado às {boletins_at:%H:%MZ})."))
 
     if has_sigmet:
-        regioes = apply_sigmet_override(regioes, sigmet_text)
+        coberto = not any("GAMET, sem área" in b.value for b in sblocos)
         av.append(("erro",
-                   "🚨 **SIGMET ACTIVO APLICÁVEL A ESTE GAMET.** "
-                   "Um SIGMET indica fenómenos que justificam alerta acima do que "
-                   "um GAMET rotineiro cobre. A decisão foi forçada a NO-GO em "
-                   "toda a área — consulta o SIGMET completo antes de voar; esta "
-                   "app não o substitui.\n\n" f"Texto reportado: {sigmet_text}"))
+                   f"🚨 **SIGMET APLICÁVEL A ESTE GAMET ({sigmet_text}).** "
+                   + ("A área vem do SIGMET completo, acima. " if coberto else
+                      "Sem o texto completo do SIGMET, a decisão foi forçada a NO-GO em "
+                      "toda a área. ")
+                   + "Consulta o SIGMET completo antes de voar; esta app não o substitui."))
 
     # A faixa nunca diz NIL se os SIGMETs não foram verificados
     if has_sigmet or sig:
