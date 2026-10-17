@@ -176,3 +176,15 @@ def analyse(eng):
             "layers":  " ".join(b.layer for b in blocks if b.layer),
         }
     return _run
+
+
+def veredicto(at):
+    """
+    Texto visível do veredicto global numa execução do AppTest. Desde a 2.2
+    o veredicto é um cartão HTML (st.markdown) e não um st.error/st.warning;
+    devolve o texto sem marcação, como o utilizador o lê.
+    """
+    for m in at.markdown:
+        if 'class="gv-veredicto"' in m.value:
+            return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", m.value)).strip()
+    return ""
