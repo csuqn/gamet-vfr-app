@@ -2,7 +2,11 @@
 
 **Briefing meteorológico VFR para Portugal Continental, a partir do GAMET.**
 
-### 👉 [Abrir a app](https://gamet-vfr-app-bxdwwklaarl2kdpiprmhu5.streamlit.app/)
+### 👉 [Abrir a app](https://gamet-vfr-app.onrender.com/)
+
+<sub>Se a app estiver parada há mais de 15 minutos, a primeira abertura demora
+cerca de 1 minuto (plano gratuito do Render). Versão de reserva, com o mesmo
+motor: [Streamlit](https://gamet-vfr-app-bxdwwklaarl2kdpiprmhu5.streamlit.app/).</sub>
 
 Uma app web que lê o GAMET da FIR de Lisboa, percebe o que ele diz e onde, e
 mostra num mapa onde se pode voar em VFR (**GO**), onde é preciso cautela
@@ -74,7 +78,7 @@ tempo (`11/15` = só das 11 às 15 UTC) e na extensão (`ISOL`, `OCNL`, `FRQ`,
 
 ## 3. Como usar a app
 
-1. **Abre a [app](https://gamet-vfr-app-bxdwwklaarl2kdpiprmhu5.streamlit.app/).** O GAMET em vigor é carregado do IPMA e analisado logo — o briefing aparece no topo.
+1. **Abre a [app](https://gamet-vfr-app.onrender.com/).** O GAMET em vigor é carregado do IPMA e analisado logo — o briefing aparece no topo.
    - A app foi desenhada primeiro para o telemóvel (tema escuro, que se lê
      bem ao sol); no computador os cartões das zonas ficam lado a lado.
    - Se o IPMA não responder, a app explica o que falhou. Podes colar o GAMET
@@ -252,7 +256,7 @@ Algarve não afecta Lisboa.
 
 ## 10. Qualidade e testes
 
-- **413 testes automáticos** cobrem a leitura do texto, a geometria, as
+- **457 testes automáticos** cobrem a leitura do texto, a geometria, as
   decisões, os dados aeronáuticos e a app completa. Cada erro alguma vez
   encontrado tem um teste que impede que volte a aparecer.
 - **Verificação cruzada:** em centenas de GAMETs gerados, a decisão de cada
@@ -270,13 +274,15 @@ Algarve não afecta Lisboa.
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
-streamlit run app.py      # a app
-python3 -m pytest         # os testes (413)
+cd nicegui_app && python main.py   # a app principal (NiceGUI), http://localhost:8080
+streamlit run app.py               # a versão de reserva (Streamlit)
+python3 -m pytest                  # os testes (457)
 ```
 
 | Ficheiro / pasta | Conteúdo |
 |---|---|
-| `app.py` | A app inteira: recolha, leitura, geometria, decisão, interface e PDF |
+| `app.py` | O motor (recolha, leitura, geometria, decisão, análise, PDF) e a interface Streamlit |
+| `nicegui_app/` | A interface principal (NiceGUI, publicada no Render); usa o motor do `app.py` |
 | `tests/` | Testes automáticos |
 | `scripts/recolher_gamet.py` | Recolha de GAMETs e SIGMETs (GitHub Actions) |
 | `scripts/analisar.py` | Análise automática de boletins reais |

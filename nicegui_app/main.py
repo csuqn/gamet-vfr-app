@@ -51,79 +51,13 @@ def _md(txt):
 
 
 # ---------------------------------------------------------------------
-# Análise — mesma lógica da secção # EXECUÇÃO da app Streamlit, sem UI.
-# (Numa migração a sério esta função passaria para o motor, e as duas
-# interfaces usavam-na; no protótipo fica aqui.)
+# Análise — a mesma função do motor que a app Streamlit usa
+# (analisar_gamet, em app.py). Aqui só se desenha o resultado.
 # ---------------------------------------------------------------------
 def analisar(texto, fonte, boletins=None, boletins_at=None, boletins_fonte="",
              indice=None, entrada=None):
-    agora = datetime.now(timezone.utc)
-    r = {"alertas": [], "texto": texto}
-    ini, fim, activo = M.parse_validity(texto)
-    r["validity_label"] = ""
-    r["faixa_val"], r["faixa_exp"] = "—", "—"
-    if ini and fim:
-        r["validity_label"] = f"Válido: {ini:%d/%H%MZ} – {fim:%d/%H%MZ}"
-        r["faixa_val"] = f"{ini:%d} {ini:%H}–{fim:%H}Z"
-        if activo:
-            mins = max(0, int((fim - agora).total_seconds() // 60))
-            h, m = divmod(mins, 60)
-            r["faixa_exp"] = f"{h}h{m:02d}m" if h else f"{m} min"
-            if mins <= 30:
-                r["alertas"].append(("aviso", f"⏳ O GAMET expira em **{r['faixa_exp']}** — o próximo está prestes a ser emitido."))
-        else:
-            r["faixa_exp"] = "EXPIRADO" if fim <= agora else "AINDA NÃO"
-            r["alertas"].append(("aviso", f"⏱️ {r['validity_label']} — **FORA DO PERÍODO DE VALIDADE**."))
-    blocks, fz, qnh, wind = M.parse_gamet(texto)
-    regioes = M.compute_dynamic_regions(blocks)
-    has_sig, sig_txt = M.extract_sigmet_applicable(texto)
-
-    if fonte == "arquivo_hist":
-        r["alertas"].append(("aviso", "📚 **GAMET DO ARQUIVO — não é o GAMET actual.** Serve para rever uma situação passada; não o uses para planear um voo."))
-    elif fonte == "arquivo_recurso":
-        r["alertas"].append(("aviso", "🕓 **O IPMA ainda não publicou o novo GAMET** (o anterior é retirado cerca de 45 min antes da emissão). A mostrar o **último GAMET arquivado, ainda em vigor**."))
-
-    sig, air, verificado, onde = [], [], False, ""
-    if fonte in ("ipma", "arquivo_recurso") and boletins is not None:
-        sig, air = M.active_bulletins(boletins)
-        verificado, onde = True, ("em vigor no IPMA" if fonte == "ipma" else f"em vigor ({boletins_fonte})")
-    elif fonte == "arquivo_hist" and indice:
-        sig, air = M.boletins_do_periodo(indice, M._iso_utc(entrada.get("inicio")), M._iso_utc(entrada.get("fim")))
-        verificado, onde = True, "durante a validade deste GAMET (arquivo)"
-    if sig:
-        regioes = M.apply_sigmet_override(regioes, " | ".join(b[:80] for b in sig))
-        r["alertas"].append(("erro", f"🚨 **{len(sig)} SIGMET {onde}**"
-                             + ("" if has_sig else " — **não referido no GAMET**")
-                             + ". Decisão forçada a NO-GO em toda a área. Lê o SIGMET completo:\n"
-                             + "\n".join(f"`{b}`" for b in sig)))
-    if air:
-        r["alertas"].append(("aviso", f"⚠️ **{len(air)} AIRMET {onde}** (mostrado, não interpretado):\n"
-                             + "\n".join(f"`{b}`" for b in air)))
-    if not verificado:
-        r["alertas"].append(("info", "ℹ️ SIGMETs do IPMA **não verificados**: só conta o campo \"SIGMET APPLICABLE\" do próprio GAMET."))
-    if has_sig:
-        regioes = M.apply_sigmet_override(regioes, sig_txt)
-        r["alertas"].append(("erro", f"🚨 **SIGMET ACTIVO APLICÁVEL A ESTE GAMET.** Decisão forçada a NO-GO em toda a área.\nTexto reportado: {sig_txt}"))
-    if M.looks_unparseable(texto):
-        r["alertas"].append(("erro", "⚠️ **Nenhum campo meteorológico reconhecido no texto** — isto **não** quer dizer que está calmo. Confirma o GAMET."))
-    ww = M.check_strong_wind(wind)
-    if ww:
-        r["alertas"].append(("aviso", "💨 **Vento forte a 1000ft AGL** (aviso geral, não altera a decisão):\n" + "\n".join(ww)))
-
-    if has_sig or sig:
-        r["faixa_sig"] = ("ACTIVO", "NO-GO")
-    elif verificado:
-        r["faixa_sig"] = ("NIL", "GO")
-    else:
-        r["faixa_sig"] = ("N/VERIF.", None)
-
-    area = M.FIR_POLYGON.area
-    por_dec = {}
-    for g in regioes:
-        por_dec[g["decision"]] = por_dec.get(g["decision"], 0) + g["polygon"].area
-    r.update(regioes=regioes, por_dec=por_dec, area=area, fz=fz, qnh=qnh, wind=wind,
-             ini=ini)
-    return r
+    return M.analisar_gamet(texto, fonte, boletins, boletins_at, boletins_fonte,
+                            indice, entrada)
 
 
 def obter_gamet_actual():
@@ -158,7 +92,7 @@ async def pagina():
     ui.html('<div class="gv-head"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" '
             'stroke="#7CC4FF" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" '
             'aria-hidden="true"><path d="M2 16l20-6-20-6 4 6-4 6z"></path><path d="M6 10h8"></path></svg>'
-            f'<div><b>LPPC GAMET</b><small>BRIEFING VFR · v{M.APP_VERSION} · NICEGUI (PROTÓTIPO)</small></div></div>'
+            f'<div><b>LPPC GAMET</b><small>BRIEFING VFR · v{M.APP_VERSION}</small></div></div>'
             ).classes("w-full")
 
     briefing = ui.column().classes("w-full gap-3")
@@ -170,8 +104,11 @@ async def pagina():
         briefing.clear()
         with briefing:
             ui.html(M.html_faixa(r["faixa_val"], r["faixa_exp"], *r["faixa_sig"])).classes("w-full")
-            for tipo, txt in r["alertas"]:
-                ui.html(f'<div class="gv-alerta gv-{tipo}">{_md(txt)}</div>').classes("w-full")
+            for tipo, txt in r["avisos"]:
+                if tipo == "ok":
+                    ui.html(f'<div class="gv-k" style="font-size:12px">{_md(txt)}</div>').classes("w-full")
+                else:
+                    ui.html(f'<div class="gv-alerta gv-{tipo}">{_md(txt)}</div>').classes("w-full")
             ui.html(M.html_veredicto(r["por_dec"], r["area"])).classes("w-full")
 
             opcoes = sorted(M.AERODROMES.keys())

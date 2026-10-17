@@ -130,7 +130,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-446 testes. Devem passar a 100%.
+457 testes. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -144,6 +144,9 @@ python3 -m pytest
 - `tests/test_v20.py` — CB em SIG CLD (GAMET real 160300) e bolsas residuais
 - `tests/test_v22.py` — componentes HTML do briefing (2.2), faixa do SIGMET e
   análise automática ao abrir
+- `tests/test_v26.py` — `analisar_gamet` (análise completa partilhada)
+- `tests/test_nicegui.py` — a interface NiceGUI dá as mesmas decisões (salta
+  sem NiceGUI instalado)
 - `tests/test_v23.py` — qualificadores seguidos sem AND (`BTN … AND … E OF …`)
   e janela horária de cada subentrada (GAMETs reais 160900, 162100, 170300)
 - `tests/test_v25.py` — VIS sem unidade (`LCA 5000 RA`, GAMET real 161500)
@@ -200,6 +203,21 @@ O IPMA já mudou o caminho (era `/showsigmet.php` na raiz até à migração
 para single-page app). O fetch tenta 7 endpoints em sequência, aceita HTML
 e JSON, e a app tem um campo de URL alternativo para o utilizador corrigir
 sem editar código.
+
+## Duas interfaces, um motor (2.6)
+
+- **NiceGUI** (`nicegui_app/`) — a interface **principal**, publicada no Render
+  (https://gamet-vfr-app.onrender.com/, plano gratuito: adormece após 15 min
+  sem uso, ~1 min a acordar) a partir do ramo `main`.
+- **Streamlit** (`app.py`) — reserva, no Streamlit Cloud.
+- O motor vive no `app.py`. `nicegui_app/motor.py` executa as mesmas secções
+  que os testes extraem (`tests/conftest.py`) e a secção de rede. **Não há
+  cópia do motor** — uma correcção no `app.py` vale para as duas.
+- `analisar_gamet()` (secção `# ANÁLISE COMPLETA`) faz tudo o que vai do
+  texto ao briefing: validade, regiões, SIGMETs (GAMET / IPMA / arquivo),
+  faixa e avisos `(tipo, markdown)`. As duas interfaces só desenham.
+- A recolha e o relatório diário correm no GitHub Actions e testam o motor —
+  não dependem de nenhuma das interfaces.
 
 ## Interface (2.2)
 

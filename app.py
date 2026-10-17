@@ -29,7 +29,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "2.5"
+APP_VERSION = "2.6"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -966,15 +966,16 @@ def _build_utc_date(day, hour, minute, ref):
     return min(candidates, key=lambda d: abs((d - ref).total_seconds()))
 
 
-def parse_validity(text):
-    """Extrai período de validade e verifica se está ativo."""
+def parse_validity(text, now=None):
+    """Extrai período de validade e verifica se está ativo (em `now`, por
+    omissão o instante actual)."""
     text = normalize(text)
     m = re.search(r"VALID\s+(\d{2})(\d{2})(\d{2})/(\d{2})(\d{2})(\d{2})", text)
     if not m:
         return None, None, False
     day_s, hh_s, mm_s = int(m.group(1)), int(m.group(2)), int(m.group(3))
     day_e, hh_e, mm_e = int(m.group(4)), int(m.group(5)), int(m.group(6))
-    now = datetime.now(timezone.utc)
+    now = now or datetime.now(timezone.utc)
 
     start = _build_utc_date(day_s, hh_s, mm_s, now)
     if start is None:
@@ -2868,6 +2869,141 @@ def generate_pdf(regions, gamet_text, fzlvl_min, qnh_min, validity_label) -> byt
 
 
 # -------------------------------------------------
+# ANÁLISE COMPLETA — partilhada pelas interfaces (2.6)
+# -------------------------------------------------
+# Tudo o que vai do texto do GAMET ao briefing: validade, regiões, SIGMETs
+# (do GAMET, do IPMA ou do arquivo) e os avisos a mostrar. A app Streamlit e
+# a NiceGUI chamam esta função e só desenham o resultado — assim a lógica
+# dos SIGMETs existe num sítio só e está coberta pelos testes.
+#
+# fonte: "ipma" | "arquivo_recurso" (GAMET actual) | "arquivo_hist" (GAMET
+# antigo do arquivo) | "manual" (colado ou editado: SIGMETs não verificados).
+# Avisos: lista de (tipo, texto em markdown), tipo ∈ erro/aviso/info/ok.
+
+def analisar_gamet(texto, fonte="manual", boletins=None, boletins_at=None,
+                   boletins_fonte="", indice=None, entrada=None, agora=None):
+    agora = agora or datetime.now(timezone.utc)
+    entrada = entrada or {}
+    r = {"texto": texto, "avisos": [], "validity_label": "",
+         "faixa_val": "—", "faixa_exp": "—"}
+    av = r["avisos"]
+
+    ini, fim, activo = parse_validity(texto, agora)
+    r.update(ini=ini, fim=fim, activo=activo)
+    if ini and fim:
+        r["validity_label"] = f"Válido: {ini:%d/%H%MZ} – {fim:%d/%H%MZ}"
+        r["faixa_val"] = f"{ini:%d} {ini:%H}–{fim:%H}Z"
+        if activo:
+            # Quanto tempo falta — ajuda a decidir se vale a pena esperar
+            # pelo próximo GAMET antes de planear o voo
+            minutos = max(0, int((fim - agora).total_seconds() // 60))
+            horas, mins = divmod(minutos, 60)
+            r["faixa_exp"] = f"{horas}h{mins:02d}m" if horas else f"{mins} min"
+            if minutos <= 30:
+                av.append(("aviso", f"⏳ O GAMET expira em **{r['faixa_exp']}** — o próximo "
+                                    "está prestes a ser emitido."))
+        else:
+            r["faixa_exp"] = "EXPIRADO" if fim <= agora else "AINDA NÃO"
+            av.append(("aviso", f"⏱️ {r['validity_label']} — ⚠️ **FORA DO PERÍODO DE "
+                                "VALIDADE**: os dados podem estar desactualizados."))
+
+    blocks, fz, qnh, wind = parse_gamet(texto)
+    regioes = compute_dynamic_regions(blocks)
+    has_sigmet, sigmet_text = extract_sigmet_applicable(texto)
+
+    if fonte == "arquivo_hist":
+        av.append(("aviso", "📚 **GAMET DO ARQUIVO — não é o GAMET actual.** Serve para rever "
+                            "uma situação passada; não o uses para planear um voo."))
+    elif fonte == "arquivo_recurso":
+        av.append(("aviso", "🕓 **O IPMA ainda não publicou o novo GAMET** (o anterior é retirado "
+                            "cerca de 45 min antes da emissão). A mostrar o **último GAMET "
+                            "arquivado, ainda em vigor**. Recarrega dentro de alguns "
+                            "minutos para obter o novo."))
+
+    # SIGMETs. Três casos:
+    #  · GAMET actual (IPMA ou recurso ao arquivo): os SIGMET/AIRMET em vigor
+    #    AGORA — da página do IPMA e/ou do arquivo. Cobrem o caso que o GAMET
+    #    não cobre: um SIGMET emitido DEPOIS do GAMET.
+    #  · GAMET do arquivo: os SIGMETs arquivados em vigor durante a validade
+    #    desse GAMET.
+    #  · Colado ou editado: não se sabe a que momento corresponde — só conta o
+    #    "SIGMET APPLICABLE" do próprio texto.
+    sig, air, verificado, onde = [], [], False, ""
+    if fonte in ("ipma", "arquivo_recurso") and boletins is not None:
+        sig, air = active_bulletins(boletins, agora)
+        verificado = True
+        onde = ("em vigor no IPMA" if fonte == "ipma"
+                else f"em vigor ({boletins_fonte or 'arquivo'})")
+    elif fonte == "arquivo_hist" and indice:
+        sig, air = boletins_do_periodo(indice, _iso_utc(entrada.get("inicio")),
+                                       _iso_utc(entrada.get("fim")))
+        verificado = True
+        onde = "durante a validade deste GAMET (arquivo)"
+    if sig:
+        regioes = apply_sigmet_override(regioes, " | ".join(b[:80] for b in sig))
+        av.append(("erro",
+                   f"🚨 **{len(sig)} SIGMET {onde}**"
+                   + ("" if has_sigmet else " — **não referido no GAMET**, provavelmente "
+                      "emitido depois dele") + ". A decisão foi forçada a NO-GO em toda a "
+                   "área. Lê o SIGMET completo:\n\n" + "\n\n".join(f"`{b}`" for b in sig)))
+    if air:
+        av.append(("aviso", f"⚠️ **{len(air)} AIRMET {onde}.** A app mostra-o mas "
+                            "não o interpreta — lê-o:\n\n" + "\n\n".join(f"`{b}`" for b in air)))
+    if not verificado:
+        av.append(("info", "ℹ️ SIGMETs do IPMA **não verificados**: o GAMET em análise não "
+                           "foi carregado do IPMA nem do arquivo nesta sessão. Só conta o "
+                           "campo \"SIGMET APPLICABLE\" do próprio GAMET."))
+    elif not sig and not air:
+        if fonte == "arquivo_hist":
+            av.append(("ok", "✅ Nenhum SIGMET/AIRMET LPPC arquivado durante a validade "
+                             "deste GAMET."))
+        elif boletins_at:
+            av.append(("ok", f"✅ Sem SIGMET/AIRMET LPPC em vigor "
+                             f"({boletins_fonte or 'página do IPMA'}, "
+                             f"verificado às {boletins_at:%H:%MZ})."))
+
+    if has_sigmet:
+        regioes = apply_sigmet_override(regioes, sigmet_text)
+        av.append(("erro",
+                   "🚨 **SIGMET ACTIVO APLICÁVEL A ESTE GAMET.** "
+                   "Um SIGMET indica fenómenos que justificam alerta acima do que "
+                   "um GAMET rotineiro cobre. A decisão foi forçada a NO-GO em "
+                   "toda a área — consulta o SIGMET completo antes de voar; esta "
+                   "app não o substitui.\n\n" f"Texto reportado: {sigmet_text}"))
+
+    # A faixa nunca diz NIL se os SIGMETs não foram verificados
+    if has_sigmet or sig:
+        r["faixa_sig"] = ("ACTIVO", "NO-GO")
+    elif verificado:
+        r["faixa_sig"] = ("NIL", "GO")
+    else:
+        r["faixa_sig"] = ("N/VERIF.", None)
+
+    if looks_unparseable(texto):
+        av.append(("erro",
+                   "⚠️ **Nenhum campo meteorológico reconhecido no texto.** "
+                   "Isto pode significar que o GAMET está incompleto, mal colado, "
+                   "ou num formato não suportado — **não** que as condições estão "
+                   "calmas. Confirma o texto antes de confiar na decisão abaixo."))
+    ventos = check_strong_wind(wind)
+    if ventos:
+        av.append(("aviso",
+                   "💨 **Vento forte reportado a 1000ft AGL** (aviso geral — não "
+                   "afecta a decisão GO/MARGINAL/NO-GO nem está atribuído a uma "
+                   "região específica, já que o vento é reportado por estação "
+                   "pontual, não por área). Confirma os limites de vento cruzado "
+                   "da tua aeronave:\n\n" + "\n".join(f"- {w}" for w in ventos)))
+
+    area = FIR_POLYGON.area
+    por_dec = {}
+    for g in regioes:
+        por_dec[g["decision"]] = por_dec.get(g["decision"], 0) + g["polygon"].area
+    r.update(regioes=regioes, por_dec=por_dec, area=area, fz=fz, qnh=qnh, wind=wind,
+             sigmets=sig, airmets=air, sigmet_gamet=has_sigmet, verificado=verificado)
+    return r
+
+
+# -------------------------------------------------
 # UI — COMPONENTES HTML (2.2)
 # -------------------------------------------------
 # Funções puras que devolvem HTML para o briefing (testáveis sem Streamlit).
@@ -3026,153 +3162,33 @@ if st.session_state.get("_active_gamet_text"):
     gamet_text = st.session_state["_active_gamet_text"]
     _agora = datetime.now(timezone.utc)
 
-    # A faixa (validade · expira · SIGMET) fica no topo, mas o estado dos
-    # SIGMETs só se sabe mais abaixo — reserva-se o lugar.
-    _faixa_box = st.container()
+    # Toda a análise (validade, regiões, SIGMETs, avisos) está no motor:
+    # analisar_gamet, partilhada com a interface NiceGUI.
+    _carregado = gamet_text.strip() == st.session_state.get("gamet_loaded", "").strip()
+    _r = analisar_gamet(
+        gamet_text,
+        fonte=st.session_state.get("gamet_fonte", "ipma") if _carregado else "manual",
+        boletins=st.session_state.get("ipma_boletins"),
+        boletins_at=st.session_state.get("ipma_boletins_at"),
+        boletins_fonte=st.session_state.get("ipma_boletins_fonte", "página do IPMA"),
+        indice=st.session_state.get("arquivo_indice"),
+        entrada=st.session_state.get("arquivo_entrada"),
+        agora=_agora,
+    )
+    validity_label, start_dt = _r["validity_label"], _r["ini"]
+    dynamic_regions = _r["regioes"]
+    fzlvl_min, qnh_min, wind_data = _r["fz"], _r["qnh"], _r["wind"]
 
-    # ---- Validade ----
-    validity_label = ""
-    _faixa_val, _faixa_exp = "—", "—"
-    start_dt, end_dt, active = parse_validity(gamet_text)
-    if start_dt and end_dt:
-        fmt = "%d/%H%MZ"
-        validity_label = f"Válido: {start_dt.strftime(fmt)} – {end_dt.strftime(fmt)}"
-        _faixa_val = f"{start_dt:%d} {start_dt:%H}–{end_dt:%H}Z"
-        if active:
-            # Quanto tempo falta — ajuda a decidir se vale a pena esperar
-            # pelo próximo GAMET antes de planear o voo
-            minutos = max(0, int((end_dt - _agora).total_seconds() // 60))
-            horas, mins = divmod(minutos, 60)
-            _faixa_exp = f"{horas}h{mins:02d}m" if horas else f"{mins} min"
-            if minutos <= 30:
-                st.warning(f"⏳ O GAMET expira em **{_faixa_exp}** — o próximo "
-                           f"está prestes a ser emitido.")
-        else:
-            _faixa_exp = "EXPIRADO" if end_dt <= _agora else "AINDA NÃO"
-            st.warning(f"⏱️ {validity_label} — ⚠️ **FORA DO PERÍODO DE VALIDADE**: "
-                       "os dados podem estar desactualizados.")
-
-    blocks, fzlvl_min, qnh_min, wind_data = parse_gamet(gamet_text)
-    dynamic_regions = compute_dynamic_regions(blocks)
-
-    has_sigmet, sigmet_text = extract_sigmet_applicable(gamet_text)
-
-    # De onde veio o GAMET em análise. Só conta se for exactamente o texto
-    # carregado (se o utilizador o editou ou colou outro, é "manual").
-    _gamet_e_o_carregado = gamet_text.strip() == st.session_state.get("gamet_loaded", "").strip()
-    _fonte = st.session_state.get("gamet_fonte", "ipma") if _gamet_e_o_carregado else "manual"
-    _entrada_arq = st.session_state.get("arquivo_entrada") or {}
-
-    if _fonte == "arquivo_hist":
-        st.warning(
-            "📚 **GAMET DO ARQUIVO — não é o GAMET actual.** Serve para rever "
-            "uma situação passada; não o uses para planear um voo.")
-    elif _fonte == "arquivo_recurso":
-        st.warning(
-            "🕓 **O IPMA ainda não publicou o novo GAMET** (o anterior é retirado "
-            "cerca de 45 min antes da emissão). A mostrar o **último GAMET "
-            "arquivado, ainda em vigor**. Recarrega dentro de alguns "
-            "minutos para obter o novo.")
-
-    # SIGMETs. Três casos:
-    #  · GAMET actual (IPMA ou recurso ao arquivo): os SIGMET/AIRMET em vigor
-    #    AGORA — lidos da página do IPMA e/ou do arquivo. Cobrem o caso que o
-    #    GAMET não cobre: um SIGMET emitido DEPOIS do GAMET.
-    #  · GAMET do arquivo: os SIGMETs arquivados que estiveram em vigor
-    #    durante a validade desse GAMET.
-    #  · GAMET colado à mão ou do histórico da sessão: não se sabe a que
-    #    momento corresponde — só conta o "SIGMET APPLICABLE" do próprio texto.
-    _bol = st.session_state.get("ipma_boletins")
-    _bol_at = st.session_state.get("ipma_boletins_at")
-    sig_ipma, air_ipma = ([], [])
-    _verificado = False
-    if _fonte in ("ipma", "arquivo_recurso") and _bol is not None:
-        sig_ipma, air_ipma = active_bulletins(_bol)
-        _verificado = True
-        _onde = ("em vigor no IPMA" if _fonte == "ipma"
-                 else f"em vigor ({st.session_state.get('ipma_boletins_fonte', 'arquivo')})")
-    elif _fonte == "arquivo_hist" and st.session_state.get("arquivo_indice"):
-        sig_ipma, air_ipma = boletins_do_periodo(
-            st.session_state["arquivo_indice"],
-            _iso_utc(_entrada_arq.get("inicio")), _iso_utc(_entrada_arq.get("fim")))
-        _verificado = True
-        _onde = "durante a validade deste GAMET (arquivo)"
-    if sig_ipma:
-        dynamic_regions = apply_sigmet_override(
-            dynamic_regions, " | ".join(b[:80] for b in sig_ipma))
-        st.error(
-            f"🚨 **{len(sig_ipma)} SIGMET {_onde}**"
-            + ("" if has_sigmet else " — **não referido no GAMET**, provavelmente "
-               "emitido depois dele") + ". A decisão foi forçada a NO-GO em toda a "
-            "área. Lê o SIGMET completo:\n\n"
-            + "\n\n".join(f"`{b}`" for b in sig_ipma)
-        )
-    if air_ipma:
-        st.warning(
-            f"⚠️ **{len(air_ipma)} AIRMET {_onde}.** A app mostra-o mas "
-            "não o interpreta — lê-o:\n\n"
-            + "\n\n".join(f"`{b}`" for b in air_ipma)
-        )
-    if not _verificado:
-        st.info("ℹ️ SIGMETs do IPMA **não verificados**: o GAMET em análise não "
-                "foi carregado do IPMA nem do arquivo nesta sessão. Só conta o "
-                "campo \"SIGMET APPLICABLE\" do próprio GAMET.")
-    elif not sig_ipma and not air_ipma:
-        if _fonte == "arquivo_hist":
-            st.caption("✅ Nenhum SIGMET/AIRMET LPPC arquivado durante a validade "
-                       "deste GAMET.")
-        elif _bol_at:
-            st.caption(f"✅ Sem SIGMET/AIRMET LPPC em vigor "
-                       f"({st.session_state.get('ipma_boletins_fonte', 'página do IPMA')}, "
-                       f"verificado às {_bol_at.strftime('%H:%MZ')}).")
-
-    if has_sigmet:
-        dynamic_regions = apply_sigmet_override(dynamic_regions, sigmet_text)
-        st.error(
-            "🚨 **SIGMET ACTIVO APLICÁVEL A ESTE GAMET.** "
-            "Um SIGMET indica fenómenos que justificam alerta acima do que "
-            "um GAMET rotineiro cobre. A decisão foi forçada a NO-GO em "
-            "toda a área — consulta o SIGMET completo antes de voar; esta "
-            "app não o substitui.\n\n"
-            f"Texto reportado: {sigmet_text}"
-        )
-
-    if has_sigmet or sig_ipma:
-        _faixa_sig, _faixa_sig_dec = "ACTIVO", "NO-GO"
-    elif _verificado:
-        _faixa_sig, _faixa_sig_dec = "NIL", "GO"
-    else:
-        _faixa_sig, _faixa_sig_dec = "N/VERIF.", None
-    with _faixa_box:
-        st.markdown(html_faixa(_faixa_val, _faixa_exp, _faixa_sig, _faixa_sig_dec),
-                    unsafe_allow_html=True)
-
-    if looks_unparseable(gamet_text):
-        st.error(
-            "⚠️ **Nenhum campo meteorológico reconhecido no texto.** "
-            "Isto pode significar que o GAMET está incompleto, mal colado, "
-            "ou num formato não suportado — **não** que as condições estão "
-            "calmas. Confirma o texto antes de confiar na decisão abaixo."
-        )
-
-    wind_warnings = check_strong_wind(wind_data)
-    if wind_warnings:
-        st.warning(
-            "💨 **Vento forte reportado a 1000ft AGL** (aviso geral — não "
-            "afecta a decisão GO/MARGINAL/NO-GO nem está atribuído a uma "
-            "região específica, já que o vento é reportado por estação "
-            "pontual, não por área). Confirma os limites de vento cruzado "
-            "da tua aeronave:\n\n" + "\n".join(f"- {w}" for w in wind_warnings)
-        )
+    st.markdown(html_faixa(_r["faixa_val"], _r["faixa_exp"], *_r["faixa_sig"]),
+                unsafe_allow_html=True)
+    _mostrar = {"erro": st.error, "aviso": st.warning, "info": st.info, "ok": st.caption}
+    for _tipo, _txt in _r["avisos"]:
+        _mostrar[_tipo](_txt)
 
     # ---- Veredicto global ----
     # Responde de imediato à pergunta principal — "posso voar?" — sem
     # obrigar a interpretar N cartões de região primeiro.
-    _area_fir = FIR_POLYGON.area
-    _area_por_dec = {}
-    for _reg in dynamic_regions:
-        _area_por_dec[_reg["decision"]] = _area_por_dec.get(_reg["decision"], 0) + _reg["polygon"].area
-    st.markdown(html_veredicto(_area_por_dec, _area_fir), unsafe_allow_html=True)
+    st.markdown(html_veredicto(_r["por_dec"], _r["area"]), unsafe_allow_html=True)
 
     # ---- O meu aeródromo ----
     airport_options = ["— Seleccionar —"] + sorted(AERODROMES.keys())

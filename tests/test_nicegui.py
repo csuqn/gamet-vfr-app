@@ -40,4 +40,4 @@ def test_sigmet_do_ipma_forca_no_go(analyse):
     r = ng.analisar(build_gamet(CASOS[0]), "ipma", [sig], agora, "página do IPMA")
     assert {x["decision"] for x in r["regioes"]} == {"NO-GO"}
     assert r["faixa_sig"] == ("ACTIVO", "NO-GO")
-    assert any(t == "erro" and "SIGMET 2" in m for t, m in r["alertas"])
+    assert any(t == "erro" and "SIGMET 2" in m for t, m in r["avisos"])
