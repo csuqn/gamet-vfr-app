@@ -169,6 +169,14 @@ Acrescentar um GAMET a `GAMETS_VARIADOS` fá-lo passar por todos.
 - `parser` — rever regex e lógica de extracção
 - `dados-aero` — adicionar ou validar aeródromos e pistas UL
 
+Usados pelo relatório diário (ver "Relatório diário com agentes"):
+
+- `piloto` — lê um GAMET às cegas, como um piloto, e dá a decisão por aeródromo
+- `comparador` — compara parser × piloto e classifica cada diferença
+- `editor` — corrige um erro confirmado, com teste do GAMET real
+- `revisor` — revê a correcção de forma independente (testes + comparação
+  de versões); APROVADO / REJEITADO / DÚVIDA
+
 ## Geografia
 
 - **Área do GAMET** — os três sectores **inferiores** da FIR (ENR 2.1.3,
@@ -301,5 +309,25 @@ Ficam separados para que cada recolha não reinicie a app publicada.
   `python scripts/analisar.py --dir dados/gamets --desde 24`.
 - Relatórios diários em `relatorios/AAAA-MM-DD.md` e resumo mensal em
   `relatorios/resumo-AAAA-MM.md` (ramo `dados`). Sem data de fim.
-  Correcções de código são **propostas** num ramo `proposta/...` e só
-  entram no `main` com aprovação do utilizador.
+
+## Relatório diário com agentes
+
+Tarefa agendada às 08:00 (Lisboa). Cadeia:
+
+1. `scripts/analisar.py` — leitura pelo parser (determinística, não é agente).
+2. `piloto` × N — um por GAMET das últimas 24 h, em paralelo, **às cegas**.
+3. `comparador` — parser × piloto, aeródromo a aeródromo.
+4. Para cada erro do parser confirmado: `editor` (ramo `proposta/...` com
+   teste do GAMET real) → PR → check "Testes" (GitHub Actions) →
+   `revisor` (independente; inclui `scripts/comparar_versoes.py` sobre todo o
+   arquivo, que lista as decisões que ficam MAIS PERMISSIVAS).
+5. Relatório e mensagem ao Duarte.
+
+**Merge automático (decisão do Duarte, 17-out-2026):** um PR entra no
+`main` sem intervenção quando o check "Testes" está verde **e** o revisor
+diz APROVADO. **Na dúvida, não entra**: fica aberto com "[Precisa do
+Duarte]" no título e a dúvida explicada na mensagem. É dúvida, sempre:
+mudança de limiares/regras de decisão; decisão mais permissiva que o
+revisor não consiga provar; leitura ambígua do GAMET; piloto e parser
+discordarem sem se saber quem tem razão; qualquer funcionalidade nova
+(não correcção).
