@@ -181,3 +181,18 @@ def test_hora_da_observacao_ilegivel_com_movimento_vale_toda_a_area(eng):
     corpo = ("EMBD TS OBS AT 13Z WI N3900 W00930 - N3900 W00915 - N3915 W00915 - "
              "N3915 W00930 TOP FL300 MOV E 15KT NC")
     assert eng.area_sigmet(_s(corpo))[0] is None
+
+
+def test_hora_impossivel_nao_rebenta_e_vale_toda_a_area(eng):
+    for hora in ("2400Z", "2560Z", "1399Z"):
+        corpo = (f"EMBD TS OBS AT {hora} WI N3900 W00930 - N3900 W00915 - N3915 W00915 - "
+                 "N3915 W00930 TOP FL300 MOV E 15KT NC")
+        assert eng.area_sigmet(_s(corpo))[0] is None, hora
+        r = _r(eng, [_s(corpo)])                      # análise completa não rebenta
+        assert {g["decision"] for g in r["regioes"]} == {"NO-GO"}, hora
+
+
+def test_segunda_hora_ilegivel_tambem_vale_toda_a_area(eng):
+    corpo = ("EMBD TS OBS AT 1300Z WI N3900 W00930 - N3900 W00915 - N3915 W00915 - "
+             "N3915 W00930 TOP FL300 FCST AT XX MOV E 15KT NC")
+    assert eng.area_sigmet(_s(corpo))[0] is None
