@@ -47,8 +47,12 @@ def test_designador_alfanumerico_activo_e_cancelado(eng):
 def test_sigmet_real_forca_no_go_e_faixa_activo(eng, net):
     boletins = net.extract_bulletins_from_html(f"<pre>{SIG_T01}</pre><pre>{AIR_1}</pre>")
     r = eng.analisar_gamet(G, "ipma", boletins=boletins, boletins_at=DURANTE, agora=DURANTE)
-    assert {g["decision"] for g in r["regioes"]} == {"NO-GO"}
     assert r["faixa_sig"] == ("ACTIVO", "NO-GO")
+    # 3.0: NO-GO na área do T01 (interior Norte/Centro, + 10 NM), não em Faro
+    def dec(nome):
+        la, lo = eng.AERODROMES[nome]
+        return eng.find_region_for_point(r["regioes"], la, lo)["decision"]
+    assert dec("Bragança (LPBG)") == "NO-GO" and dec("Faro (LPFR)") != "NO-GO"
     texto = " ".join(m for _, m in r["avisos"])
     assert "SIGMET T01" in texto and "AIRMET 1" in texto
 

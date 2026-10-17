@@ -111,9 +111,10 @@ não para planear um voo.
 ## 4. Como ler o briefing
 
 **Avisos no topo**
-- 🚨 **SIGMET:** a decisão é forçada a NO-GO em toda a área, seja o SIGMET
-  referido pelo GAMET, seja um SIGMET em vigor na página do IPMA que saiu
-  depois do GAMET. Lê o SIGMET completo.
+- 🚨 **SIGMET:** NO-GO na área do SIGMET, com 10 NM de margem (e estendida
+  na direcção do movimento, se o SIGMET se desloca). Se a área não for legível,
+  ou se o GAMET só indicar o identificador do SIGMET sem o texto completo estar
+  disponível, NO-GO em toda a área. Lê sempre o SIGMET completo.
 - ⚠️ **AIRMET:** se existir, é mostrado, mas a app não o interpreta.
 - ⚠️ **Nenhum campo reconhecido:** a app não percebeu o texto. Isto **não**
   significa que o tempo está calmo; confirma o GAMET.
@@ -189,7 +190,7 @@ Em cada zona, a app aplica estas regras. Fica a pior decisão que se aplicar.
 | Linha de borrasca, chuva ou chuvisco que gela, tempestade de poeira ou areia, granizo, nuvem funil (`SQL`, `FZRA`, `FZDZ`, `DS`, `SS`, `GR`, `FC`) | NO-GO | Fenómenos severos |
 | Montanhas obscurecidas (`MT OBSC`) | NO-GO | Risco de voo controlado contra o terreno |
 | Cinzas vulcânicas (`VA`) | NO-GO | — |
-| SIGMET em vigor | NO-GO em toda a área | Nem o GAMET nem a lista do IPMA dizem com precisão onde é; restringir seria inventar precisão |
+| SIGMET em vigor | NO-GO na área do SIGMET + 10 NM (estendida pelo movimento) | O SIGMET completo do IPMA traz a área (polígono, círculo ou qualificadores). Sem área legível, ou só com o identificador no GAMET: NO-GO em toda a área |
 
 **Princípios por trás das regras**
 - **Na dúvida, a leitura conservadora.** Errar para o lado pessimista é
@@ -256,7 +257,7 @@ Algarve não afecta Lisboa.
 
 ## 10. Qualidade e testes
 
-- **463 testes automáticos** cobrem a leitura do texto, a geometria, as
+- **474 testes automáticos** cobrem a leitura do texto, a geometria, as
   decisões, os dados aeronáuticos e a app completa. Cada erro alguma vez
   encontrado tem um teste que impede que volte a aparecer.
 - **Verificação cruzada:** em centenas de GAMETs gerados, a decisão de cada
@@ -276,7 +277,7 @@ Algarve não afecta Lisboa.
 pip install -r requirements.txt -r requirements-dev.txt
 cd nicegui_app && python main.py   # a app principal (NiceGUI), http://localhost:8080
 streamlit run app.py               # a versão de reserva (Streamlit)
-python3 -m pytest                  # os testes (463)
+python3 -m pytest                  # os testes (474)
 ```
 
 | Ficheiro / pasta | Conteúdo |

@@ -81,14 +81,25 @@ definir `FIR_POLYGON` — não entram na decisão.
 | SIGWX SQL / FZRA / FZDZ / DS / SS / GR / FC | NO-GO |
 | MT OBSC | NO-GO |
 | VA (cinzas vulcânicas) | NO-GO |
-| SIGMET activo (no GAMET **ou** na página do IPMA) | NO-GO em toda a área |
+| SIGMET activo com área legível (página do IPMA / arquivo) | NO-GO na área + 10 NM, estendida pelo MOV (desde a 3.0) |
+| SIGMET sem área legível, ENTIRE FIR, ou só o identificador no GAMET | NO-GO em toda a área |
 
 TURB e ICE severos forçam NO-GO desde a v23: a maioria dos ultraleves não
 tem sistemas de degelo nem margem estrutural para turbulência severa.
 
-O SIGMET aplica-se a toda a FIR porque o campo `SIGMET APPLICABLE` do
-GAMET não descreve geometria — restringi-lo a parte da área seria inventar
-precisão que não temos.
+**SIGMET (3.0, decisão do Duarte a 17-out-2026).** Até à 2.7 qualquer
+SIGMET punha NO-GO em toda a FIR, porque a app só tinha o campo
+`SIGMET APPLICABLE` do GAMET, que não traz geometria. Desde que lê o SIGMET
+completo (página do IPMA e arquivo), usa a área dele: `area_sigmet()` lê
+`WI <polígono>`, `WI nnNM OF <ponto>` e os qualificadores do GAMET
+(`N OF …`, `BTN …`), junta `_SIGMET_MARGEM_NM` (10 NM) e, com `MOV dir nnKT`,
+estende a área na direcção do movimento durante toda a validade.
+`blocos_sigmet()` transforma cada SIGMET num `MetBlock("SIGMET")`, que entra
+em `compute_dynamic_regions` como qualquer fenómeno (decisão NO-GO).
+Continua a ser **toda a área** quando: a área não é legível, há `ENTIRE FIR`
+ou `LINE`, o `MOV` não tem direcção/velocidade legível, ou o GAMET refere um
+SIGMET cujo texto completo não está disponível (ex.: GAMET colado à mão).
+Os níveis (`TOP FL340`, `SFC/FL080`) ainda não restringem a decisão.
 
 Desde a 1.4 a app também lê os SIGMET/AIRMET da página do IPMA (a mesma
 que traz o GAMET; `extract_bulletins_from_html`, `active_bulletins`), para
@@ -130,7 +141,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-457 testes. Devem passar a 100%.
+474 testes. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -152,6 +163,8 @@ python3 -m pytest
 - `tests/test_v25.py` — VIS sem unidade (`LCA 5000 RA`, GAMET real 161500)
 - `tests/test_v27.py` — SIGMET/AIRMET sem "=" final (boletins reais de
   17-out-2026: SIGMET T01, AIRMET 1)
+- `tests/test_v30.py` — SIGMET só na sua área + 10 NM (SIGMET T02 real),
+  movimento, círculo, ENTIRE FIR, área ilegível, referência do GAMET
 - `tests/conftest.py` — extrai o motor da app sem executar a UI. Os imports
   vêm da própria app (nunca de uma lista fixa — escondia imports em falta)
 

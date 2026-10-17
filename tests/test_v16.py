@@ -268,7 +268,8 @@ def test_app_gamet_do_arquivo_usa_sigmets_da_sua_validade(app_path):
     assert "GAMET DO ARQUIVO" in avisos
     assert "durante a validade deste GAMET" in erros and "SIGMET 4" in erros
     assert "SIGMET 8" not in erros
-    assert "NO-GO em 100% da FIR" in veredicto(at)
+    v = veredicto(at)   # 3.0: SIGMET "N OF N4000" → só a sua área
+    assert v.startswith("NO-GO em") and "100%" not in v, v
 
 
 def test_app_gamet_do_arquivo_sem_sigmets(app_path):
@@ -333,7 +334,8 @@ def test_app_recurso_ponta_a_ponta(app_path, monkeypatch):
     assert not at.exception, [e.value for e in at.exception]
     assert "ainda não publicou o novo GAMET" in " ".join(w.value for w in at.warning)
     erros = " ".join(e.value for e in at.error)
-    assert "SIGMET 5" in erros and "NO-GO em 100% da FIR" in veredicto(at)
+    v = veredicto(at)   # 3.0: SIGMET "N OF N4000" → só a sua área
+    assert "SIGMET 5" in erros and v.startswith("NO-GO em") and "100%" not in v, v
 
 
 def test_app_sem_ipma_nem_arquivo_falha_em_voz_alta(app_path, monkeypatch):
