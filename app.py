@@ -29,7 +29,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "3.3"
+APP_VERSION = "3.4"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -1430,7 +1430,26 @@ _CLD_BASE_RE = re.compile(
     r"(?:\s+(?P<ref>AGL|AMSL)\b)?"
 )
 
-def parse_gamet(text):
+# Início de subentrada com ar de qualificador geográfico (3.4), lido ou não
+# por extract_polygon: "N OF", "NW OF", "N PART", "BTN", "WI", "ALONG",
+# "ENTIRE FIR" ou uma coordenada. MAR/LAN/COT sozinhos não são área.
+_AREA_KW = (r"(?:(?:[NS][EW]?|[EW])\s+(?:OF|PART)\b|BTN\b|WI\b|ALONG\b|ENTIRE\s+FIR\b"
+            r"|[NS]\d{4}\b|[WE]\d{5}\b)")
+_AREA_INI_RE = re.compile(r"(?:\d{2}/\d{2}\s+)?" + _AREA_KW)
+
+
+def subentradas_sem_area(text):
+    """
+    Subentradas cuja área geográfica não foi reconhecida e que, por isso,
+    foram aplicadas a toda a FIR (3.4). Lista de textos ("CAMPO: conteúdo"),
+    para o aviso do briefing e para o relatório do arquivo.
+    """
+    sem_area = []
+    parse_gamet(text, sem_area)
+    return sem_area
+
+
+def parse_gamet(text, sem_area=None):
 
     text = normalize(text)
 
@@ -1478,6 +1497,11 @@ def parse_gamet(text):
     secn1 = re.sub(r"(\w)\s+(E\s+OF\s+[WE]\d{4,5})", r"\1\n\2", secn1)
     secn1 = re.sub(r"(\w)\s+(W\s+OF\s+[WE]\d{4,5})", r"\1\n\2", secn1)
     secn1 = re.sub(r"(\w)\s+(BTN\s+N\d{4})", r"\1\n\2", secn1)
+    # Qualificadores que a app não lê ("NW OF …", "N OF N40", "WI …",
+    # "ALONG …", "N PART", "ENTIRE FIR") também abrem subentrada (3.4): até à
+    # 3.3 ficavam colados à linha anterior e herdavam a área dela.
+    secn1 = re.sub(r"(\w)[ \t]+((?:[NS][EW]?|[EW])\s+(?:OF|PART)\b|BTN\b|WI\s|ALONG\b"
+                   r"|ENTIRE\s+FIR\b)", r"\1\n\2", secn1)
     secn1 = secn1.replace(" && ", " AND ")
 
     lines = [l.strip() for l in secn1.splitlines() if l.strip()]
@@ -1487,7 +1511,8 @@ def parse_gamet(text):
     # deixava-a no fim da linha anterior e a subentrada herdava a janela da
     # anterior (GAMET real 160900/161500: CB das 12–15Z mostrado como
     # "apenas 09–11Z"). Passa para o início da linha a que pertence.
-    _qual_ini = re.compile(r"(?:[NSEW]\s+OF\s+[NWE]\d{4,5}|BTN\s+[NWE]\d{4,5})")
+    # Também vale para os qualificadores que a app não lê (3.4).
+    _qual_ini = re.compile(r"(?:[NSEW]\s+OF\s+[NWE]\d{4,5}|BTN\s+[NWE]\d{4,5}|" + _AREA_KW + ")")
     for i in range(len(lines) - 1):
         mj = re.search(r"(?<=[\s:])(\d{2}/\d{2})$", lines[i])
         if mj and _qual_ini.match(lines[i + 1]):
@@ -1498,6 +1523,7 @@ def parse_gamet(text):
     blocks = []
     current_polygon = FIR_POLYGON
     current_window  = ""
+    campo_txt       = ""
 
     for raw_line in lines:
 
@@ -1545,6 +1571,8 @@ def parse_gamet(text):
                 r"^(SFC\s+VIS\s*:?|SIG\s+VIS\s*:?|VIS\s*:|SIG\s+CLD\s*:?|CLD\s*:|SIGWX\s*:?|TURB\s*:?|ICE\s*:?|MT\s+OBSC\s*:?|SFC\s+WSPD\s*:?|MTW\s*:|VA\s*:?)\s*",
                 "", line
             ).strip()
+            # Nome do campo, para o aviso de área não reconhecida (3.4)
+            campo_txt = line[:len(line) - len(content)].strip().rstrip(":").strip()
         else:
             content = line
 
@@ -1561,6 +1589,16 @@ def parse_gamet(text):
         new_poly = extract_polygon(line)
         if new_poly is not None:
             current_polygon = new_poly
+        elif _AREA_INI_RE.match(content):
+            # Subentrada com ar de qualificador geográfico, mas sem área
+            # legível (3.4, pedido do Duarte): vale para toda a FIR e fica
+            # registada para o aviso. Até à 3.3 herdava em silêncio a área
+            # da subentrada anterior (GAMET real 171500 antes da 3.1: a base
+            # da costa W ia para uma tira junto ao Guadiana). Linhas sem
+            # qualificador nenhum continuam a usar a área da subentrada.
+            current_polygon = FIR_POLYGON
+            if sem_area is not None:
+                sem_area.append(f"{campo_txt}: {content}")
 
         poly = current_polygon
         if poly is not None and poly.is_empty:
@@ -3270,8 +3308,15 @@ def analisar_gamet(texto, fonte="manual", boletins=None, boletins_at=None,
             av.append(("aviso", f"⏱️ {r['validity_label']} — ⚠️ **FORA DO PERÍODO DE "
                                 "VALIDADE**: os dados podem estar desactualizados."))
 
-    blocks, fz, qnh, wind = parse_gamet(texto)
+    sem_area = []
+    blocks, fz, qnh, wind = parse_gamet(texto, sem_area)
     has_sigmet, sigmet_text = extract_sigmet_applicable(texto)
+    # Falhar em voz alta (3.4): a subentrada foi aplicada a toda a FIR porque
+    # a área não foi lida. O texto vai como código; as interfaces escapam-no.
+    for s in sem_area:
+        av.append(("aviso", f"⚠️ **Área não reconhecida** em «`{s.replace('`', '')}`» — "
+                            "aplicada a **toda a FIR**. Confirma no texto do GAMET onde "
+                            "se aplica."))
 
     if fonte == "arquivo_hist":
         av.append(("aviso", "📚 **GAMET DO ARQUIVO — não é o GAMET actual.** Serve para rever "

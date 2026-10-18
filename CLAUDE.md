@@ -60,7 +60,14 @@ Três pormenores que já causaram erros reais:
   motivos dela já estiverem na vizinha (3.2); senão fica cartão próprio. Antes,
   os motivos da fatia passavam para a região inteira.
 - `BTN` aceita `AND` ou hífen entre os limites (`BTN N4050 - N3840`, 3.1).
-  Uma subentrada sem área legível herda a da anterior.
+- Uma subentrada que começa (depois da janela `HH/HH`) por algo com ar de
+  qualificador geográfico (`N/NW… OF`, `BTN`, `WI`, `ALONG`, `N PART`,
+  `ENTIRE FIR`, coordenada) mas de que `extract_polygon` não tira área vale
+  para **toda a FIR** e gera um aviso "Área não reconhecida"
+  (`subentradas_sem_area`; também no `scripts/analisar.py`) — até à 3.3 herdava
+  em silêncio a área da anterior (pedido do Duarte, 3.4). Linhas sem
+  qualificador continuam a usar a área da subentrada; um qualificador fora
+  da FIR continua a descartar o fenómeno; MAR/LAN/COT sozinhos não são área.
 
 Não há sectores fixos. A app teve 3 sectores (Norte/Centro/Sul) até à v17;
 foram substituídos por geometria dinâmica porque marcavam um sector
@@ -162,7 +169,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-531 testes. Devem passar a 100%.
+560 testes. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -191,6 +198,8 @@ python3 -m pytest
 - `tests/test_v32.py` — `BTN … - …` com hífen (GAMET real 171500/172100)
 - `tests/test_v33.py` — SIGMET referido já terminado (T02 real após 18Z) e
   motivos de fatias que não passam para a vizinha
+- `tests/test_v34.py` — subentrada com área ilegível → toda a FIR + aviso
+  (GAMET real 171500 com `BTN N4050 ~ N3840`), casos que não mudam, arquivo real
 - `tests/conftest.py` — extrai o motor da app sem executar a UI. Os imports
   vêm da própria app (nunca de uma lista fixa — escondia imports em falta)
 

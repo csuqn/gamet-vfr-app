@@ -28,7 +28,7 @@ _SECTIONS = [
                    "\n# -------------------------------------------------\n# DECISION"),
     ("wind",       "def parse_wind(secn2: str) -> list:",
                    "\n# -------------------------------------------------\n# PARSER — v"),
-    ("parser",     "def parse_gamet(text):",
+    ("parser",     "def parse_gamet(text",
                    "\n# -------------------------------------------------\n# PDF EXPORT"),
     ("pdf",        "def _pdf_briefing_page",
                    "\n\n# -------------------------------------------------\n# EXECU"),
