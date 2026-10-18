@@ -52,6 +52,8 @@ Três pormenores que já causaram erros reais:
 - Qualificadores seguidos, com ou sem AND (`BTN N3840 AND N4100 E OF W00800`),
   são uma só área (2.3). A janela `HH/HH` pertence à subentrada que vem a
   seguir; uma subentrada sem janela vale para todo o período.
+- `BTN` aceita `AND` ou hífen entre os limites (`BTN N4050 - N3840`, 3.1).
+  Uma subentrada sem área legível herda a da anterior.
 
 Não há sectores fixos. A app teve 3 sectores (Norte/Centro/Sul) até à v17;
 foram substituídos por geometria dinâmica porque marcavam um sector
@@ -142,7 +144,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-483 testes. Devem passar a 100%.
+503 testes. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -166,6 +168,7 @@ python3 -m pytest
   17-out-2026: SIGMET T01, AIRMET 1)
 - `tests/test_v30.py` — SIGMET só na sua área + 10 NM (SIGMET T02 real),
   movimento, círculo, ENTIRE FIR, área ilegível, referência do GAMET
+- `tests/test_v32.py` — `BTN … - …` com hífen (GAMET real 171500/172100)
 - `tests/conftest.py` — extrai o motor da app sem executar a UI. Os imports
   vêm da própria app (nunca de uma lista fixa — escondia imports em falta)
 
