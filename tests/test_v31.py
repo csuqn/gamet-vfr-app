@@ -7,9 +7,9 @@ exigia a referência, por isso a base de 200 ft desaparecia em silêncio e a
 zona saía MARGINAL (só o nevoeiro LCA) em vez de NO-GO (base < 300 ft, sem
 excepção LCA). O `analisar.py` assinalava "Campo sem fenómeno gerado".
 
-Sem referência a base é lida como AMSL: convertida contra o relevo, dá
-sempre uma base AGL igual ou menor do que a leitura AGL (leitura
-conservadora). Nestes dois GAMETs as duas leituras dão as mesmas decisões.
+Sem referência a base é lida como AGL (decisão do Duarte, 18-out-2026):
+em SIG CLD o IPMA dá as bases em AGL e a falta da referência é quase
+certamente uma gralha. Só "AMSL" explícito é convertido contra o relevo.
 """
 import re
 import sys
@@ -118,27 +118,34 @@ def test_com_agl_continua_igual(eng, analyse, gamet):
 @pytest.mark.parametrize("corpo, fen, valor", [
     ("SECN I SIG CLD:N OF N4000 BKN 002-008/010HFT AGL", "BASE_AGL", 200),
     ("SECN I SIG CLD:N OF N4000 BKN 020/040HFT AMSL", "BASE_AMSL", 2000),
-    ("SECN I SIG CLD:N OF N4000 BKN 002-008/010HFT", "BASE_AMSL", 200),
-    ("SECN I SIG CLD:N OF N4000 BKN 004/XXXHFT", "BASE_AMSL", 400),
-    ("SECN I SIG CLD:N OF N4000 OVC SFC/010HFT", "BASE_AMSL", 0),
-    ("SECN I SIG CLD:N OF N4000 BKN 800/1100FT", "BASE_AMSL", 800),
+    ("SECN I SIG CLD:N OF N4000 BKN 002-008/010HFT", "BASE_AGL", 200),
+    ("SECN I SIG CLD:N OF N4000 BKN 004/XXXHFT", "BASE_AGL", 400),
+    ("SECN I SIG CLD:N OF N4000 OVC SFC/010HFT", "BASE_AGL", 0),
+    ("SECN I SIG CLD:N OF N4000 BKN 800/1100FT", "BASE_AGL", 800),
 ])
 def test_formas_da_base(analyse, corpo, fen, valor):
     (b,) = _bases(analyse(build_gamet(corpo)))
     assert (b.phenomenon, b.value) == (fen, valor)
 
 
-def test_sem_referencia_nunca_mais_permissiva_que_agl(eng, analyse):
-    """Com bases mais altas a diferença aparece: sem referência, a base
-    (lida como AMSL) nunca dá decisão mais permissiva do que a leitura AGL."""
-    ordem = {"GO": 0, "MARGINAL": 1, "NO-GO": 2}
-    for base in ("004", "010", "020", "040"):
+def test_sem_referencia_igual_a_agl(eng, analyse):
+    """Sem referência a base vale exactamente como AGL, e o "AMSL" explícito
+    continua a ser convertido contra o relevo (dá base AGL menor)."""
+    for base in ("002", "004", "010", "020", "040"):
         sem = analyse(build_gamet(f"SECN I SIG CLD:BKN {base}/060HFT"))
         agl = analyse(build_gamet(f"SECN I SIG CLD:BKN {base}/060HFT AGL"))
-        d_sem = _por_codigo(eng, sem["regions"])
-        d_agl = _por_codigo(eng, agl["regions"])
-        for cod in d_agl:
-            assert ordem[d_sem[cod]] >= ordem[d_agl[cod]], (base, cod)
+        assert _por_codigo(eng, sem["regions"]) == _por_codigo(eng, agl["regions"]), base
+    amsl = analyse(build_gamet("SECN I SIG CLD:BKN 020/060HFT AMSL"))
+    (b,) = _bases(amsl)
+    assert b.phenomenon == "BASE_AMSL"
+    # 2000 ft AMSL fica abaixo de 300 ft AGL no relevo mais alto → NO-GO algures
+    assert "NO-GO" in set(_por_codigo(eng, amsl["regions"]).values())
+
+
+def test_motivo_base_200_ft(analyse):
+    r = analyse(GAMET_180300)
+    motivos = {m for reg in r["regions"] for m in reg["reasons"]}
+    assert any(re.search(r"BASE 200\s*ft\s*<\s*300\s*ft", m, re.I) for m in motivos), motivos
 
 
 def test_analisar_ja_nao_assinala_campo_sem_fenomeno(eng):

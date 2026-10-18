@@ -50,8 +50,9 @@ Três pormenores que já causaram erros reais:
   e notas se estiver a menos de `_BOLSA_MAX_KM` (25 km), mesmo sem ser
   contígua (2.0). Mais longe continua a ser um cartão próprio.
 - Uma base de SIG CLD sem AGL nem AMSL (`BKN 002-008/010HFT`) é lida como
-  **AMSL** (3.2): convertida contra o MEF, nunca dá base maior do que a
-  leitura AGL. Até à 3.0 era descartada em silêncio.
+  **AGL** (3.2, decisão do Duarte a 18-out-2026: em SIG CLD o IPMA dá as
+  bases em AGL e a falta da referência é tida por gralha). Só `AMSL`
+  explícito é convertido contra o MEF. Até à 3.1 era descartada em silêncio.
 - Qualificadores seguidos, com ou sem AND (`BTN N3840 AND N4100 E OF W00800`),
   são uma só área (2.3). A janela `HH/HH` pertence à subentrada que vem a
   seguir; uma subentrada sem janela vale para todo o período.
@@ -147,7 +148,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-517 testes. Devem passar a 100%.
+518 testes. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
