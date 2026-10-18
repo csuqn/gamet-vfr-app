@@ -29,7 +29,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "3.2"
+APP_VERSION = "3.3"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -1422,7 +1422,12 @@ _CLD_BASE_RE = re.compile(
     r"(?<![\dA-Z])(?P<base>SFC|\d{3,5})"
     r"(?:-\d{3,5})?"                      # fim do intervalo de bases
     r"(?:/(?:\d{3,5}|XXX))?"              # topo
-    r"\s*(?P<unit>HFT|FT)\s+(?P<ref>AGL|AMSL)\b"
+    r"\s*(?P<unit>HFT|FT)\b"
+    # Referência opcional (3.3): o IPMA escreveu "LCA BKN 002-008/010HFT"
+    # sem AGL nem AMSL (GAMETs reais 172100 e 180300). Exigi-la fazia a base
+    # de 200 ft desaparecer em silêncio (MARGINAL em vez de NO-GO). Sem
+    # referência a base é lida como AGL — ver o estado "CLD".
+    r"(?:\s+(?P<ref>AGL|AMSL)\b)?"
 )
 
 def parse_gamet(text):
@@ -1698,7 +1703,11 @@ def parse_gamet(text):
                     base_ft = int(base_txt) * 100
                 else:
                     base_ft = int(base_txt)
-                fen = "BASE_AGL" if ref == "AGL" else "BASE_AMSL"
+                # Sem AGL/AMSL (3.3) → AGL (decisão do Duarte, 18-out-2026):
+                # em SIG CLD o IPMA dá as bases em AGL, e a falta da
+                # referência é quase certamente uma gralha. Só "AMSL"
+                # explícito é convertido contra o relevo.
+                fen = "BASE_AMSL" if ref == "AMSL" else "BASE_AGL"
                 blocks.append(MetBlock(fen, poly, base_ft, qualifier, surface=surface, window=window))
 
             # Cumulonimbos na linha de nuvens (2.0). Até à 1.6 "TCU/CB" em

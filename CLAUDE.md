@@ -49,6 +49,10 @@ Três pormenores que já causaram erros reais:
 - Uma bolsa residual (< 1,5% da FIR) junta-se à região com as mesmas causas
   e notas se estiver a menos de `_BOLSA_MAX_KM` (25 km), mesmo sem ser
   contígua (2.0). Mais longe continua a ser um cartão próprio.
+- Uma base de SIG CLD sem AGL nem AMSL (`BKN 002-008/010HFT`) é lida como
+  **AGL** (3.3, decisão do Duarte a 18-out-2026: em SIG CLD o IPMA dá as
+  bases em AGL e a falta da referência é tida por gralha). Só `AMSL`
+  explícito é convertido contra o MEF. Até à 3.2 era descartada em silêncio.
 - Qualificadores seguidos, com ou sem AND (`BTN N3840 AND N4100 E OF W00800`),
   são uma só área (2.3). A janela `HH/HH` pertence à subentrada que vem a
   seguir; uma subentrada sem janela vale para todo o período.
@@ -158,7 +162,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-516 testes. Devem passar a 100%.
+531 testes. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -182,6 +186,8 @@ python3 -m pytest
   17-out-2026: SIGMET T01, AIRMET 1)
 - `tests/test_v30.py` — SIGMET só na sua área + 10 NM (SIGMET T02 real),
   movimento, círculo, ENTIRE FIR, área ilegível, referência do GAMET
+- `tests/test_v31.py` — base de SIG CLD sem AGL/AMSL (GAMETs reais 172100 e
+  180300: `LCA BKN 002-008/010HFT`)
 - `tests/test_v32.py` — `BTN … - …` com hífen (GAMET real 171500/172100)
 - `tests/test_v33.py` — SIGMET referido já terminado (T02 real após 18Z) e
   motivos de fatias que não passam para a vizinha
