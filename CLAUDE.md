@@ -50,11 +50,13 @@ Três pormenores que já causaram erros reais:
   e notas se estiver a menos de `_BOLSA_MAX_KM` (25 km), mesmo sem ser
   contígua (2.0). Mais longe continua a ser um cartão próprio.
 - Uma base de SIG CLD sem AGL nem AMSL (`BKN 002-008/010HFT`) é lida como
-  **AMSL** (3.1): convertida contra o MEF, nunca dá base maior do que a
+  **AMSL** (3.2): convertida contra o MEF, nunca dá base maior do que a
   leitura AGL. Até à 3.0 era descartada em silêncio.
 - Qualificadores seguidos, com ou sem AND (`BTN N3840 AND N4100 E OF W00800`),
   são uma só área (2.3). A janela `HH/HH` pertence à subentrada que vem a
   seguir; uma subentrada sem janela vale para todo o período.
+- `BTN` aceita `AND` ou hífen entre os limites (`BTN N4050 - N3840`, 3.1).
+  Uma subentrada sem área legível herda a da anterior.
 
 Não há sectores fixos. A app teve 3 sectores (Norte/Centro/Sul) até à v17;
 foram substituídos por geometria dinâmica porque marcavam um sector
@@ -145,7 +147,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-497 testes. Devem passar a 100%.
+517 testes. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -171,6 +173,7 @@ python3 -m pytest
   movimento, círculo, ENTIRE FIR, área ilegível, referência do GAMET
 - `tests/test_v31.py` — base de SIG CLD sem AGL/AMSL (GAMETs reais 172100 e
   180300: `LCA BKN 002-008/010HFT`)
+- `tests/test_v32.py` — `BTN … - …` com hífen (GAMET real 171500/172100)
 - `tests/conftest.py` — extrai o motor da app sem executar a UI. Os imports
   vêm da própria app (nunca de uma lista fixa — escondia imports em falta)
 

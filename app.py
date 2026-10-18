@@ -29,7 +29,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "3.1"
+APP_VERSION = "3.2"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -1081,13 +1081,18 @@ def _clean_poly(geom):
     # Outro tipo (LineString, Point, etc.) — sem área válida
     return Polygon()
 
+# Separador dos dois limites de um BTN: "AND" ou hífen, com ou sem espaços.
+_BTN_SEP = r"(?:\s+AND\s+|\s*-\s*)"
+
 def extract_polygon(line):
     poly = FIR_POLYGON
     geo_found = False
     partes = []  # cada qualificador isolado, recortado à FIR
 
-    # BTN N\d\d\d\d AND N\d\d\d\d  (latitude)
-    for m in re.findall(r"BTN\s+N(\d{2})(\d{2})\s+AND\s+N(\d{2})(\d{2})", line):
+    # BTN N\d\d\d\d AND N\d\d\d\d  (latitude). O IPMA também escreve
+    # "BTN N4050 - N3840" (GAMET real 171500/172100): até à 3.0 o hífen não
+    # era lido e a subentrada herdava a área da anterior.
+    for m in re.findall(r"BTN\s+N(\d{2})(\d{2})" + _BTN_SEP + r"N(\d{2})(\d{2})", line):
         geo_found = True
         lat1 = int(m[0]) + int(m[1]) / 60
         lat2 = int(m[2]) + int(m[3]) / 60
@@ -1095,7 +1100,7 @@ def extract_polygon(line):
         poly = _clean_poly(poly.intersection(partes[-1]))
 
     # BTN W/E\d\d\d\d AND W/E\d\d\d\d  (longitude)
-    for m in re.findall(r"BTN\s+([WE])(\d{2,3})(\d{2})\s+AND\s+([WE])(\d{2,3})(\d{2})", line):
+    for m in re.findall(r"BTN\s+([WE])(\d{2,3})(\d{2})" + _BTN_SEP + r"([WE])(\d{2,3})(\d{2})", line):
         geo_found = True
         lon1 = _lon(m[1], m[2], m[0])
         lon2 = _lon(m[4], m[5], m[3])
@@ -1455,7 +1460,7 @@ def parse_gamet(text):
     # ia para outra linha e o BTN perdia-se (a faixa passava a ir de costa a
     # costa). Por isso o AND entre eles é opcional.
     secn1 = re.sub(
-        r"((?:[NSEW]\s+OF\s+[NWE]\d{4,5}|BTN\s+[NWE]\d{4,5}\s+AND\s+[NWE]\d{4,5}))"
+        r"((?:[NSEW]\s+OF\s+[NWE]\d{4,5}|BTN\s+[NWE]\d{4,5}" + _BTN_SEP + r"[NWE]\d{4,5}))"
         r"\s+(?:AND\s+)?(?=(?:[NSEW]\s+OF\s+[NWE]\d{4,5}|BTN\s+[NWE]\d{4,5}))",
         r"\1 && ", secn1)
     secn1 = re.sub(r"(\w)\s+(N\s+OF\s+N\d{4})", r"\1\n\2", secn1)
