@@ -1094,7 +1094,16 @@ def _clean_poly(geom):
 # Separador dos dois limites de um BTN: "AND" ou hífen, com ou sem espaços.
 _BTN_SEP = r"(?:\s+AND\s+|\s*-\s*)"
 
+# Qualificador diagonal ("NW OF W00800", "SE OF N3840", 3.4). A app não o
+# interpreta: a linha inteira fica sem área legível (→ toda a FIR + aviso em
+# parse_gamet; → toda a área em area_sigmet). Até à 3.3 os padrões cardinais
+# não tinham fronteira de palavra e "NW OF W00800" era lido como
+# "W OF W00800".
+_DIAGONAL_RE = re.compile(r"\b[NSEW]{2,3}\s+OF\b")
+
 def extract_polygon(line):
+    if _DIAGONAL_RE.search(line):
+        return None
     poly = FIR_POLYGON
     geo_found = False
     partes = []  # cada qualificador isolado, recortado à FIR
@@ -1118,28 +1127,28 @@ def extract_polygon(line):
         poly = _clean_poly(poly.intersection(partes[-1]))
 
     # N OF N\d\d\d\d
-    for m in re.findall(r"N\s+OF\s+N(\d{2})(\d{2})", line):
+    for m in re.findall(r"\bN\s+OF\s+N(\d{2})(\d{2})", line):
         geo_found = True
         lat = int(m[0]) + int(m[1]) / 60
         partes.append(_clean_poly(FIR_POLYGON.intersection(box(FIR_MINX, lat, FIR_MAXX, FIR_MAXY))))
         poly = _clean_poly(poly.intersection(partes[-1]))
 
     # S OF N\d\d\d\d
-    for m in re.findall(r"S\s+OF\s+N(\d{2})(\d{2})", line):
+    for m in re.findall(r"\bS\s+OF\s+N(\d{2})(\d{2})", line):
         geo_found = True
         lat = int(m[0]) + int(m[1]) / 60
         partes.append(_clean_poly(FIR_POLYGON.intersection(box(FIR_MINX, FIR_MINY, FIR_MAXX, lat))))
         poly = _clean_poly(poly.intersection(partes[-1]))
 
     # E OF W/E\d\d\d\d
-    for m in re.findall(r"E\s+OF\s+([WE])(\d{2,3})(\d{2})", line):
+    for m in re.findall(r"\bE\s+OF\s+([WE])(\d{2,3})(\d{2})", line):
         geo_found = True
         lon = _lon(m[1], m[2], m[0])
         partes.append(_clean_poly(FIR_POLYGON.intersection(box(lon, FIR_MINY, FIR_MAXX, FIR_MAXY))))
         poly = _clean_poly(poly.intersection(partes[-1]))
 
     # W OF W/E\d\d\d\d
-    for m in re.findall(r"W\s+OF\s+([WE])(\d{2,3})(\d{2})", line):
+    for m in re.findall(r"\bW\s+OF\s+([WE])(\d{2,3})(\d{2})", line):
         geo_found = True
         lon = _lon(m[1], m[2], m[0])
         partes.append(_clean_poly(FIR_POLYGON.intersection(box(FIR_MINX, FIR_MINY, lon, FIR_MAXY))))
@@ -1492,8 +1501,8 @@ def parse_gamet(text, sem_area=None):
     # ia para outra linha e o BTN perdia-se (a faixa passava a ir de costa a
     # costa). Por isso o AND entre eles é opcional.
     secn1 = re.sub(
-        r"((?:[NSEW]\s+OF\s+[NWE]\d{4,5}|BTN\s+[NWE]\d{4,5}" + _BTN_SEP + r"[NWE]\d{4,5}))"
-        r"\s+(?:AND\s+)?(?=(?:[NSEW]\s+OF\s+[NWE]\d{4,5}|BTN\s+[NWE]\d{4,5}))",
+        r"((?:\b[NSEW]\s+OF\s+[NWE]\d{4,5}|BTN\s+[NWE]\d{4,5}" + _BTN_SEP + r"[NWE]\d{4,5}))"
+        r"\s+(?:AND\s+)?(?=(?:\b[NSEW]\s+OF\s+[NWE]\d{4,5}|BTN\s+[NWE]\d{4,5}))",
         r"\1 && ", secn1)
     secn1 = re.sub(r"(\w)\s+(N\s+OF\s+N\d{4})", r"\1\n\2", secn1)
     secn1 = re.sub(r"(\w)\s+(S\s+OF\s+N\d{4})", r"\1\n\2", secn1)
@@ -1586,7 +1595,7 @@ def parse_gamet(text, sem_area=None):
         new_poly = extract_polygon(line)
         if new_poly is not None:
             current_polygon = new_poly
-        elif _AREA_INI_RE.match(content):
+        elif _AREA_INI_RE.match(content) or _DIAGONAL_RE.search(content):
             # Subentrada com ar de qualificador geográfico, mas sem área
             # legível (3.4, pedido do Duarte): vale para toda a FIR e fica
             # registada para o aviso. Até à 3.3 herdava em silêncio a área

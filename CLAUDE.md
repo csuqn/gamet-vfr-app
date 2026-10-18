@@ -69,9 +69,14 @@ Três pormenores que já causaram erros reais:
   Linhas sem qualificador continuam a usar a área da subentrada; um
   qualificador fora da FIR continua a descartar o fenómeno; MAR/LAN/COT
   sozinhos não são área. Só conta o que já é início de linha (quebra injectada
-  antes de `N OF N…`/`BTN N…` etc., ou quebra do texto): injectar quebras antes
-  de `SW OF`/`NW OF` tornava a leitura mais permissiva enquanto
-  `extract_polygon` não tiver `\b` (lê `SW OF` como `W OF`).
+  antes de `N OF N…`/`BTN N…` etc., ou quebra do texto) — não se injectam
+  quebras novas.
+- **Diagonais** (`NE/NW/SE/SW OF …`, `_DIAGONAL_RE`) não são interpretadas: a
+  linha onde aparecem, em qualquer posição, fica sem área legível → toda a FIR
+  + aviso; num SIGMET sem `WI`, toda a área. Os cardinais `N/S/E/W OF` exigem
+  fronteira de palavra (em `extract_polygon` e na junção por AND). Até à 3.3
+  `NW OF W00800` era lido como `W OF W00800`. Toda a FIR contém qualquer
+  meia-FIR, por isso nunca é mais permissivo.
 
 Não há sectores fixos. A app teve 3 sectores (Norte/Centro/Sul) até à v17;
 foram substituídos por geometria dinâmica porque marcavam um sector
@@ -173,7 +178,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-560 testes. Devem passar a 100%.
+588 testes. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -204,7 +209,8 @@ python3 -m pytest
   motivos de fatias que não passam para a vizinha
 - `tests/test_v34.py` — subentrada com área ilegível → toda a FIR + aviso
   (GAMET real 171500 com `BTN N4050 ~ N3840`), casos que não mudam, `SW OF`
-  colado na mesma linha (OCNL TS continua NO-GO no NE)
+  colado na mesma linha (OCNL TS continua NO-GO no NE), diagonais `NE/NW/SE/SW OF`
+  (toda a FIR + aviso; SIGMET → toda a área)
 - `tests/conftest.py` — extrai o motor da app sem executar a UI. Os imports
   vêm da própria app (nunca de uma lista fixa — escondia imports em falta)
 

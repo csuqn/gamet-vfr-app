@@ -166,19 +166,106 @@ def test_janela_da_subentrada_ilegivel_e_a_dela(analyse):
     assert _base(r, 200).window == "12–15Z"
 
 
-def test_sw_of_colado_mantem_o_comportamento_do_main(eng, analyse):
+def test_sw_of_colado_na_mesma_linha_toda_a_fir_com_aviso(eng, analyse):
     """
-    Sem quebra antes de "SW OF" (que a app ainda lê como "W OF", por falta de
-    \\b em extract_polygon), a linha continua a ser uma só: E OF W00700 e
-    W OF W00830 dão intersecção vazia → união, e o OCNL TS fica NO-GO no NE.
-    Uma quebra injectada aqui punha o OCNL TS só a W de 8°30' (mais permissivo).
+    "E OF W00700 ISOL TS SW OF W00830 OCNL TS" fica numa só linha (não se
+    injectam quebras antes de diagonais). Até à 3.3 "SW OF" era lido como
+    "W OF": E OF W00700 ∩ W OF W00830 = vazio → união, e a faixa entre 8°30'W
+    e 7°W ficava sem TS. Com a diagonal a linha não tem área legível: ISOL e
+    OCNL TS em toda a FIR, com aviso. O NE continua NO-GO; a faixa do meio
+    passa a NO-GO (mais severo, nunca mais permissivo).
     """
     texto = build_gamet("SECN I SIGWX:E OF W00700 ISOL TS SW OF W00830 OCNL TS")
     r = analyse(texto)
-    assert "OCNL" in r["ts"]
-    for nome in ("Bragança (LPBG)", "Mogadouro (LPMU)", "Cabeço da Vaca (LP66)"):
+    # Uma linha de SIGWX dá um só bloco de TS, com o pior qualificador (como
+    # no main): o ISOL fica absorvido pelo OCNL.
+    assert r["ts"] == {"OCNL"}
+    for b in r["blocks"]:
+        assert b.polygon.symmetric_difference(eng.FIR_POLYGON).area < 1e-6
+    for nome in ("Bragança (LPBG)", "Mogadouro (LPMU)", "Cabeço da Vaca (LP66)",
+                 "Lisboa (LPPT)", "Évora (LPEV)", "Viseu (LPVZ)", "Faro (LPFR)"):
         assert _dec(eng, r["regions"], nome) == "NO-GO", nome
+    (s,) = eng.subentradas_sem_area(texto)
+    assert "SW OF W00830" in s
+
+
+# ---------------------------------------------------------------------
+# Qualificadores diagonais (NE/NW/SE/SW OF): nunca lidos como cardinais
+# ---------------------------------------------------------------------
+
+_DIAGONAIS = [f"{d} OF {c}" for d in ("NE", "NW", "SE", "SW") for c in ("W00800", "N3840")]
+
+
+@pytest.mark.parametrize("qual", _DIAGONAIS)
+def test_diagonal_nao_da_area(eng, qual):
+    assert eng.extract_polygon(f"{qual} LCA BKN 002HFT AGL") is None
+
+
+@pytest.mark.parametrize("qual", _DIAGONAIS)
+def test_diagonal_no_inicio_da_linha_toda_a_fir_com_aviso(eng, analyse, qual):
+    texto = build_gamet(f"SECN I SIG CLD:S OF N3800 LCA BKN 010HFT AGL\n{qual} LCA BKN 002HFT AGL")
+    r = analyse(texto)
+    assert _base(r, 200).polygon.symmetric_difference(eng.FIR_POLYGON).area < 1e-6, qual
+    assert _base(r, 1000).polygon.bounds[3] <= 38.0 + 1e-6
+    (s,) = eng.subentradas_sem_area(texto)
+    assert qual in s
+    avisos = [t for _, t in eng.analisar_gamet(texto, "manual")["avisos"]
+              if "Área não reconhecida" in t]
+    assert len(avisos) == 1 and qual in avisos[0]
+    for nome in ("Porto (LPPR)", "Lisboa (LPPT)", "Bragança (LPBG)", "Faro (LPFR)"):
+        assert _dec(eng, r["regions"], nome) == "NO-GO", (qual, nome)
+
+
+@pytest.mark.parametrize("qual", _DIAGONAIS)
+def test_diagonal_no_inicio_do_campo(eng, analyse, qual):
+    texto = build_gamet(f"SECN I SIG CLD:{qual} LCA BKN 002HFT AGL")
+    assert _base(analyse(texto), 200).polygon.symmetric_difference(eng.FIR_POLYGON).area < 1e-6
+    assert len(eng.subentradas_sem_area(texto)) == 1
+
+
+def test_diagonal_nao_e_juntada_por_and_a_um_cardinal(eng, analyse):
+    """
+    "SE OF N3840" já não contém um "E OF N3840" que a junção por AND veja: a
+    quebra antes de "N OF N4000" mantém-se e a base de 200 ft fica a N de
+    N4000 — que contém a intersecção pretendida (SE OF N3840 ∩ N OF N4000),
+    logo não é mais permissivo. A linha com a diagonal (incluindo a base de
+    1000 ft) fica sem área legível → toda a FIR, com aviso.
+    """
+    texto = build_gamet("SECN I SIG CLD:N OF N3800 LCA BKN 010HFT AGL SE OF N3840 AND "
+                        "N OF N4000 LCA BKN 002HFT AGL")
+    r = analyse(texto)
+    norte = eng._clean_poly(eng.FIR_POLYGON.intersection(
+        eng.box(eng.FIR_MINX, 40.0, eng.FIR_MAXX, eng.FIR_MAXY)))
+    assert _base(r, 200).polygon.symmetric_difference(norte).area < 1e-6
+    assert _base(r, 1000).polygon.symmetric_difference(eng.FIR_POLYGON).area < 1e-6
+    (s,) = eng.subentradas_sem_area(texto)
+    assert "SE OF N3840" in s
+
+
+@pytest.mark.parametrize("corpo,limites", [
+    ("SIG CLD:N OF N3840 AND W OF W00850 LCA BKN 002HFT AGL",
+     dict(miny=38 + 40 / 60, maxx=-(8 + 50 / 60))),
+    ("SIGWX:E OF W00800 LAN ISOL/EMBD TS", dict(minx=-8.0)),
+])
+def test_cardinais_continuam_iguais(eng, analyse, corpo, limites):
+    texto = build_gamet("SECN I " + corpo)
+    (b,) = analyse(texto)["blocks"]
+    minx, miny, maxx, maxy = b.polygon.bounds
+    for k, v in limites.items():
+        assert abs(locals()[k] - v) < 1e-6, (k, locals()[k], v)
     assert eng.subentradas_sem_area(texto) == []
+
+
+def test_sigmet_com_diagonal_e_toda_a_area(eng):
+    sig = ("LPPC SIGMET T05 VALID 181400/181800 LPPT- LPPC LISBOA FIR "
+           "SEV TURB FCST SW OF W00800 SFC/FL080 STNR NC=")
+    geom, desc = eng.area_sigmet(sig)
+    assert geom is None
+    assert "toda a área" in desc
+    # O mesmo SIGMET com cardinal continua a ter área própria
+    geom, _ = eng.area_sigmet(sig.replace("SW OF", "W OF"))
+    assert geom is not None and not geom.is_empty
+    assert geom.bounds[2] < -7.5
 
 
 # ---------------------------------------------------------------------
