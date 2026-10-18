@@ -2700,11 +2700,23 @@ def sigmets_terminados(conhecidos, ref, periodo_gamet=(None, None)):
         if re.search(r"\bCNL\b", b):
             continue
         p = _periodo_boletim(b, ref)
-        if not p or p[0] != "SIGMET":
+        if not p:
+            # Cabeçalho ilegível mas com id de SIGMET: esse id fica por provar
+            if re.match(r"\s*LPPC\s+SIGMET\b", b or "") and sigmet_id(b):
+                por_id[sigmet_id(b)].append(None)
+            continue
+        if p[0] != "SIGMET":
             continue
         _, sid, _, ini, fim = p
         if ini is None or fim is None:
             por_id[sid].append(None)            # ilegível → não se prova nada
+            continue
+        # A numeração recomeça às 00 UTC: o id referido pelo GAMET é o da
+        # numeração do dia em que o GAMET começa. Um boletim de outro dia UTC
+        # não prova nada (ex.: GAMET AMD 180030 a referir "T02" e o único T02
+        # conhecido ser o do dia 17).
+        if ini.date() != g_ini.date():
+            por_id[sid].append(None)
             continue
         if ini < g_fim and g_ini < fim:
             if i in cancelados:

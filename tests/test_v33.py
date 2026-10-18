@@ -138,3 +138,25 @@ def test_cnl_sem_validade_cancela_so_o_boletim_em_vigor(eng):
     assert s == []                                     # T02 de hoje cancelado
     s, _ = eng.active_bulletins([T02_HOJE_TARDE, cnl], datetime(2026, 10, 17, 19, 0, tzinfo=timezone.utc))
     assert s == [T02_HOJE_TARDE]                       # começou depois do CNL — não é o mesmo
+
+
+def test_g6_boletim_com_o_mesmo_id_ilegivel_nao_prova_nada(eng):
+    ilegivel = "LPPC SIGMET T02 VALID 17XX00/171800 LPPT- LPPC LISBOA FIR EMBD TS FCST"
+    r = eng.analisar_gamet(G1521, "ipma", boletins=[], boletins_at=NOITE, agora=NOITE,
+                           boletins_arquivo=[T02, ilegivel])
+    assert {g["decision"] for g in r["regioes"]} == {"NO-GO"}
+    assert r["faixa_sig"] == ("ACTIVO", "NO-GO")
+
+
+def test_h_gamet_depois_da_meia_noite_nao_usa_o_t02_da_vespera(eng):
+    g = build_gamet("SECN I SFC VIS: N OF N4100 5000M BR", validity="180030/180300", sigmet="T02")
+    t02_17 = T02.replace("171400/171800", "172045/180045")
+    agora = datetime(2026, 10, 18, 1, 0, tzinfo=timezone.utc)
+    r = eng.analisar_gamet(g, "ipma", boletins=[], boletins_at=agora, agora=agora,
+                           boletins_arquivo=[t02_17])
+    assert {x["decision"] for x in r["regioes"]} == {"NO-GO"}
+    # Mas um GAMET que começou no dia 17 e refere o T02 do dia 17 já expirado: deixa de contar
+    g = build_gamet("SECN I SFC VIS: N OF N4100 5000M BR", validity="172100/180300", sigmet="T02")
+    r = eng.analisar_gamet(g, "ipma", boletins=[], boletins_at=agora, agora=agora,
+                           boletins_arquivo=[t02_17])
+    assert "NO-GO" not in {x["decision"] for x in r["regioes"]}
