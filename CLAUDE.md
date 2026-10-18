@@ -52,6 +52,9 @@ Três pormenores que já causaram erros reais:
 - Qualificadores seguidos, com ou sem AND (`BTN N3840 AND N4100 E OF W00800`),
   são uma só área (2.3). A janela `HH/HH` pertence à subentrada que vem a
   seguir; uma subentrada sem janela vale para todo o período.
+- Uma fatia pequena (< 1,5%) só se funde numa vizinha da mesma decisão se os
+  motivos dela já estiverem na vizinha (3.2); senão fica cartão próprio. Antes,
+  os motivos da fatia passavam para a região inteira.
 - `BTN` aceita `AND` ou hífen entre os limites (`BTN N4050 - N3840`, 3.1).
   Uma subentrada sem área legível herda a da anterior.
 
@@ -85,6 +88,7 @@ definir `FIR_POLYGON` — não entram na decisão.
 | VA (cinzas vulcânicas) | NO-GO |
 | SIGMET activo com área legível (página do IPMA / arquivo) | NO-GO na área + 10 NM, estendida pelo MOV (desde a 3.0) |
 | SIGMET sem área legível, ENTIRE FIR, ou só o identificador no GAMET | NO-GO em toda a área |
+| SIGMET referido no GAMET que se sabe terminado (expirou / CNL) | não conta; aviso (desde a 3.2). Estado desconhecido → toda a área |
 
 TURB e ICE severos forçam NO-GO desde a v23: a maioria dos ultraleves não
 tem sistemas de degelo nem margem estrutural para turbulência severa.
@@ -103,6 +107,10 @@ Continua a ser **toda a área** quando: a área não é legível, há `ENTIRE FI
 ou `LINE`, o `MOV` não tem direcção/velocidade legível, ou o GAMET refere um
 SIGMET cujo texto completo não está disponível (ex.: GAMET colado à mão).
 Os níveis (`TOP FL340`, `SFC/FL080`) ainda não restringem a decisão.
+Desde a 3.2 (decisão do Duarte), um SIGMET referido em `SIGMET APPLICABLE`
+que se **sabe** terminado — validade acabada ou `CNL SIGMET <id>` na página do
+IPMA ou nos boletins arquivados das últimas 24 h (`sigmets_terminados`) —
+deixa de contar, com aviso. Se o estado não se souber, conta em toda a área.
 
 Desde a 1.4 a app também lê os SIGMET/AIRMET da página do IPMA (a mesma
 que traz o GAMET; `extract_bulletins_from_html`, `active_bulletins`), para
@@ -144,7 +152,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-503 testes. Devem passar a 100%.
+509 testes. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -169,6 +177,8 @@ python3 -m pytest
 - `tests/test_v30.py` — SIGMET só na sua área + 10 NM (SIGMET T02 real),
   movimento, círculo, ENTIRE FIR, área ilegível, referência do GAMET
 - `tests/test_v32.py` — `BTN … - …` com hífen (GAMET real 171500/172100)
+- `tests/test_v33.py` — SIGMET referido já terminado (T02 real após 18Z) e
+  motivos de fatias que não passam para a vizinha
 - `tests/conftest.py` — extrai o motor da app sem executar a UI. Os imports
   vêm da própria app (nunca de uma lista fixa — escondia imports em falta)
 

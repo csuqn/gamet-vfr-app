@@ -55,9 +55,19 @@ def _md(txt):
 # (analisar_gamet, em app.py). Aqui só se desenha o resultado.
 # ---------------------------------------------------------------------
 def analisar(texto, fonte, boletins=None, boletins_at=None, boletins_fonte="",
-             indice=None, entrada=None):
+             indice=None, entrada=None, boletins_arquivo=None):
     return M.analisar_gamet(texto, fonte, boletins, boletins_at, boletins_fonte,
-                            indice, entrada)
+                            indice, entrada, boletins_arquivo=boletins_arquivo)
+
+
+def _boletins_arquivo_recentes():
+    """SIGMETs arquivados nas últimas 24 h (incl. expirados), para saber se um
+    SIGMET referido no GAMET já terminou. Sem arquivo → None."""
+    try:
+        ok, idx = M.fetch_arquivo_indice()
+        return M.boletins_arquivados(idx, datetime.now(timezone.utc)) if ok else None
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def obter_gamet_actual():
@@ -66,13 +76,15 @@ def obter_gamet_actual():
     if ok:
         return dict(texto=res, fonte="ipma",
                     boletins=M.extract_bulletins_from_html(M._IPMA_LAST["raw"]),
-                    boletins_at=M._IPMA_LAST["at"], boletins_fonte="página do IPMA", erro=None)
+                    boletins_at=M._IPMA_LAST["at"], boletins_fonte="página do IPMA", erro=None,
+                    arquivo=_boletins_arquivo_recentes())
     pagina = M.extract_bulletins_from_html(M._IPMA_LAST["sem_gamet"])
     txt, info, arq = M.gamet_de_recurso(M.fetch_arquivo_indice, M.fetch_arquivo)
     if txt:
         return dict(texto=txt, fonte="arquivo_recurso", boletins=arq + [b for b in pagina if b not in arq],
                     boletins_at=datetime.now(timezone.utc),
-                    boletins_fonte="página do IPMA + arquivo" if pagina else "arquivo", erro=res)
+                    boletins_fonte="página do IPMA + arquivo" if pagina else "arquivo", erro=res,
+                    arquivo=arq)
     return dict(texto="", fonte=None, boletins=None, boletins_at=None, boletins_fonte="",
                 erro=f"{res}\n\nArquivo: {info}.")
 
@@ -268,7 +280,8 @@ async def pagina():
             return
         caixa.value = g["texto"]
         desenhar(await run.cpu_bound(analisar, g["texto"], g["fonte"], g["boletins"],
-                                     g["boletins_at"], g["boletins_fonte"]))
+                                     g["boletins_at"], g["boletins_fonte"], None, None,
+                                     g.get("arquivo")))
 
     ui.button("Recarregar GAMET", icon="refresh", on_click=carregar_actual).classes("w-full").props("flat no-caps")
     await ui.context.client.connected()

@@ -29,7 +29,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "3.1"
+APP_VERSION = "3.2"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -401,6 +401,16 @@ with _c_ctrl:
     @st.cache_data(ttl=300, show_spinner=False)
     def _indice_arquivo():
         return fetch_arquivo_indice()
+
+    def _boletins_arquivo_recentes(agora):
+        """SIGMETs arquivados nas últimas 24 h (incl. expirados) — servem para
+        saber se um SIGMET referido no GAMET já terminou. Sem arquivo → None.
+        (Chamada só depois de o motor estar definido.)"""
+        try:
+            ok, idx = _indice_arquivo()
+        except Exception:  # noqa: BLE001
+            return None
+        return boletins_arquivados(idx, agora) if ok else None
 
 
     with st.expander("📚 Arquivo de GAMETs"):
@@ -2263,6 +2273,9 @@ def _merge_slivers(regions, min_area_frac=0.015):
                 tuple(r["turb"]), tuple(r["ice"]),
                 tuple(r["mt_obsc"]), tuple(r["va"]))
 
+    def _motivos(r):
+        return {_BASE_REASON_RE.sub("BASE #ft", m) for m in r.get("reasons", [])}
+
     def _bolsa_irma(a, b):
         # Mesmo grupo de compute_dynamic_regions (mesma decisão, mesmos
         # motivos e mesmas anotações) e a menos de _BOLSA_MAX_KM: é a mesma
@@ -2285,9 +2298,14 @@ def _merge_slivers(regions, min_area_frac=0.015):
         # 1ª escolha: mesma decisão e mesmas causas
         if not candidatos:
             candidatos = [g for g in grandes if _assinatura(g) == _assinatura(peq)]
-        # 2ª escolha: mesma decisão (motivos podem diferir, decisão não)
+        # 2ª escolha: mesma decisão e motivos que JÁ incluem os da região
+        # pequena. Até à 3.1 bastava a mesma decisão, e os motivos da fatia
+        # (ex.: TS numa faixa a sul) passavam para toda a região vizinha —
+        # Alqueidão aparecia com "TS ISOL/EMBD" de uma zona a 100 km.
+        # Sem vizinha assim, a região pequena fica como cartão próprio.
         if not candidatos:
-            candidatos = [g for g in grandes if g["decision"] == peq["decision"]]
+            candidatos = [g for g in grandes if g["decision"] == peq["decision"]
+                          and _motivos(peq) <= _motivos(g)]
         if not candidatos:
             orfas.append(peq)   # única com esta decisão — preservar
             continue
@@ -2617,7 +2635,42 @@ def ids_sigmet_aplicavel(sigmet_text):
     return ids
 
 
-def blocos_sigmet(sigmets, has_sigmet, sigmet_text, ref=None):
+def _fim_sigmet(texto, ref):
+    """Fim da validade de um boletim (ou None se ilegível)."""
+    m = re.search(r"VALID\s+(\d{2})(\d{2})(\d{2})/(\d{2})(\d{2})(\d{2})", texto or "")
+    if not m:
+        return None
+    g = [int(x) for x in m.groups()]
+    ini = _build_utc_date(g[0], g[1], g[2], ref)
+    fim = _build_utc_date(g[3], g[4], g[5], ini) if ini else None
+    if ini and fim and fim <= ini:
+        fim += timedelta(days=1)
+    return fim
+
+
+def sigmets_terminados(conhecidos, ref):
+    """
+    {identificador: hora} dos SIGMETs que se SABE que já não estão em vigor
+    em `ref`: validade terminada, ou cancelados por um "CNL SIGMET <id>".
+    Só entra o que se consegue provar — o resto é tratado como desconhecido.
+    """
+    out = {}
+    for b in conhecidos or []:
+        for c in re.finditer(r"\bCNL\s+SIGMET\s+(\S+)", b):
+            out[c.group(1)] = "cancelado"
+    for b in conhecidos or []:
+        if re.search(r"\bCNL\s+SIGMET\b", b):
+            continue
+        sid = sigmet_id(b)
+        if not sid or not re.match(r"\s*LPPC\s+SIGMET\b", b):
+            continue
+        fim = _fim_sigmet(b, ref)
+        if fim is not None and fim <= ref and sid not in out:
+            out[sid] = f"expirou às {fim:%H%MZ}"
+    return out
+
+
+def blocos_sigmet(sigmets, has_sigmet, sigmet_text, ref=None, conhecidos=None):
     """
     MetBlocks "SIGMET" para compute_dynamic_regions, e a descrição de cada um.
     sigmets: textos completos em vigor. has_sigmet/sigmet_text: o campo
@@ -2644,6 +2697,18 @@ def blocos_sigmet(sigmets, has_sigmet, sigmet_text, ref=None):
             descr.append(f"SIGMET {rot}: NO-GO na sua área ({d})")
     if has_sigmet:
         ids = ids_sigmet_aplicavel(sigmet_text)
+        # (3.2, decisão do Duarte) Um SIGMET referido no GAMET que já se
+        # sabe terminado — expirou ou foi cancelado — deixa de contar. Se o
+        # estado for desconhecido, continua a contar em toda a área.
+        terminados = sigmets_terminados(conhecidos, ref or datetime.now(timezone.utc)) if ids else {}
+        for i in ids or []:
+            if i not in disponiveis and i in terminados:
+                descr.append(f"SIGMET {i} referido no GAMET já não está em vigor "
+                             f"({terminados[i]}) — não conta para a decisão")
+        if ids:
+            ids = [i for i in ids if i in disponiveis or i not in terminados]
+            if not ids:
+                return blocos, descr
         if not ids or any(i not in disponiveis for i in ids):
             blocos.append(MetBlock("SIGMET", FIR_POLYGON,
                                    f"{sigmet_text[:40]} (GAMET, sem área) — toda a área"))
@@ -3108,7 +3173,8 @@ def generate_pdf(regions, gamet_text, fzlvl_min, qnh_min, validity_label) -> byt
 # Avisos: lista de (tipo, texto em markdown), tipo ∈ erro/aviso/info/ok.
 
 def analisar_gamet(texto, fonte="manual", boletins=None, boletins_at=None,
-                   boletins_fonte="", indice=None, entrada=None, agora=None):
+                   boletins_fonte="", indice=None, entrada=None, agora=None,
+                   boletins_arquivo=None):
     agora = agora or datetime.now(timezone.utc)
     entrada = entrada or {}
     r = {"texto": texto, "avisos": [], "validity_label": "",
@@ -3168,7 +3234,10 @@ def analisar_gamet(texto, fonte="manual", boletins=None, boletins_at=None,
         verificado = True
         onde = "durante a validade deste GAMET (arquivo)"
 
-    sblocos, sdescr = blocos_sigmet(sig, has_sigmet, sigmet_text, agora)
+    conhecidos = None
+    if fonte in ("ipma", "arquivo_recurso") and boletins is not None:
+        conhecidos = list(boletins) + list(boletins_arquivo or [])
+    sblocos, sdescr = blocos_sigmet(sig, has_sigmet, sigmet_text, agora, conhecidos)
     regioes = compute_dynamic_regions(blocks + sblocos)
 
     if sig:
@@ -3196,15 +3265,21 @@ def analisar_gamet(texto, fonte="manual", boletins=None, boletins_at=None,
 
     if has_sigmet:
         coberto = not any("GAMET, sem área" in b.value for b in sblocos)
-        av.append(("erro",
-                   f"🚨 **SIGMET APLICÁVEL A ESTE GAMET ({sigmet_text}).** "
-                   + ("A área vem do SIGMET completo, acima. " if coberto else
-                      "Sem o texto completo do SIGMET, a decisão foi forçada a NO-GO em "
-                      "toda a área. ")
-                   + "Consulta o SIGMET completo antes de voar; esta app não o substitui."))
+        terminado = [d for d in sdescr if "já não está em vigor" in d]
+        if terminado and coberto and not sig:
+            av.append(("aviso",
+                       f"⚠️ **O GAMET refere o SIGMET {sigmet_text}, que já não está em vigor.** "
+                       + " ".join(terminado) + ". Confirma no IPMA que não há outro SIGMET."))
+        else:
+            av.append(("erro",
+                       f"🚨 **SIGMET APLICÁVEL A ESTE GAMET ({sigmet_text}).** "
+                       + ("A área vem do SIGMET completo, acima. " if coberto else
+                          "Sem o texto completo do SIGMET, a decisão foi forçada a NO-GO em "
+                          "toda a área. ")
+                       + "Consulta o SIGMET completo antes de voar; esta app não o substitui."))
 
     # A faixa nunca diz NIL se os SIGMETs não foram verificados
-    if has_sigmet or sig:
+    if sig or any(b.phenomenon == "SIGMET" for b in sblocos):
         r["faixa_sig"] = ("ACTIVO", "NO-GO")
     elif verificado:
         r["faixa_sig"] = ("NIL", "GO")
@@ -3406,6 +3481,7 @@ if st.session_state.get("_active_gamet_text"):
         indice=st.session_state.get("arquivo_indice"),
         entrada=st.session_state.get("arquivo_entrada"),
         agora=_agora,
+        boletins_arquivo=_boletins_arquivo_recentes(_agora) if _carregado else None,
     )
     validity_label, start_dt = _r["validity_label"], _r["ini"]
     dynamic_regions = _r["regioes"]
