@@ -223,23 +223,56 @@ def test_diagonal_no_inicio_do_campo(eng, analyse, qual):
     assert len(eng.subentradas_sem_area(texto)) == 1
 
 
-def test_diagonal_nao_e_juntada_por_and_a_um_cardinal(eng, analyse):
+def test_diagonal_juntada_por_and_ao_cardinal_toda_a_fir(eng, analyse):
     """
-    "SE OF N3840" já não contém um "E OF N3840" que a junção por AND veja: a
-    quebra antes de "N OF N4000" mantém-se e a base de 200 ft fica a N de
-    N4000 — que contém a intersecção pretendida (SE OF N3840 ∩ N OF N4000),
-    logo não é mais permissivo. A linha com a diagonal (incluindo a base de
-    1000 ft) fica sem área legível → toda a FIR, com aviso.
+    "SE OF N3840 AND N OF N4000" é uma só área: a junção por AND aceita as
+    diagonais, por isso não há quebra antes de "N OF N4000" e a linha inteira
+    (com a diagonal) fica sem área legível → toda a FIR + aviso, para as duas
+    bases. Em 9c86865 a quebra ficava e a base de 200 ft ficava só a N de
+    N4000; com outros arranjos (ver o teste seguinte) isso era mais
+    permissivo do que o main. Toda a FIR é a leitura conservadora.
     """
     texto = build_gamet("SECN I SIG CLD:N OF N3800 LCA BKN 010HFT AGL SE OF N3840 AND "
                         "N OF N4000 LCA BKN 002HFT AGL")
     r = analyse(texto)
-    norte = eng._clean_poly(eng.FIR_POLYGON.intersection(
-        eng.box(eng.FIR_MINX, 40.0, eng.FIR_MAXX, eng.FIR_MAXY)))
-    assert _base(r, 200).polygon.symmetric_difference(norte).area < 1e-6
+    assert _base(r, 200).polygon.symmetric_difference(eng.FIR_POLYGON).area < 1e-6
     assert _base(r, 1000).polygon.symmetric_difference(eng.FIR_POLYGON).area < 1e-6
     (s,) = eng.subentradas_sem_area(texto)
-    assert "SE OF N3840" in s
+    assert "SE OF N3840 AND N OF N4000" in s
+
+
+def test_btn_diagonal_and_cardinal_nunca_mais_permissivo(eng, analyse):
+    """
+    Fuzz do revisor: no main, "SW OF" era lido como "W OF", a intersecção com
+    N OF N3840 dava vazio e a união punha o ISOL TS em toda a faixa (Faro, Beja
+    e Évora MARGINAL). Em 9c86865 a quebra antes de "N OF N3840" deixava o TS
+    só a N de N3840 (GO no Sul). Agora a linha fica junta → toda a FIR + aviso.
+    """
+    texto = build_gamet("SECN I SIGWX: BTN N3700 - N3840 SW OF W00800 AND N OF N3840 ISOL TS")
+    r = analyse(texto)
+    (b,) = [b for b in r["blocks"] if b.phenomenon == "TS"]
+    assert b.polygon.symmetric_difference(eng.FIR_POLYGON).area < 1e-6
+    for nome in ("Faro (LPFR)", "Beja (LPBJ)", "Évora (LPEV)"):
+        assert _dec(eng, r["regions"], nome) in ("MARGINAL", "NO-GO"), nome
+    (s,) = eng.subentradas_sem_area(texto)
+    assert "SW OF W00800" in s
+
+
+@pytest.mark.parametrize("corpo", [
+    "SIGWX:SW OF W00800 BTN N3700 AND N3840 ISOL TS",       # diagonal + BTN
+    "SIGWX:SW OF W00800 BTN N3700 - N3840 ISOL TS",
+    "SIGWX:SW OF W00800 N OF N3840 ISOL TS",                # cardinal sem AND
+    "SIGWX:NE OF W00800 S OF N3900 ISOL TS",
+    "SIGWX:E OF W00800 - NE OF W00800 AND W OF W00830 ISOL TS",
+    "SIGWX:N OF N3840 SW OF W00800 AND E OF W00800 ISOL TS",
+])
+def test_diagonal_nunca_e_partida_do_cardinal_seguinte(eng, analyse, corpo):
+    """A quebra antes de N/S/E/W OF ou BTN não separa a diagonal do resto."""
+    texto = build_gamet("SECN I " + corpo)
+    r = analyse(texto)
+    (b,) = [b for b in r["blocks"] if b.phenomenon == "TS"]
+    assert b.polygon.symmetric_difference(eng.FIR_POLYGON).area < 1e-6, corpo
+    assert len(eng.subentradas_sem_area(texto)) == 1
 
 
 @pytest.mark.parametrize("corpo,limites", [

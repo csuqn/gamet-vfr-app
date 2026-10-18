@@ -74,7 +74,9 @@ Três pormenores que já causaram erros reais:
 - **Diagonais** (`NE/NW/SE/SW OF …`, `_DIAGONAL_RE`) não são interpretadas: a
   linha onde aparecem, em qualquer posição, fica sem área legível → toda a FIR
   + aviso; num SIGMET sem `WI`, toda a área. Os cardinais `N/S/E/W OF` exigem
-  fronteira de palavra (em `extract_polygon` e na junção por AND). Até à 3.3
+  fronteira de palavra (em `extract_polygon`). A junção por AND aceita
+  diagonais (`[NSEW]{1,3} OF`), para a quebra antes do cardinal seguinte não
+  separar a diagonal do resto da área. Até à 3.3
   `NW OF W00800` era lido como `W OF W00800`. Toda a FIR contém qualquer
   meia-FIR, por isso nunca é mais permissivo.
 
@@ -178,7 +180,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-588 testes. Devem passar a 100%.
+595 testes. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**

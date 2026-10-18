@@ -1500,9 +1500,13 @@ def parse_gamet(text, sem_area=None):
     # GAMET real de 16-out-2026) também são uma só área: até à 2.2 o segundo
     # ia para outra linha e o BTN perdia-se (a faixa passava a ir de costa a
     # costa). Por isso o AND entre eles é opcional.
+    # As diagonais ("SW OF W00800", 3.4) também entram na junção: sem isso a
+    # quebra antes do cardinal seguinte ("… SW OF W00800 AND N OF N3840 …")
+    # deixava o fenómeno só com a área do cardinal (mais permissivo). Juntas,
+    # a linha tem uma diagonal → toda a FIR + aviso.
     secn1 = re.sub(
-        r"((?:\b[NSEW]\s+OF\s+[NWE]\d{4,5}|BTN\s+[NWE]\d{4,5}" + _BTN_SEP + r"[NWE]\d{4,5}))"
-        r"\s+(?:AND\s+)?(?=(?:\b[NSEW]\s+OF\s+[NWE]\d{4,5}|BTN\s+[NWE]\d{4,5}))",
+        r"((?:\b[NSEW]{1,3}\s+OF\s+[NWE]\d{4,5}|BTN\s+[NWE]\d{4,5}" + _BTN_SEP + r"[NWE]\d{4,5}))"
+        r"\s+(?:AND\s+)?(?=(?:\b[NSEW]{1,3}\s+OF\s+[NWE]\d{4,5}|BTN\s+[NWE]\d{4,5}))",
         r"\1 && ", secn1)
     secn1 = re.sub(r"(\w)\s+(N\s+OF\s+N\d{4})", r"\1\n\2", secn1)
     secn1 = re.sub(r"(\w)\s+(S\s+OF\s+N\d{4})", r"\1\n\2", secn1)
