@@ -111,6 +111,11 @@ Desde a 3.2 (decisão do Duarte), um SIGMET referido em `SIGMET APPLICABLE`
 que se **sabe** terminado — validade acabada ou `CNL SIGMET <id>` na página do
 IPMA ou nos boletins arquivados das últimas 24 h (`sigmets_terminados`) —
 deixa de contar, com aviso. Se o estado não se souber, conta em toda a área.
+A numeração dos SIGMET recomeça todos os dias: só contam os boletins com
+esse id cuja validade se sobrepõe à do GAMET, e todos têm de estar
+terminados. Um CNL só cancela o boletim concreto (mesmo id **e** validade;
+sem validade, o que estava em vigor no início do CNL — `_boletins_cancelados`,
+também usado por `active_bulletins`).
 
 Desde a 1.4 a app também lê os SIGMET/AIRMET da página do IPMA (a mesma
 que traz o GAMET; `extract_bulletins_from_html`, `active_bulletins`), para
@@ -152,7 +157,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-509 testes. Devem passar a 100%.
+514 testes. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**

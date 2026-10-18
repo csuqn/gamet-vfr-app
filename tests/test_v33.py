@@ -87,3 +87,54 @@ def test_motivos_de_uma_fatia_nao_passam_para_a_vizinha(eng):
     assert any(any(m.startswith("TS") for m in x["reasons"]) for x in r["regioes"])
     area = sum(x["polygon"].area for x in r["regioes"])
     assert abs(area / eng.FIR_POLYGON.area - 1) < 0.01
+
+
+# ---------------------------------------------------------------------
+# Casos do revisor (18-out-2026): a numeração dos SIGMET recomeça todos os
+# dias — um T02 (ou um CNL do T02) de ontem não diz nada sobre o T02 de hoje.
+# ---------------------------------------------------------------------
+T02_ONTEM = T02.replace("171400/171800", "161400/161800")
+T02_HOJE_TARDE = T02.replace("171400/171800", "171700/172100")
+NOITE = datetime(2026, 10, 17, 19, 0, tzinfo=timezone.utc)
+
+
+def test_a1_t02_de_ontem_expirado_nao_prova_nada(eng):
+    r = eng.analisar_gamet(G1521, "ipma", boletins=[], boletins_at=NOITE, agora=NOITE,
+                           boletins_arquivo=[T02_ONTEM])
+    assert {g["decision"] for g in r["regioes"]} == {"NO-GO"}
+    assert r["faixa_sig"] == ("ACTIVO", "NO-GO")
+
+
+def test_a2_t02_de_hoje_em_vigor_no_arquivo_continua_a_contar(eng):
+    r = eng.analisar_gamet(G1521, "ipma", boletins=[], boletins_at=NOITE, agora=NOITE,
+                           boletins_arquivo=[T02_ONTEM, T02_HOJE_TARDE])
+    assert r["faixa_sig"] == ("ACTIVO", "NO-GO")
+    assert _ad(eng, r, "Bragança (LPBG)")["decision"] == "NO-GO"
+    assert not any("já não está em vigor" in m for _, m in r["avisos"])
+
+
+def test_b1_cnl_de_ontem_nao_cancela_o_t02_de_hoje(eng):
+    cnl_ontem = "LPPC SIGMET T03 VALID 161600/161800 LPPT- LPPC LISBOA FIR CNL SIGMET T02 161400/161800"
+    s, _ = eng.active_bulletins([T02_HOJE_TARDE, cnl_ontem], NOITE)
+    assert s == [T02_HOJE_TARDE]
+    r = eng.analisar_gamet(G1521, "arquivo_recurso", boletins=[T02_HOJE_TARDE, cnl_ontem],
+                           boletins_at=NOITE, agora=NOITE)
+    assert r["faixa_sig"] == ("ACTIVO", "NO-GO")
+    assert _ad(eng, r, "Bragança (LPBG)")["decision"] == "NO-GO"
+
+
+def test_f_t02_de_hoje_ainda_por_comecar_continua_a_contar(eng):
+    cedo = datetime(2026, 10, 17, 16, 0, tzinfo=timezone.utc)
+    r = eng.analisar_gamet(G1521, "ipma", boletins=[T02_HOJE_TARDE], boletins_at=cedo, agora=cedo,
+                           boletins_arquivo=[T02_ONTEM])
+    assert {g["decision"] for g in r["regioes"]} == {"NO-GO"}
+    assert r["faixa_sig"] == ("ACTIVO", "NO-GO")
+
+
+def test_cnl_sem_validade_cancela_so_o_boletim_em_vigor(eng):
+    cnl = "LPPC SIGMET T03 VALID 171600/171800 LPPT- LPPC LISBOA FIR CNL SIGMET T02"
+    agora = datetime(2026, 10, 17, 16, 30, tzinfo=timezone.utc)
+    s, _ = eng.active_bulletins([T02, T02_ONTEM, cnl], agora)
+    assert s == []                                     # T02 de hoje cancelado
+    s, _ = eng.active_bulletins([T02_HOJE_TARDE, cnl], datetime(2026, 10, 17, 19, 0, tzinfo=timezone.utc))
+    assert s == [T02_HOJE_TARDE]                       # começou depois do CNL — não é o mesmo
