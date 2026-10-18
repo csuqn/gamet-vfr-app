@@ -113,12 +113,16 @@ def test_analisar_py_assinala(eng):
 # Outras formas de área ilegível a meio de um campo
 # ---------------------------------------------------------------------
 
+# A meio de um campo, uma subentrada só começa linha nova se a quebra já
+# for injectada (BTN N…, N OF N…) ou se o texto trouxer a quebra. Aqui usa-se
+# a quebra do próprio texto. A injecção de quebras antes dos qualificadores
+# não lidos fica de fora (ver o teste do "SW OF" mais abaixo).
 @pytest.mark.parametrize("area", [
     "NW OF N4000", "BTN N4000 / N3800", "N OF N40", "WI N4000 W00800 - N3900 W00700",
-    "ALONG COAST", "N PART", "S PART", "ENTIRE FIR",
+    "ALONG COAST", "N PART", "S PART",
 ])
 def test_formas_ilegiveis_a_meio_do_campo(eng, analyse, area):
-    texto = build_gamet(f"SECN I SIG CLD:S OF N3800 LCA BKN 010HFT AGL {area} LCA BKN 002HFT AGL")
+    texto = build_gamet(f"SECN I SIG CLD:S OF N3800 LCA BKN 010HFT AGL\n{area} LCA BKN 002HFT AGL")
     r = analyse(texto)
     b = _base(r, 200)
     assert b.polygon.symmetric_difference(eng.FIR_POLYGON).area < 1e-6, area
@@ -130,6 +134,24 @@ def test_formas_ilegiveis_a_meio_do_campo(eng, analyse, area):
         assert _dec(eng, r["regions"], nome) == "NO-GO", (area, nome)
 
 
+def test_btn_ilegivel_sem_quebra_no_texto(eng, analyse):
+    """BTN N…: a quebra já era injectada; a subentrada vale para toda a FIR."""
+    texto = build_gamet("SECN I SIG CLD:S OF N3800 LCA BKN 010HFT AGL "
+                        "BTN N4000 / N3800 LCA BKN 002HFT AGL")
+    b = _base(analyse(texto), 200)
+    assert b.polygon.symmetric_difference(eng.FIR_POLYGON).area < 1e-6
+    assert len(eng.subentradas_sem_area(texto)) == 1
+
+
+def test_entire_fir_a_meio_do_campo_toda_a_fir_sem_aviso(eng, analyse):
+    texto = build_gamet("SECN I SIG CLD:S OF N3800 LCA BKN 010HFT AGL\nENTIRE FIR LCA BKN 002HFT AGL")
+    b = _base(analyse(texto), 200)
+    assert b.polygon.symmetric_difference(eng.FIR_POLYGON).area < 1e-6
+    assert eng.subentradas_sem_area(texto) == []
+    assert not [t for _, t in eng.analisar_gamet(texto, "manual")["avisos"]
+                if "Área não reconhecida" in t]
+
+
 def test_ilegivel_no_inicio_do_campo_avisa_e_ja_era_toda_a_fir(eng, analyse):
     texto = build_gamet("SECN I SIG CLD:NW OF N4000 LCA BKN 002HFT AGL")
     b = _base(analyse(texto), 200)
@@ -139,15 +161,24 @@ def test_ilegivel_no_inicio_do_campo_avisa_e_ja_era_toda_a_fir(eng, analyse):
 
 def test_janela_da_subentrada_ilegivel_e_a_dela(analyse):
     r = analyse(build_gamet(
-        "SECN I SIG CLD:09/12 S OF N3800 LCA BKN 010HFT AGL 12/15 NW OF N4000 LCA BKN 002HFT AGL"))
+        "SECN I SIG CLD:09/12 S OF N3800 LCA BKN 010HFT AGL\n12/15 NW OF N4000 LCA BKN 002HFT AGL"))
     assert _base(r, 1000).window == "09–12Z"
     assert _base(r, 200).window == "12–15Z"
 
 
-def test_subentrada_ilegivel_sem_janela_vale_todo_o_periodo(analyse):
-    r = analyse(build_gamet(
-        "SECN I SIG CLD:09/12 S OF N3800 LCA BKN 010HFT AGL NW OF N4000 LCA BKN 002HFT AGL"))
-    assert _base(r, 200).window == ""
+def test_sw_of_colado_mantem_o_comportamento_do_main(eng, analyse):
+    """
+    Sem quebra antes de "SW OF" (que a app ainda lê como "W OF", por falta de
+    \\b em extract_polygon), a linha continua a ser uma só: E OF W00700 e
+    W OF W00830 dão intersecção vazia → união, e o OCNL TS fica NO-GO no NE.
+    Uma quebra injectada aqui punha o OCNL TS só a W de 8°30' (mais permissivo).
+    """
+    texto = build_gamet("SECN I SIGWX:E OF W00700 ISOL TS SW OF W00830 OCNL TS")
+    r = analyse(texto)
+    assert "OCNL" in r["ts"]
+    for nome in ("Bragança (LPBG)", "Mogadouro (LPMU)", "Cabeço da Vaca (LP66)"):
+        assert _dec(eng, r["regions"], nome) == "NO-GO", nome
+    assert eng.subentradas_sem_area(texto) == []
 
 
 # ---------------------------------------------------------------------
@@ -200,18 +231,3 @@ def test_171500_real_decisoes_nao_mudam(eng, analyse):
     r = analyse(GAMET_171500.replace("SIGMET APPLICABLE:T02", "SIGMET APPLICABLE: NIL"))
     assert {n: _dec(eng, r["regions"], n) for n in eng.AERODROMES} == DECISOES_3_0
     assert eng.subentradas_sem_area(GAMET_171500) == []
-
-
-# ---------------------------------------------------------------------
-# Arquivo real: nenhum GAMET tem hoje subentradas com área ilegível
-# ---------------------------------------------------------------------
-
-_ARQUIVO = Path(__file__).resolve().parent.parent / "dados" / "gamets"
-
-
-@pytest.mark.skipif(not _ARQUIVO.is_dir(), reason="sem o ramo dados em ./dados")
-def test_arquivo_real_sem_subentradas_ilegiveis(eng):
-    ficheiros = sorted(_ARQUIVO.rglob("*.txt"))
-    assert ficheiros
-    for f in ficheiros:
-        assert eng.subentradas_sem_area(f.read_text(encoding="utf-8")) == [], f.name

@@ -62,12 +62,16 @@ Três pormenores que já causaram erros reais:
 - `BTN` aceita `AND` ou hífen entre os limites (`BTN N4050 - N3840`, 3.1).
 - Uma subentrada que começa (depois da janela `HH/HH`) por algo com ar de
   qualificador geográfico (`N/NW… OF`, `BTN`, `WI`, `ALONG`, `N PART`,
-  `ENTIRE FIR`, coordenada) mas de que `extract_polygon` não tira área vale
-  para **toda a FIR** e gera um aviso "Área não reconhecida"
-  (`subentradas_sem_area`; também no `scripts/analisar.py`) — até à 3.3 herdava
-  em silêncio a área da anterior (pedido do Duarte, 3.4). Linhas sem
-  qualificador continuam a usar a área da subentrada; um qualificador fora
-  da FIR continua a descartar o fenómeno; MAR/LAN/COT sozinhos não são área.
+  coordenada) mas de que `extract_polygon` não tira área vale para **toda a
+  FIR** e gera um aviso "Área não reconhecida" (`subentradas_sem_area`; também
+  no `scripts/analisar.py`) — até à 3.3 herdava em silêncio a área da anterior
+  (pedido do Duarte, 3.4). `ENTIRE FIR` também dá toda a FIR, sem aviso.
+  Linhas sem qualificador continuam a usar a área da subentrada; um
+  qualificador fora da FIR continua a descartar o fenómeno; MAR/LAN/COT
+  sozinhos não são área. Só conta o que já é início de linha (quebra injectada
+  antes de `N OF N…`/`BTN N…` etc., ou quebra do texto): injectar quebras antes
+  de `SW OF`/`NW OF` tornava a leitura mais permissiva enquanto
+  `extract_polygon` não tiver `\b` (lê `SW OF` como `W OF`).
 
 Não há sectores fixos. A app teve 3 sectores (Norte/Centro/Sul) até à v17;
 foram substituídos por geometria dinâmica porque marcavam um sector
@@ -199,7 +203,8 @@ python3 -m pytest
 - `tests/test_v33.py` — SIGMET referido já terminado (T02 real após 18Z) e
   motivos de fatias que não passam para a vizinha
 - `tests/test_v34.py` — subentrada com área ilegível → toda a FIR + aviso
-  (GAMET real 171500 com `BTN N4050 ~ N3840`), casos que não mudam, arquivo real
+  (GAMET real 171500 com `BTN N4050 ~ N3840`), casos que não mudam, `SW OF`
+  colado na mesma linha (OCNL TS continua NO-GO no NE)
 - `tests/conftest.py` — extrai o motor da app sem executar a UI. Os imports
   vêm da própria app (nunca de uma lista fixa — escondia imports em falta)
 

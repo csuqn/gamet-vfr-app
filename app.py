@@ -1433,9 +1433,12 @@ _CLD_BASE_RE = re.compile(
 # Início de subentrada com ar de qualificador geográfico (3.4), lido ou não
 # por extract_polygon: "N OF", "NW OF", "N PART", "BTN", "WI", "ALONG",
 # "ENTIRE FIR" ou uma coordenada. MAR/LAN/COT sozinhos não são área.
-_AREA_KW = (r"(?:(?:[NS][EW]?|[EW])\s+(?:OF|PART)\b|BTN\b|WI\b|ALONG\b|ENTIRE\s+FIR\b"
-            r"|[NS]\d{4}\b|[WE]\d{5}\b)")
-_AREA_INI_RE = re.compile(r"(?:\d{2}/\d{2}\s+)?" + _AREA_KW)
+# "ENTIRE FIR" é toda a FIR, lida — não gera aviso.
+_AREA_INI_RE = re.compile(
+    r"(?:\d{2}/\d{2}\s+)?"
+    r"(?:(?:[NS][EW]?|[EW])\s+(?:OF|PART)\b|BTN\b|WI\b|ALONG\b|ENTIRE\s+FIR\b"
+    r"|[NS]\d{4}\b|[WE]\d{5}\b)")
+_ENTIRE_FIR_RE = re.compile(r"(?:\d{2}/\d{2}\s+)?ENTIRE\s+FIR\b")
 
 
 def subentradas_sem_area(text):
@@ -1497,11 +1500,6 @@ def parse_gamet(text, sem_area=None):
     secn1 = re.sub(r"(\w)\s+(E\s+OF\s+[WE]\d{4,5})", r"\1\n\2", secn1)
     secn1 = re.sub(r"(\w)\s+(W\s+OF\s+[WE]\d{4,5})", r"\1\n\2", secn1)
     secn1 = re.sub(r"(\w)\s+(BTN\s+N\d{4})", r"\1\n\2", secn1)
-    # Qualificadores que a app não lê ("NW OF …", "N OF N40", "WI …",
-    # "ALONG …", "N PART", "ENTIRE FIR") também abrem subentrada (3.4): até à
-    # 3.3 ficavam colados à linha anterior e herdavam a área dela.
-    secn1 = re.sub(r"(\w)[ \t]+((?:[NS][EW]?|[EW])\s+(?:OF|PART)\b|BTN\b|WI\s|ALONG\b"
-                   r"|ENTIRE\s+FIR\b)", r"\1\n\2", secn1)
     secn1 = secn1.replace(" && ", " AND ")
 
     lines = [l.strip() for l in secn1.splitlines() if l.strip()]
@@ -1511,8 +1509,7 @@ def parse_gamet(text, sem_area=None):
     # deixava-a no fim da linha anterior e a subentrada herdava a janela da
     # anterior (GAMET real 160900/161500: CB das 12–15Z mostrado como
     # "apenas 09–11Z"). Passa para o início da linha a que pertence.
-    # Também vale para os qualificadores que a app não lê (3.4).
-    _qual_ini = re.compile(r"(?:[NSEW]\s+OF\s+[NWE]\d{4,5}|BTN\s+[NWE]\d{4,5}|" + _AREA_KW + ")")
+    _qual_ini = re.compile(r"(?:[NSEW]\s+OF\s+[NWE]\d{4,5}|BTN\s+[NWE]\d{4,5})")
     for i in range(len(lines) - 1):
         mj = re.search(r"(?<=[\s:])(\d{2}/\d{2})$", lines[i])
         if mj and _qual_ini.match(lines[i + 1]):
@@ -1595,9 +1592,10 @@ def parse_gamet(text, sem_area=None):
             # registada para o aviso. Até à 3.3 herdava em silêncio a área
             # da subentrada anterior (GAMET real 171500 antes da 3.1: a base
             # da costa W ia para uma tira junto ao Guadiana). Linhas sem
-            # qualificador nenhum continuam a usar a área da subentrada.
+            # qualificador nenhum continuam a usar a área da subentrada;
+            # "ENTIRE FIR" é toda a FIR lida e não gera aviso.
             current_polygon = FIR_POLYGON
-            if sem_area is not None:
+            if sem_area is not None and not _ENTIRE_FIR_RE.match(content):
                 sem_area.append(f"{campo_txt}: {content}")
 
         poly = current_polygon
