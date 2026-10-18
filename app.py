@@ -29,7 +29,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "3.0"
+APP_VERSION = "3.1"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -1407,7 +1407,12 @@ _CLD_BASE_RE = re.compile(
     r"(?<![\dA-Z])(?P<base>SFC|\d{3,5})"
     r"(?:-\d{3,5})?"                      # fim do intervalo de bases
     r"(?:/(?:\d{3,5}|XXX))?"              # topo
-    r"\s*(?P<unit>HFT|FT)\s+(?P<ref>AGL|AMSL)\b"
+    r"\s*(?P<unit>HFT|FT)\b"
+    # Referência opcional (3.1): o IPMA escreveu "LCA BKN 002-008/010HFT"
+    # sem AGL nem AMSL (GAMETs reais 172100 e 180300). Exigi-la fazia a base
+    # de 200 ft desaparecer em silêncio (MARGINAL em vez de NO-GO). Sem
+    # referência a base é lida como AMSL — ver o estado "CLD".
+    r"(?:\s+(?P<ref>AGL|AMSL)\b)?"
 )
 
 def parse_gamet(text):
@@ -1683,6 +1688,9 @@ def parse_gamet(text):
                     base_ft = int(base_txt) * 100
                 else:
                     base_ft = int(base_txt)
+                # Sem AGL/AMSL (3.1) → AMSL, a leitura conservadora: a
+                # conversão contra o MEF dá sempre uma base AGL igual ou
+                # menor do que lê-la como AGL (o MEF é > 0 em toda a FIR).
                 fen = "BASE_AGL" if ref == "AGL" else "BASE_AMSL"
                 blocks.append(MetBlock(fen, poly, base_ft, qualifier, surface=surface, window=window))
 
