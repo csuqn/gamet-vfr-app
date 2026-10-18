@@ -29,7 +29,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "3.2"
+APP_VERSION = "3.3"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -401,6 +401,16 @@ with _c_ctrl:
     @st.cache_data(ttl=300, show_spinner=False)
     def _indice_arquivo():
         return fetch_arquivo_indice()
+
+    def _boletins_arquivo_recentes(agora):
+        """SIGMETs arquivados nas últimas 24 h (incl. expirados) — servem para
+        saber se um SIGMET referido no GAMET já terminou. Sem arquivo → None.
+        (Chamada só depois de o motor estar definido.)"""
+        try:
+            ok, idx = _indice_arquivo()
+        except Exception:  # noqa: BLE001
+            return None
+        return boletins_arquivados(idx, agora) if ok else None
 
 
     with st.expander("📚 Arquivo de GAMETs"):
@@ -1413,7 +1423,7 @@ _CLD_BASE_RE = re.compile(
     r"(?:-\d{3,5})?"                      # fim do intervalo de bases
     r"(?:/(?:\d{3,5}|XXX))?"              # topo
     r"\s*(?P<unit>HFT|FT)\b"
-    # Referência opcional (3.1): o IPMA escreveu "LCA BKN 002-008/010HFT"
+    # Referência opcional (3.3): o IPMA escreveu "LCA BKN 002-008/010HFT"
     # sem AGL nem AMSL (GAMETs reais 172100 e 180300). Exigi-la fazia a base
     # de 200 ft desaparecer em silêncio (MARGINAL em vez de NO-GO). Sem
     # referência a base é lida como AGL — ver o estado "CLD".
@@ -1693,7 +1703,7 @@ def parse_gamet(text):
                     base_ft = int(base_txt) * 100
                 else:
                     base_ft = int(base_txt)
-                # Sem AGL/AMSL (3.2) → AGL (decisão do Duarte, 18-out-2026):
+                # Sem AGL/AMSL (3.3) → AGL (decisão do Duarte, 18-out-2026):
                 # em SIG CLD o IPMA dá as bases em AGL, e a falta da
                 # referência é quase certamente uma gralha. Só "AMSL"
                 # explícito é convertido contra o relevo.
@@ -2272,6 +2282,9 @@ def _merge_slivers(regions, min_area_frac=0.015):
                 tuple(r["turb"]), tuple(r["ice"]),
                 tuple(r["mt_obsc"]), tuple(r["va"]))
 
+    def _motivos(r):
+        return {_BASE_REASON_RE.sub("BASE #ft", m) for m in r.get("reasons", [])}
+
     def _bolsa_irma(a, b):
         # Mesmo grupo de compute_dynamic_regions (mesma decisão, mesmos
         # motivos e mesmas anotações) e a menos de _BOLSA_MAX_KM: é a mesma
@@ -2294,9 +2307,14 @@ def _merge_slivers(regions, min_area_frac=0.015):
         # 1ª escolha: mesma decisão e mesmas causas
         if not candidatos:
             candidatos = [g for g in grandes if _assinatura(g) == _assinatura(peq)]
-        # 2ª escolha: mesma decisão (motivos podem diferir, decisão não)
+        # 2ª escolha: mesma decisão e motivos que JÁ incluem os da região
+        # pequena. Até à 3.1 bastava a mesma decisão, e os motivos da fatia
+        # (ex.: TS numa faixa a sul) passavam para toda a região vizinha —
+        # Alqueidão aparecia com "TS ISOL/EMBD" de uma zona a 100 km.
+        # Sem vizinha assim, a região pequena fica como cartão próprio.
         if not candidatos:
-            candidatos = [g for g in grandes if g["decision"] == peq["decision"]]
+            candidatos = [g for g in grandes if g["decision"] == peq["decision"]
+                          and _motivos(peq) <= _motivos(g)]
         if not candidatos:
             orfas.append(peq)   # única com esta decisão — preservar
             continue
@@ -2320,34 +2338,67 @@ def _merge_slivers(regions, min_area_frac=0.015):
     return grandes + orfas
 
 
+_CAB_BOLETIM_RE = re.compile(
+    r"LPPC\s+(SIGMET|AIRMET)\s+(\S+)\s+VALID\s+(\d{2})(\d{2})(\d{2})/(\d{2})(\d{2})(\d{2})")
+_CNL_RE = re.compile(r"\bCNL\s+(SIGMET|AIRMET)\s+([^\s=]+)(?:\s+(\d{6}/\d{6}))?")
+
+
+def _periodo_boletim(b, ref):
+    """(tipo, id, 'ddhhmm/ddhhmm', ini, fim) de um boletim, ou None."""
+    cab = _CAB_BOLETIM_RE.match(b or "")
+    if not cab:
+        return None
+    d1, h1, m1, d2, h2, m2 = (int(cab.group(i)) for i in range(3, 9))
+    ini = _build_utc_date(d1, h1, m1, ref)
+    fim = _build_utc_date(d2, h2, m2, ini) if ini else None
+    if fim is not None and ini is not None and fim <= ini:
+        fim = fim + timedelta(days=1)
+    val = f"{cab.group(3)}{cab.group(4)}{cab.group(5)}/{cab.group(6)}{cab.group(7)}{cab.group(8)}"
+    return cab.group(1), cab.group(2), val, ini, fim
+
+
+def _boletins_cancelados(bulletins, ref):
+    """
+    Índices dos boletins cancelados por um "CNL SIGMET <id> <validade>". O
+    cancelamento tem de bater no boletim CONCRETO: mesmo tipo, mesmo id e a
+    mesma validade (a numeração recomeça todos os dias — um "CNL SIGMET T02"
+    de ontem não cancela o T02 de hoje). Um CNL sem validade só cancela o
+    boletim com esse id em vigor no início do próprio CNL.
+    """
+    info = [_periodo_boletim(b, ref) for b in bulletins]
+    cancelados = set()
+    for b, pc in zip(bulletins, info):
+        for m in _CNL_RE.finditer(b or ""):
+            tipo, num, val = m.group(1), m.group(2), m.group(3)
+            for j, pj in enumerate(info):
+                if not pj or pj[0] != tipo or pj[1] != num or re.search(r"\bCNL\b", bulletins[j]):
+                    continue
+                if val:
+                    if pj[2] == val:
+                        cancelados.add(j)
+                elif pc and pc[3] and pj[3] and pj[4] and pj[3] <= pc[3] < pj[4]:
+                    cancelados.add(j)
+    return cancelados
+
+
 def active_bulletins(bulletins, now=None):
     """
     A partir dos SIGMET/AIRMET LPPC lidos da página do IPMA, devolve
     (sigmets_activos, airmets_activos): os que estão dentro da validade e
-    não foram cancelados por um "CNL SIGMET n". Os próprios boletins de
+    não foram cancelados (_boletins_cancelados). Os próprios boletins de
     cancelamento nunca contam como activos.
 
     Na dúvida (validade ilegível), o boletim conta como activo — é a
     leitura conservadora.
     """
     now = now or datetime.now(timezone.utc)
-    cancelados = set()
-    for b in bulletins:
-        for m in re.finditer(r"\bCNL\s+(SIGMET|AIRMET)\s+(\S+)", b):
-            cancelados.add((m.group(1), m.group(2)))
+    cancelados = _boletins_cancelados(bulletins, now)
     sigmets, airmets = [], []
-    for b in bulletins:
-        cab = re.match(r"LPPC\s+(SIGMET|AIRMET)\s+(\S+)\s+VALID\s+(\d{2})(\d{2})(\d{2})/(\d{2})(\d{2})(\d{2})", b)
-        if not cab:
+    for i, b in enumerate(bulletins):
+        p = _periodo_boletim(b, now)
+        if not p or re.search(r"\bCNL\s+(SIGMET|AIRMET)\b", b) or i in cancelados:
             continue
-        tipo, num = cab.group(1), cab.group(2)
-        if re.search(r"\bCNL\s+(SIGMET|AIRMET)\b", b) or (tipo, num) in cancelados:
-            continue
-        d1, h1, m1, d2, h2, m2 = (int(cab.group(i)) for i in range(3, 9))
-        ini = _build_utc_date(d1, h1, m1, now)
-        fim = _build_utc_date(d2, h2, m2, ini) if ini else None
-        if fim is not None and ini is not None and fim <= ini:
-            fim = fim + timedelta(days=1)
+        tipo, _, _, ini, fim = p
         activo = (ini is None or fim is None) or (ini <= now < fim)
         if activo:
             (sigmets if tipo == "SIGMET" else airmets).append(b)
@@ -2626,7 +2677,69 @@ def ids_sigmet_aplicavel(sigmet_text):
     return ids
 
 
-def blocos_sigmet(sigmets, has_sigmet, sigmet_text, ref=None):
+def _fim_sigmet(texto, ref):
+    """Fim da validade de um boletim (ou None se ilegível)."""
+    m = re.search(r"VALID\s+(\d{2})(\d{2})(\d{2})/(\d{2})(\d{2})(\d{2})", texto or "")
+    if not m:
+        return None
+    g = [int(x) for x in m.groups()]
+    ini = _build_utc_date(g[0], g[1], g[2], ref)
+    fim = _build_utc_date(g[3], g[4], g[5], ini) if ini else None
+    if ini and fim and fim <= ini:
+        fim += timedelta(days=1)
+    return fim
+
+
+def sigmets_terminados(conhecidos, ref, periodo_gamet=(None, None)):
+    """
+    {identificador: motivo} dos SIGMETs que se PROVA que já não estão em
+    vigor em `ref`. Só contam os boletins com esse id cuja validade se
+    sobrepõe à do GAMET (a numeração recomeça todos os dias: o T02 de ontem
+    não diz nada sobre o T02 de hoje). Um id só é dado como terminado se
+    houver pelo menos um desses boletins e TODOS estiverem expirados ou
+    cancelados — nenhum activo, futuro ou com validade ilegível. Sem
+    validade do GAMET, nada é dado como terminado.
+    """
+    g_ini, g_fim = periodo_gamet
+    if not conhecidos or not g_ini or not g_fim:
+        return {}
+    cancelados = _boletins_cancelados(conhecidos, ref)
+    por_id = defaultdict(list)
+    for i, b in enumerate(conhecidos):
+        if re.search(r"\bCNL\b", b):
+            continue
+        p = _periodo_boletim(b, ref)
+        if not p:
+            # Cabeçalho ilegível mas com id de SIGMET: esse id fica por provar
+            if re.match(r"\s*LPPC\s+SIGMET\b", b or "") and sigmet_id(b):
+                por_id[sigmet_id(b)].append(None)
+            continue
+        if p[0] != "SIGMET":
+            continue
+        _, sid, _, ini, fim = p
+        if ini is None or fim is None:
+            por_id[sid].append(None)            # ilegível → não se prova nada
+            continue
+        # A numeração recomeça às 00 UTC: o id referido pelo GAMET é o da
+        # numeração do dia em que o GAMET começa. Um boletim de outro dia UTC
+        # não prova nada (ex.: GAMET AMD 180030 a referir "T02" e o único T02
+        # conhecido ser o do dia 17).
+        if ini.date() != g_ini.date():
+            por_id[sid].append(None)
+            continue
+        if ini < g_fim and g_ini < fim:
+            if i in cancelados:
+                por_id[sid].append("cancelado")
+            elif fim <= ref:
+                por_id[sid].append(f"expirou às {fim:%H%MZ}")
+            else:
+                por_id[sid].append(None)        # activo ou futuro
+    return {sid: ests[-1] for sid, ests in por_id.items()
+            if ests and all(e is not None for e in ests)}
+
+
+def blocos_sigmet(sigmets, has_sigmet, sigmet_text, ref=None, conhecidos=None,
+                  periodo_gamet=(None, None)):
     """
     MetBlocks "SIGMET" para compute_dynamic_regions, e a descrição de cada um.
     sigmets: textos completos em vigor. has_sigmet/sigmet_text: o campo
@@ -2653,6 +2766,19 @@ def blocos_sigmet(sigmets, has_sigmet, sigmet_text, ref=None):
             descr.append(f"SIGMET {rot}: NO-GO na sua área ({d})")
     if has_sigmet:
         ids = ids_sigmet_aplicavel(sigmet_text)
+        # (3.2, decisão do Duarte) Um SIGMET referido no GAMET que já se
+        # sabe terminado — expirou ou foi cancelado — deixa de contar. Se o
+        # estado for desconhecido, continua a contar em toda a área.
+        terminados = (sigmets_terminados(conhecidos, ref or datetime.now(timezone.utc),
+                                         periodo_gamet) if ids else {})
+        for i in ids or []:
+            if i not in disponiveis and i in terminados:
+                descr.append(f"SIGMET {i} referido no GAMET já não está em vigor "
+                             f"({terminados[i]}) — não conta para a decisão")
+        if ids:
+            ids = [i for i in ids if i in disponiveis or i not in terminados]
+            if not ids:
+                return blocos, descr
         if not ids or any(i not in disponiveis for i in ids):
             blocos.append(MetBlock("SIGMET", FIR_POLYGON,
                                    f"{sigmet_text[:40]} (GAMET, sem área) — toda a área"))
@@ -3117,7 +3243,8 @@ def generate_pdf(regions, gamet_text, fzlvl_min, qnh_min, validity_label) -> byt
 # Avisos: lista de (tipo, texto em markdown), tipo ∈ erro/aviso/info/ok.
 
 def analisar_gamet(texto, fonte="manual", boletins=None, boletins_at=None,
-                   boletins_fonte="", indice=None, entrada=None, agora=None):
+                   boletins_fonte="", indice=None, entrada=None, agora=None,
+                   boletins_arquivo=None):
     agora = agora or datetime.now(timezone.utc)
     entrada = entrada or {}
     r = {"texto": texto, "avisos": [], "validity_label": "",
@@ -3177,7 +3304,11 @@ def analisar_gamet(texto, fonte="manual", boletins=None, boletins_at=None,
         verificado = True
         onde = "durante a validade deste GAMET (arquivo)"
 
-    sblocos, sdescr = blocos_sigmet(sig, has_sigmet, sigmet_text, agora)
+    conhecidos = None
+    if fonte in ("ipma", "arquivo_recurso") and boletins is not None:
+        conhecidos = list(boletins) + list(boletins_arquivo or [])
+    sblocos, sdescr = blocos_sigmet(sig, has_sigmet, sigmet_text, agora, conhecidos,
+                                    (ini, fim))
     regioes = compute_dynamic_regions(blocks + sblocos)
 
     if sig:
@@ -3205,15 +3336,21 @@ def analisar_gamet(texto, fonte="manual", boletins=None, boletins_at=None,
 
     if has_sigmet:
         coberto = not any("GAMET, sem área" in b.value for b in sblocos)
-        av.append(("erro",
-                   f"🚨 **SIGMET APLICÁVEL A ESTE GAMET ({sigmet_text}).** "
-                   + ("A área vem do SIGMET completo, acima. " if coberto else
-                      "Sem o texto completo do SIGMET, a decisão foi forçada a NO-GO em "
-                      "toda a área. ")
-                   + "Consulta o SIGMET completo antes de voar; esta app não o substitui."))
+        terminado = [d for d in sdescr if "já não está em vigor" in d]
+        if terminado and coberto and not sig:
+            av.append(("aviso",
+                       f"⚠️ **O GAMET refere o SIGMET {sigmet_text}, que já não está em vigor.** "
+                       + " ".join(terminado) + ". Confirma no IPMA que não há outro SIGMET."))
+        else:
+            av.append(("erro",
+                       f"🚨 **SIGMET APLICÁVEL A ESTE GAMET ({sigmet_text}).** "
+                       + ("A área vem do SIGMET completo, acima. " if coberto else
+                          "Sem o texto completo do SIGMET, a decisão foi forçada a NO-GO em "
+                          "toda a área. ")
+                       + "Consulta o SIGMET completo antes de voar; esta app não o substitui."))
 
     # A faixa nunca diz NIL se os SIGMETs não foram verificados
-    if has_sigmet or sig:
+    if sig or any(b.phenomenon == "SIGMET" for b in sblocos):
         r["faixa_sig"] = ("ACTIVO", "NO-GO")
     elif verificado:
         r["faixa_sig"] = ("NIL", "GO")
@@ -3415,6 +3552,7 @@ if st.session_state.get("_active_gamet_text"):
         indice=st.session_state.get("arquivo_indice"),
         entrada=st.session_state.get("arquivo_entrada"),
         agora=_agora,
+        boletins_arquivo=_boletins_arquivo_recentes(_agora) if _carregado else None,
     )
     validity_label, start_dt = _r["validity_label"], _r["ini"]
     dynamic_regions = _r["regioes"]

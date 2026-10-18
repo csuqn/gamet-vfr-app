@@ -1,5 +1,5 @@
 """
-3.1 — Base de nuvem em SIG CLD sem referência (AGL/AMSL).
+3.3 — Base de nuvem em SIG CLD sem referência (AGL/AMSL).
 
 Dois GAMETs reais (172100/180300 e 180300/180900) trazem
 "LCA BKN 002-008/010HFT" sem AGL nem AMSL a seguir ao HFT. `_CLD_BASE_RE`
