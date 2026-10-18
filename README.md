@@ -114,7 +114,8 @@ não para planear um voo.
 - 🚨 **SIGMET:** NO-GO na área do SIGMET, com 10 NM de margem (e estendida
   na direcção do movimento, se o SIGMET se desloca). Se a área não for legível,
   ou se o GAMET só indicar o identificador do SIGMET sem o texto completo estar
-  disponível, NO-GO em toda a área. Lê sempre o SIGMET completo.
+  disponível, NO-GO em toda a área. Um SIGMET referido pelo GAMET que já
+  expirou ou foi cancelado deixa de contar (com aviso). Lê sempre o SIGMET completo.
 - ⚠️ **AIRMET:** se existir, é mostrado, mas a app não o interpreta.
 - ⚠️ **Nenhum campo reconhecido:** a app não percebeu o texto. Isto **não**
   significa que o tempo está calmo; confirma o GAMET.
@@ -257,7 +258,7 @@ Algarve não afecta Lisboa.
 
 ## 10. Qualidade e testes
 
-- **503 testes automáticos** cobrem a leitura do texto, a geometria, as
+- **516 testes automáticos** cobrem a leitura do texto, a geometria, as
   decisões, os dados aeronáuticos e a app completa. Cada erro alguma vez
   encontrado tem um teste que impede que volte a aparecer.
 - **Verificação cruzada:** em centenas de GAMETs gerados, a decisão de cada
@@ -277,7 +278,7 @@ Algarve não afecta Lisboa.
 pip install -r requirements.txt -r requirements-dev.txt
 cd nicegui_app && python main.py   # a app principal (NiceGUI), http://localhost:8080
 streamlit run app.py               # a versão de reserva (Streamlit)
-python3 -m pytest                  # os testes (503)
+python3 -m pytest                  # os testes (516)
 ```
 
 | Ficheiro / pasta | Conteúdo |
