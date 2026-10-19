@@ -258,7 +258,7 @@ Algarve não afecta Lisboa.
 
 ## 10. Qualidade e testes
 
-- **739 testes automáticos** cobrem a leitura do texto, a geometria, as
+- **1142 testes automáticos** cobrem a leitura do texto, a geometria, as
   decisões, os dados aeronáuticos e a app completa. Cada erro alguma vez
   encontrado tem um teste que impede que volte a aparecer.
 - **Verificação cruzada:** em centenas de GAMETs gerados, a decisão de cada
@@ -278,7 +278,7 @@ Algarve não afecta Lisboa.
 pip install -r requirements.txt -r requirements-dev.txt
 cd nicegui_app && python main.py   # a app principal (NiceGUI), http://localhost:8080
 streamlit run app.py               # a versão de reserva (Streamlit)
-python3 -m pytest                  # os testes (739)
+python3 -m pytest                  # os testes (1142)
 ```
 
 | Ficheiro / pasta | Conteúdo |

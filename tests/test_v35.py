@@ -220,9 +220,40 @@ def test_sem_cardinal_e_cardinal_com_of_nao_mudam(eng, analyse):
 
 
 def test_diagonal_continua_toda_a_fir(eng, analyse):
-    texto = build_gamet("SECN I SIG CLD:SW OF W00800 S BTN N3720 - N3800 LCA BKN 002HFT AGL")
+    texto = build_gamet("SECN I SIG CLD:SW OF W00800 LCA BKN 002HFT AGL")
     assert _igual(_base(analyse(texto)["blocks"], 200).polygon, eng.FIR_POLYGON)
     assert len(eng.subentradas_sem_area(texto)) == 1
+
+
+def test_qualificador_antes_do_cardinal_nao_se_junta(eng, analyse):
+    """
+    Revisão do d043ce1: "SW OF W00800 S BTN …" (e "E OF W00800 [AND] S BTN …")
+    não se juntam numa só área — a 3.4 partia a linha antes do BTN e o
+    fenómeno ficava em toda a faixa. A quebra vai para antes do cardinal: o
+    fenómeno fica em S OF N3800 (contém a faixa), com aviso; a diagonal,
+    sozinha na sua linha, continua a dar o aviso de área não reconhecida.
+    """
+    texto = build_gamet("SECN I SIG CLD:SW OF W00800 S BTN N3720 - N3800 LCA BKN 002HFT AGL")
+    assert _igual(_base(analyse(texto)["blocks"], 200).polygon, _semiplano(eng, y1=38.0))
+    assert len(eng.subentradas_sem_area(texto)) == 1
+    assert [x[1] for x in eng.subentradas_alargadas(texto)] == ["S OF N3800"]
+    for pre in ("E OF W00800 ", "E OF W00800 AND ", "W OF W00800 ", "BTN W00800 - W00700 "):
+        texto = build_gamet(f"SECN I SIGWX:{pre}S BTN N3720 - N3800 OCNL TS")
+        (b,) = analyse(texto)["blocks"]
+        assert _igual(b.polygon, _semiplano(eng, y1=38.0)), pre
+
+
+def test_mesma_linha_nunca_menor_que_a_leitura_antiga(eng, analyse):
+    """
+    BTN em longitudes não leva quebra: "E OF W00750 E BTN W00900 - W00800"
+    fica numa linha. Na 3.4: E OF W00750 ∩ faixa = vazio → união (inclui a
+    faixa). A leitura nova sozinha (E OF W00750 ∩ E OF W00900) perdia a
+    faixa; a 3.5 une-a com a leitura da 3.4.
+    """
+    texto = build_gamet("SECN I SIGWX:E OF W00750 E BTN W00900 - W00800 OCNL TS")
+    (b,) = analyse(texto)["blocks"]
+    faixa = _semiplano(eng, x0=-9.0, x1=-8.0)
+    assert faixa.difference(b.polygon).area < 1e-9
 
 
 _CASOS_CONTEM = [f"{c} BTN {a} {sep} {b}"

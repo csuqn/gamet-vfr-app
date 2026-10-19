@@ -1172,6 +1172,12 @@ def extract_polygon(line, leituras=None):
     # a linha fica sem área legível, para não ficar só com o resto da linha.
     if len(_CARDINAL_BTN_RE.findall(line)) != cardinais_lidos:
         return None
+    # Nunca menor do que a leitura da 3.4 (a mesma linha sem os cardinais):
+    # com outro qualificador na linha, a intersecção vazia cai para a união
+    # (abaixo), e a união da 3.4 podia ser maior do que a leitura nova.
+    antiga = None
+    if cardinais_lidos:
+        antiga = extract_polygon(re.sub(r"\b[NSEW]\s+(BTN\b)", r"\1", line))
 
     # N OF N\d\d\d\d
     for m in re.findall(r"\bN\s+OF\s+N(\d{2})(\d{2})", line):
@@ -1206,6 +1212,8 @@ def extract_polygon(line, leituras=None):
         # S OF N3800") dão intersecção vazia, o que faria o fenómeno
         # desaparecer. Na dúvida, a leitura conservadora é a união.
         poly = _clean_poly(unary_union([p for p in partes if not p.is_empty]))
+    if antiga is not None:
+        poly = _clean_poly(unary_union([poly, antiga]))
 
     if geo_found and leituras is not None:
         leituras.extend(lidas)
@@ -1566,7 +1574,7 @@ def parse_gamet(text, sem_area=None, alargadas=None):
     # a linha tem uma diagonal → toda a FIR + aviso.
     secn1 = re.sub(
         r"((?:\b[NSEW]{1,3}\s+OF\s+[NWE]\d{4,5}|BTN\s+[NWE]\d{4,5}" + _BTN_SEP + r"[NWE]\d{4,5}))"
-        r"\s+(?:AND\s+)?(?=(?:\b[NSEW]{1,3}\s+OF\s+[NWE]\d{4,5}|(?:\b[NSEW]\s+)?BTN\s+[NWE]\d{4,5}))",
+        r"\s+(?:AND\s+)?(?=(?:\b[NSEW]{1,3}\s+OF\s+[NWE]\d{4,5}|BTN\s+[NWE]\d{4,5}))",
         r"\1 && ", secn1)
     secn1 = re.sub(r"(\w)\s+(N\s+OF\s+N\d{4})", r"\1\n\2", secn1)
     secn1 = re.sub(r"(\w)\s+(S\s+OF\s+N\d{4})", r"\1\n\2", secn1)
@@ -1574,10 +1582,19 @@ def parse_gamet(text, sem_area=None, alargadas=None):
     secn1 = re.sub(r"(\w)\s+(W\s+OF\s+[WE]\d{4,5})", r"\1\n\2", secn1)
     # Um cardinal solto antes do BTN ("S BTN N3720 - N3800", 3.5) fica com
     # ele na mesma linha — até à 3.4 a quebra separava-os, e o "S" (e a
-    # janela "23/03" antes dele) perdia-se.
-    # O (?<!…) impede que o próprio cardinal ("CLD:S BTN …") conte como o
-    # conteúdo antes da quebra.
-    secn1 = re.sub(r"(\w)(?<!\b[NSEW])\s+((?:\b[NSEW]\s+)?BTN\s+N\d{4})", r"\1\n\2", secn1)
+    # janela "23/03" antes dele) perdia-se. A quebra vai para antes do
+    # cardinal; um cardinal que já abre a linha ou o campo ("CLD:S BTN …")
+    # não é separado do BTN. O cardinal solto NUNCA se junta por AND a um
+    # qualificador anterior (a junção acima não o aceita): a 3.4 partia a
+    # linha antes do BTN e a área tem de conter sempre a da 3.4.
+    secn1 = re.sub(r"(\w)\s+([NSEW]\s+BTN\s+N\d{4})", r"\1\n\2", secn1)
+
+    def _quebra_btn(m):
+        if (m.group(1) in "NSEW"
+                and re.search(r"(?:^|[\n:])\s*$", m.string[:m.start(1)])):
+            return m.group(0)               # "CLD:S BTN …": fica junto
+        return f"{m.group(1)}\n{m.group(2)}"
+    secn1 = re.sub(r"(\w)\s+(BTN\s+N\d{4})", _quebra_btn, secn1)
     secn1 = secn1.replace(" && ", " AND ")
 
     lines = [l.strip() for l in secn1.splitlines() if l.strip()]
