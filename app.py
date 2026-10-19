@@ -29,7 +29,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "3.3"
+APP_VERSION = "3.4"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -1094,7 +1094,16 @@ def _clean_poly(geom):
 # Separador dos dois limites de um BTN: "AND" ou hífen, com ou sem espaços.
 _BTN_SEP = r"(?:\s+AND\s+|\s*-\s*)"
 
+# Qualificador diagonal ("NW OF W00800", "SE OF N3840", 3.4). A app não o
+# interpreta: a linha inteira fica sem área legível (→ toda a FIR + aviso em
+# parse_gamet; → toda a área em area_sigmet). Até à 3.3 os padrões cardinais
+# não tinham fronteira de palavra e "NW OF W00800" era lido como
+# "W OF W00800".
+_DIAGONAL_RE = re.compile(r"\b[NSEW]{2,3}\s+OF\b")
+
 def extract_polygon(line):
+    if _DIAGONAL_RE.search(line):
+        return None
     poly = FIR_POLYGON
     geo_found = False
     partes = []  # cada qualificador isolado, recortado à FIR
@@ -1118,28 +1127,28 @@ def extract_polygon(line):
         poly = _clean_poly(poly.intersection(partes[-1]))
 
     # N OF N\d\d\d\d
-    for m in re.findall(r"N\s+OF\s+N(\d{2})(\d{2})", line):
+    for m in re.findall(r"\bN\s+OF\s+N(\d{2})(\d{2})", line):
         geo_found = True
         lat = int(m[0]) + int(m[1]) / 60
         partes.append(_clean_poly(FIR_POLYGON.intersection(box(FIR_MINX, lat, FIR_MAXX, FIR_MAXY))))
         poly = _clean_poly(poly.intersection(partes[-1]))
 
     # S OF N\d\d\d\d
-    for m in re.findall(r"S\s+OF\s+N(\d{2})(\d{2})", line):
+    for m in re.findall(r"\bS\s+OF\s+N(\d{2})(\d{2})", line):
         geo_found = True
         lat = int(m[0]) + int(m[1]) / 60
         partes.append(_clean_poly(FIR_POLYGON.intersection(box(FIR_MINX, FIR_MINY, FIR_MAXX, lat))))
         poly = _clean_poly(poly.intersection(partes[-1]))
 
     # E OF W/E\d\d\d\d
-    for m in re.findall(r"E\s+OF\s+([WE])(\d{2,3})(\d{2})", line):
+    for m in re.findall(r"\bE\s+OF\s+([WE])(\d{2,3})(\d{2})", line):
         geo_found = True
         lon = _lon(m[1], m[2], m[0])
         partes.append(_clean_poly(FIR_POLYGON.intersection(box(lon, FIR_MINY, FIR_MAXX, FIR_MAXY))))
         poly = _clean_poly(poly.intersection(partes[-1]))
 
     # W OF W/E\d\d\d\d
-    for m in re.findall(r"W\s+OF\s+([WE])(\d{2,3})(\d{2})", line):
+    for m in re.findall(r"\bW\s+OF\s+([WE])(\d{2,3})(\d{2})", line):
         geo_found = True
         lon = _lon(m[1], m[2], m[0])
         partes.append(_clean_poly(FIR_POLYGON.intersection(box(FIR_MINX, FIR_MINY, lon, FIR_MAXY))))
@@ -1430,7 +1439,29 @@ _CLD_BASE_RE = re.compile(
     r"(?:\s+(?P<ref>AGL|AMSL)\b)?"
 )
 
-def parse_gamet(text):
+# Início de subentrada com ar de qualificador geográfico (3.4), lido ou não
+# por extract_polygon: "N OF", "NW OF", "N PART", "BTN", "WI", "ALONG",
+# "ENTIRE FIR" ou uma coordenada. MAR/LAN/COT sozinhos não são área.
+# "ENTIRE FIR" é toda a FIR, lida — não gera aviso.
+_AREA_INI_RE = re.compile(
+    r"(?:\d{2}/\d{2}\s+)?"
+    r"(?:(?:[NS][EW]?|[EW])\s+(?:OF|PART)\b|BTN\b|WI\b|ALONG\b|ENTIRE\s+FIR\b"
+    r"|[NS]\d{4}\b|[WE]\d{5}\b)")
+_ENTIRE_FIR_RE = re.compile(r"(?:\d{2}/\d{2}\s+)?ENTIRE\s+FIR\b")
+
+
+def subentradas_sem_area(text):
+    """
+    Subentradas cuja área geográfica não foi reconhecida e que, por isso,
+    foram aplicadas a toda a FIR (3.4). Lista de textos ("CAMPO: conteúdo"),
+    para o aviso do briefing e para o relatório do arquivo.
+    """
+    sem_area = []
+    parse_gamet(text, sem_area)
+    return sem_area
+
+
+def parse_gamet(text, sem_area=None):
 
     text = normalize(text)
 
@@ -1469,9 +1500,13 @@ def parse_gamet(text):
     # GAMET real de 16-out-2026) também são uma só área: até à 2.2 o segundo
     # ia para outra linha e o BTN perdia-se (a faixa passava a ir de costa a
     # costa). Por isso o AND entre eles é opcional.
+    # As diagonais ("SW OF W00800", 3.4) também entram na junção: sem isso a
+    # quebra antes do cardinal seguinte ("… SW OF W00800 AND N OF N3840 …")
+    # deixava o fenómeno só com a área do cardinal (mais permissivo). Juntas,
+    # a linha tem uma diagonal → toda a FIR + aviso.
     secn1 = re.sub(
-        r"((?:[NSEW]\s+OF\s+[NWE]\d{4,5}|BTN\s+[NWE]\d{4,5}" + _BTN_SEP + r"[NWE]\d{4,5}))"
-        r"\s+(?:AND\s+)?(?=(?:[NSEW]\s+OF\s+[NWE]\d{4,5}|BTN\s+[NWE]\d{4,5}))",
+        r"((?:\b[NSEW]{1,3}\s+OF\s+[NWE]\d{4,5}|BTN\s+[NWE]\d{4,5}" + _BTN_SEP + r"[NWE]\d{4,5}))"
+        r"\s+(?:AND\s+)?(?=(?:\b[NSEW]{1,3}\s+OF\s+[NWE]\d{4,5}|BTN\s+[NWE]\d{4,5}))",
         r"\1 && ", secn1)
     secn1 = re.sub(r"(\w)\s+(N\s+OF\s+N\d{4})", r"\1\n\2", secn1)
     secn1 = re.sub(r"(\w)\s+(S\s+OF\s+N\d{4})", r"\1\n\2", secn1)
@@ -1498,6 +1533,7 @@ def parse_gamet(text):
     blocks = []
     current_polygon = FIR_POLYGON
     current_window  = ""
+    campo_txt       = ""
 
     for raw_line in lines:
 
@@ -1545,6 +1581,8 @@ def parse_gamet(text):
                 r"^(SFC\s+VIS\s*:?|SIG\s+VIS\s*:?|VIS\s*:|SIG\s+CLD\s*:?|CLD\s*:|SIGWX\s*:?|TURB\s*:?|ICE\s*:?|MT\s+OBSC\s*:?|SFC\s+WSPD\s*:?|MTW\s*:|VA\s*:?)\s*",
                 "", line
             ).strip()
+            # Nome do campo, para o aviso de área não reconhecida (3.4)
+            campo_txt = line[:len(line) - len(content)].strip().rstrip(":").strip()
         else:
             content = line
 
@@ -1561,6 +1599,17 @@ def parse_gamet(text):
         new_poly = extract_polygon(line)
         if new_poly is not None:
             current_polygon = new_poly
+        elif _AREA_INI_RE.match(content) or _DIAGONAL_RE.search(content):
+            # Subentrada com ar de qualificador geográfico, mas sem área
+            # legível (3.4, pedido do Duarte): vale para toda a FIR e fica
+            # registada para o aviso. Até à 3.3 herdava em silêncio a área
+            # da subentrada anterior (GAMET real 171500 antes da 3.1: a base
+            # da costa W ia para uma tira junto ao Guadiana). Linhas sem
+            # qualificador nenhum continuam a usar a área da subentrada;
+            # "ENTIRE FIR" é toda a FIR lida e não gera aviso.
+            current_polygon = FIR_POLYGON
+            if sem_area is not None and not _ENTIRE_FIR_RE.match(content):
+                sem_area.append(f"{campo_txt}: {content}")
 
         poly = current_polygon
         if poly is not None and poly.is_empty:
@@ -3270,8 +3319,15 @@ def analisar_gamet(texto, fonte="manual", boletins=None, boletins_at=None,
             av.append(("aviso", f"⏱️ {r['validity_label']} — ⚠️ **FORA DO PERÍODO DE "
                                 "VALIDADE**: os dados podem estar desactualizados."))
 
-    blocks, fz, qnh, wind = parse_gamet(texto)
+    sem_area = []
+    blocks, fz, qnh, wind = parse_gamet(texto, sem_area)
     has_sigmet, sigmet_text = extract_sigmet_applicable(texto)
+    # Falhar em voz alta (3.4): a subentrada foi aplicada a toda a FIR porque
+    # a área não foi lida. O texto vai como código; as interfaces escapam-no.
+    for s in sem_area:
+        av.append(("aviso", f"⚠️ **Área não reconhecida** em «`{s.replace('`', '')}`» — "
+                            "aplicada a **toda a FIR**. Confirma no texto do GAMET onde "
+                            "se aplica."))
 
     if fonte == "arquivo_hist":
         av.append(("aviso", "📚 **GAMET DO ARQUIVO — não é o GAMET actual.** Serve para rever "

@@ -10,7 +10,9 @@ parte do texto e a app dar GO em silêncio:
   3. campos da Secção I com conteúdo que não geraram nenhum fenómeno
      (foi assim que "BKN 002/010HFT AGL" passou 31 versões despercebido);
   4. palavras da Secção I fora do vocabulário conhecido (formatos novos);
-  5. regiões cuja decisão não bate com o cálculo directo ponto a ponto
+  5. subentradas com área geográfica não reconhecida, aplicadas a toda a
+     FIR (3.4);
+  6. regiões cuja decisão não bate com o cálculo directo ponto a ponto
      nos 52 aeródromos (o "oráculo" dos testes).
 
 Uso:
@@ -134,6 +136,8 @@ def analisar(eng, texto):
     r["regioes"] = regioes
     if eng.looks_unparseable(texto):
         r["alertas"].append("GAMET considerado ilegível pela app")
+    for s in eng.subentradas_sem_area(texto):
+        r["alertas"].append(f"Área não reconhecida (aplicada a toda a FIR) → {s}")
     for p in campos_sem_fenomeno(secn1, blocos):
         r["alertas"].append(f"Campo sem fenómeno gerado → {p}")
     desc = palavras_desconhecidas(secn1)

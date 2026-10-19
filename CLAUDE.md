@@ -60,7 +60,25 @@ Três pormenores que já causaram erros reais:
   motivos dela já estiverem na vizinha (3.2); senão fica cartão próprio. Antes,
   os motivos da fatia passavam para a região inteira.
 - `BTN` aceita `AND` ou hífen entre os limites (`BTN N4050 - N3840`, 3.1).
-  Uma subentrada sem área legível herda a da anterior.
+- Uma subentrada que começa (depois da janela `HH/HH`) por algo com ar de
+  qualificador geográfico (`N/NW… OF`, `BTN`, `WI`, `ALONG`, `N PART`,
+  coordenada) mas de que `extract_polygon` não tira área vale para **toda a
+  FIR** e gera um aviso "Área não reconhecida" (`subentradas_sem_area`; também
+  no `scripts/analisar.py`) — até à 3.3 herdava em silêncio a área da anterior
+  (pedido do Duarte, 3.4). `ENTIRE FIR` também dá toda a FIR, sem aviso.
+  Linhas sem qualificador continuam a usar a área da subentrada; um
+  qualificador fora da FIR continua a descartar o fenómeno; MAR/LAN/COT
+  sozinhos não são área. Só conta o que já é início de linha (quebra injectada
+  antes de `N OF N…`/`BTN N…` etc., ou quebra do texto) — não se injectam
+  quebras novas.
+- **Diagonais** (`NE/NW/SE/SW OF …`, `_DIAGONAL_RE`) não são interpretadas: a
+  linha onde aparecem, em qualquer posição, fica sem área legível → toda a FIR
+  + aviso; num SIGMET sem `WI`, toda a área. Os cardinais `N/S/E/W OF` exigem
+  fronteira de palavra (em `extract_polygon`). A junção por AND aceita
+  diagonais (`[NSEW]{1,3} OF`), para a quebra antes do cardinal seguinte não
+  separar a diagonal do resto da área. Até à 3.3
+  `NW OF W00800` era lido como `W OF W00800`. Toda a FIR contém qualquer
+  meia-FIR, por isso nunca é mais permissivo.
 
 Não há sectores fixos. A app teve 3 sectores (Norte/Centro/Sul) até à v17;
 foram substituídos por geometria dinâmica porque marcavam um sector
@@ -162,7 +180,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-531 testes. Devem passar a 100%.
+595 testes. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -191,6 +209,10 @@ python3 -m pytest
 - `tests/test_v32.py` — `BTN … - …` com hífen (GAMET real 171500/172100)
 - `tests/test_v33.py` — SIGMET referido já terminado (T02 real após 18Z) e
   motivos de fatias que não passam para a vizinha
+- `tests/test_v34.py` — subentrada com área ilegível → toda a FIR + aviso
+  (GAMET real 171500 com `BTN N4050 ~ N3840`), casos que não mudam, `SW OF`
+  colado na mesma linha (OCNL TS continua NO-GO no NE), diagonais `NE/NW/SE/SW OF`
+  (toda a FIR + aviso; SIGMET → toda a área)
 - `tests/conftest.py` — extrai o motor da app sem executar a UI. Os imports
   vêm da própria app (nunca de uma lista fixa — escondia imports em falta)
 
