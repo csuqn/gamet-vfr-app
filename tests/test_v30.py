@@ -134,10 +134,18 @@ def test_poligono_que_se_cruza_usa_a_envolvente(eng):
     assert laco.area >= bem.area * 0.999
 
 
-def test_coordenada_sem_minutos_cai_para_toda_a_area(eng):
+def test_coordenada_so_com_graus_lida_como_nn00(eng):
+    """
+    Regra mudada na 3.5 (decisão do Duarte, 19-out-2026; SIGMET real U02 com
+    "N3347 W018"): o Anexo 3 permite omitir os minutos — "N39 W007" é
+    39°00'N 7°00'W. Até à 3.4 este SIGMET valia em toda a área. Coordenadas
+    mal formadas continuam a dar toda a área (test_v35).
+    """
     geom, _ = eng.area_sigmet(_s("EMBD TS FCST WI N3900 W00800 - N39 W007 - N4000 W00700 - "
                                  "N4000 W00800 TOP FL300 STNR NC"))
-    assert geom is None
+    quadrado, _ = eng.area_sigmet(_s(f"EMBD TS FCST WI {QUADRADO} TOP FL300 STNR NC"))
+    assert geom is not None
+    assert geom.symmetric_difference(quadrado).area < 1e-9
 
 
 def test_identificador_desconhecido_no_gamet_vale_toda_a_area(eng):

@@ -11,7 +11,8 @@ parte do texto e a app dar GO em silêncio:
      (foi assim que "BKN 002/010HFT AGL" passou 31 versões despercebido);
   4. palavras da Secção I fora do vocabulário conhecido (formatos novos);
   5. subentradas com área geográfica não reconhecida, aplicadas a toda a
-     FIR (3.4);
+     FIR (3.4), e com cardinal solto antes de BTN, lidas de forma alargada
+     (3.5);
   6. regiões cuja decisão não bate com o cálculo directo ponto a ponto
      nos 52 aeródromos (o "oráculo" dos testes).
 
@@ -60,7 +61,7 @@ LCA ISOL OCNL FRQ EMBD GEN MOD SEV HVY ABV BLW TOP TOPS MAR LAN COT
 FEW SCT BKN OVC CB TCU AS AC NS ST SC CU CI FG BR RA DZ SN HZ FU DU SA
 SHRA SHSN TSRA TSGR GR GS FZRA FZDZ FZFG BCFG MIFG PRFG VCFG BLSN DS SS
 INTSF WKN NC STNR MOV KT AGL AMSL HFT FT M KM FL INC IN CLD OBS FCST
-WSPD MTW SQL FC TC MPS
+WSPD MTW SQL FC TC MPS -
 """.split())
 _PADROES = [
     r"N\d{4}", r"W\d{5}", r"FL\d{3}", r"\d{2}/\d{2}", r"\d{3,4}M",
@@ -138,6 +139,8 @@ def analisar(eng, texto):
         r["alertas"].append("GAMET considerado ilegível pela app")
     for s in eng.subentradas_sem_area(texto):
         r["alertas"].append(f"Área não reconhecida (aplicada a toda a FIR) → {s}")
+    for s, leitura in eng.subentradas_alargadas(texto):
+        r["alertas"].append(f"Cardinal solto antes de BTN (área alargada a {leitura}) → {s}")
     for p in campos_sem_fenomeno(secn1, blocos):
         r["alertas"].append(f"Campo sem fenómeno gerado → {p}")
     desc = palavras_desconhecidas(secn1)

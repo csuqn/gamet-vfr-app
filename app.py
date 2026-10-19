@@ -29,7 +29,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "3.4"
+APP_VERSION = "3.5"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -1101,30 +1101,83 @@ _BTN_SEP = r"(?:\s+AND\s+|\s*-\s*)"
 # "W OF W00800".
 _DIAGONAL_RE = re.compile(r"\b[NSEW]{2,3}\s+OF\b")
 
-def extract_polygon(line):
+# Cardinal simples solto imediatamente antes de BTN ("S BTN N3720 - N3800",
+# GAMET real 182100/190300; 3.5, opção (b) do Duarte a 19-out-2026). Lê-se
+# como a UNIÃO da faixa com o semiplano nessa direcção, a partir do limite
+# mais extremo nessa direcção: "S BTN N3720 - N3800" → "S OF N3800" (contém
+# a faixa). Cardinal e BTN de eixos diferentes ("E BTN N3720 - N3800") → a
+# linha fica sem área legível (toda a FIR + aviso), como as diagonais. Até à
+# 3.4 o cardinal era ignorado em silêncio (ficava só a faixa: NO-GO em LP58 e
+# LP78, mas não em Faro, Portimão e Lagos).
+_CARDINAL_BTN_RE = re.compile(r"\b[NSEW]\s+BTN\b")
+
+def extract_polygon(line, leituras=None):
+    """
+    Área dos qualificadores geográficos da linha, recortada à FIR, ou None
+    se não houver nenhum legível. `leituras` (lista, opcional) recebe a
+    leitura de cada cardinal solto antes de BTN (ex.: "S OF N3800"), para o
+    aviso.
+    """
     if _DIAGONAL_RE.search(line):
         return None
     poly = FIR_POLYGON
     geo_found = False
     partes = []  # cada qualificador isolado, recortado à FIR
+    cardinais_lidos = 0
+    lidas = []
 
     # BTN N\d\d\d\d AND N\d\d\d\d  (latitude). O IPMA também escreve
     # "BTN N4050 - N3840" (GAMET real 171500/172100): até à 3.0 o hífen não
     # era lido e a subentrada herdava a área da anterior.
-    for m in re.findall(r"BTN\s+N(\d{2})(\d{2})" + _BTN_SEP + r"N(\d{2})(\d{2})", line):
+    for m in re.finditer(r"(?:\b([NSEW])\s+)?BTN\s+N(\d{2})(\d{2})" + _BTN_SEP + r"N(\d{2})(\d{2})", line):
         geo_found = True
-        lat1 = int(m[0]) + int(m[1]) / 60
-        lat2 = int(m[2]) + int(m[3]) / 60
-        partes.append(_clean_poly(FIR_POLYGON.intersection(box(FIR_MINX, min(lat1, lat2), FIR_MAXX, max(lat1, lat2)))))
+        card, d1, m1, d2, m2 = m.groups()
+        lat1 = int(d1) + int(m1) / 60
+        lat2 = int(d2) + int(m2) / 60
+        lo, hi = min(lat1, lat2), max(lat1, lat2)
+        if card in ("E", "W"):
+            return None                     # eixo trocado → sem área legível
+        if card == "S":
+            lo = FIR_MINY
+            lidas.append("S OF N" + (f"{d1}{m1}" if lat1 >= lat2 else f"{d2}{m2}"))
+        elif card == "N":
+            hi = FIR_MAXY
+            lidas.append("N OF N" + (f"{d1}{m1}" if lat1 <= lat2 else f"{d2}{m2}"))
+        if card:
+            cardinais_lidos += 1
+        partes.append(_clean_poly(FIR_POLYGON.intersection(box(FIR_MINX, lo, FIR_MAXX, hi))))
         poly = _clean_poly(poly.intersection(partes[-1]))
 
     # BTN W/E\d\d\d\d AND W/E\d\d\d\d  (longitude)
-    for m in re.findall(r"BTN\s+([WE])(\d{2,3})(\d{2})" + _BTN_SEP + r"([WE])(\d{2,3})(\d{2})", line):
+    for m in re.finditer(r"(?:\b([NSEW])\s+)?BTN\s+([WE])(\d{2,3})(\d{2})" + _BTN_SEP + r"([WE])(\d{2,3})(\d{2})", line):
         geo_found = True
-        lon1 = _lon(m[1], m[2], m[0])
-        lon2 = _lon(m[4], m[5], m[3])
-        partes.append(_clean_poly(FIR_POLYGON.intersection(box(min(lon1, lon2), FIR_MINY, max(lon1, lon2), FIR_MAXY))))
+        card, h1, d1, m1, h2, d2, m2 = m.groups()
+        lon1 = _lon(d1, m1, h1)
+        lon2 = _lon(d2, m2, h2)
+        lo, hi = min(lon1, lon2), max(lon1, lon2)
+        if card in ("N", "S"):
+            return None                     # eixo trocado → sem área legível
+        if card == "E":
+            hi = FIR_MAXX
+            lidas.append("E OF " + (f"{h1}{d1}{m1}" if lon1 <= lon2 else f"{h2}{d2}{m2}"))
+        elif card == "W":
+            lo = FIR_MINX
+            lidas.append("W OF " + (f"{h1}{d1}{m1}" if lon1 >= lon2 else f"{h2}{d2}{m2}"))
+        if card:
+            cardinais_lidos += 1
+        partes.append(_clean_poly(FIR_POLYGON.intersection(box(lo, FIR_MINY, hi, FIR_MAXY))))
         poly = _clean_poly(poly.intersection(partes[-1]))
+
+    # Um cardinal solto antes de um BTN que não foi lido (limites ilegíveis):
+    # a linha fica sem área legível, para não ficar só com o resto da linha.
+    if len(_CARDINAL_BTN_RE.findall(line)) != cardinais_lidos:
+        return None
+    # Nunca menor do que a leitura da 3.4 (a mesma linha sem os cardinais):
+    # com outro qualificador na linha, a intersecção vazia cai para a união
+    # (abaixo), e a união da 3.4 podia ser maior do que a leitura nova.
+    antiga = None
+    if cardinais_lidos:
+        antiga = extract_polygon(re.sub(r"\b[NSEW]\s+(BTN\b)", r"\1", line))
 
     # N OF N\d\d\d\d
     for m in re.findall(r"\bN\s+OF\s+N(\d{2})(\d{2})", line):
@@ -1159,7 +1212,11 @@ def extract_polygon(line):
         # S OF N3800") dão intersecção vazia, o que faria o fenómeno
         # desaparecer. Na dúvida, a leitura conservadora é a união.
         poly = _clean_poly(unary_union([p for p in partes if not p.is_empty]))
+    if antiga is not None:
+        poly = _clean_poly(unary_union([poly, antiga]))
 
+    if geo_found and leituras is not None:
+        leituras.extend(lidas)
     return poly if geo_found else None
 
 # -------------------------------------------------
@@ -1445,7 +1502,7 @@ _CLD_BASE_RE = re.compile(
 # "ENTIRE FIR" é toda a FIR, lida — não gera aviso.
 _AREA_INI_RE = re.compile(
     r"(?:\d{2}/\d{2}\s+)?"
-    r"(?:(?:[NS][EW]?|[EW])\s+(?:OF|PART)\b|BTN\b|WI\b|ALONG\b|ENTIRE\s+FIR\b"
+    r"(?:(?:[NS][EW]?|[EW])\s+(?:OF|PART)\b|(?:[NSEW]\s+)?BTN\b|WI\b|ALONG\b|ENTIRE\s+FIR\b"
     r"|[NS]\d{4}\b|[WE]\d{5}\b)")
 _ENTIRE_FIR_RE = re.compile(r"(?:\d{2}/\d{2}\s+)?ENTIRE\s+FIR\b")
 
@@ -1461,7 +1518,18 @@ def subentradas_sem_area(text):
     return sem_area
 
 
-def parse_gamet(text, sem_area=None):
+def subentradas_alargadas(text):
+    """
+    Subentradas com um cardinal solto antes de BTN ("S BTN N3720 - N3800"),
+    cuja área foi alargada ao semiplano (3.5). Lista de pares
+    ("CAMPO: conteúdo", leitura), ex.: (…, "S OF N3800").
+    """
+    alargadas = []
+    parse_gamet(text, alargadas=alargadas)
+    return alargadas
+
+
+def parse_gamet(text, sem_area=None, alargadas=None):
 
     text = normalize(text)
 
@@ -1512,7 +1580,21 @@ def parse_gamet(text, sem_area=None):
     secn1 = re.sub(r"(\w)\s+(S\s+OF\s+N\d{4})", r"\1\n\2", secn1)
     secn1 = re.sub(r"(\w)\s+(E\s+OF\s+[WE]\d{4,5})", r"\1\n\2", secn1)
     secn1 = re.sub(r"(\w)\s+(W\s+OF\s+[WE]\d{4,5})", r"\1\n\2", secn1)
-    secn1 = re.sub(r"(\w)\s+(BTN\s+N\d{4})", r"\1\n\2", secn1)
+    # Um cardinal solto antes do BTN ("S BTN N3720 - N3800", 3.5) fica com
+    # ele na mesma linha — até à 3.4 a quebra separava-os, e o "S" (e a
+    # janela "23/03" antes dele) perdia-se. A quebra vai para antes do
+    # cardinal; um cardinal que já abre a linha ou o campo ("CLD:S BTN …")
+    # não é separado do BTN. O cardinal solto NUNCA se junta por AND a um
+    # qualificador anterior (a junção acima não o aceita): a 3.4 partia a
+    # linha antes do BTN e a área tem de conter sempre a da 3.4.
+    secn1 = re.sub(r"(\w)\s+([NSEW]\s+BTN\s+N\d{4})", r"\1\n\2", secn1)
+
+    def _quebra_btn(m):
+        if (m.group(1) in "NSEW"
+                and re.search(r"(?:^|[\n:])\s*$", m.string[:m.start(1)])):
+            return m.group(0)               # "CLD:S BTN …": fica junto
+        return f"{m.group(1)}\n{m.group(2)}"
+    secn1 = re.sub(r"(\w)\s+(BTN\s+N\d{4})", _quebra_btn, secn1)
     secn1 = secn1.replace(" && ", " AND ")
 
     lines = [l.strip() for l in secn1.splitlines() if l.strip()]
@@ -1522,7 +1604,7 @@ def parse_gamet(text, sem_area=None):
     # deixava-a no fim da linha anterior e a subentrada herdava a janela da
     # anterior (GAMET real 160900/161500: CB das 12–15Z mostrado como
     # "apenas 09–11Z"). Passa para o início da linha a que pertence.
-    _qual_ini = re.compile(r"(?:[NSEW]\s+OF\s+[NWE]\d{4,5}|BTN\s+[NWE]\d{4,5})")
+    _qual_ini = re.compile(r"(?:[NSEW]\s+OF\s+[NWE]\d{4,5}|(?:[NSEW]\s+)?BTN\s+[NWE]\d{4,5})")
     for i in range(len(lines) - 1):
         mj = re.search(r"(?<=[\s:])(\d{2}/\d{2})$", lines[i])
         if mj and _qual_ini.match(lines[i + 1]):
@@ -1596,10 +1678,16 @@ def parse_gamet(text, sem_area=None):
         # nenhum — mas manter o polígono anterior faria com que passasse
         # a cobrir a FIR inteira, transformando área nula em cobertura
         # total. Marca-se a área como vazia e o bloco é descartado.
-        new_poly = extract_polygon(line)
+        lidas = []
+        new_poly = extract_polygon(line, lidas)
         if new_poly is not None:
             current_polygon = new_poly
-        elif _AREA_INI_RE.match(content) or _DIAGONAL_RE.search(content):
+            # Cardinal solto antes de BTN (3.5): área alargada, com aviso
+            if alargadas is not None:
+                for leitura in lidas:
+                    alargadas.append((f"{campo_txt}: {content}", leitura))
+        elif (_AREA_INI_RE.match(content) or _DIAGONAL_RE.search(content)
+              or _CARDINAL_BTN_RE.search(content)):
             # Subentrada com ar de qualificador geográfico, mas sem área
             # legível (3.4, pedido do Duarte): vale para toda a FIR e fica
             # registada para o aviso. Até à 3.3 herdava em silêncio a área
@@ -2570,15 +2658,19 @@ def gamet_de_recurso(fetch_indice, fetch_texto, agora=None):
 
 _SIGMET_MARGEM_NM = 10
 _NM_GRAUS = 1 / 60                      # 1 NM ≈ 1' de latitude
-_COORD_RE = re.compile(r"([NS])(\d{2})(\d{2})\s*([EW])(\d{3})(\d{2})")
+# Coordenada OACI (Anexo 3): Nnn[nn]/Snn[nn] Wnnn[nn]/Ennn[nn]. Os minutos
+# podem faltar (3.5, decisão do Duarte a 19-out-2026; SIGMET real U02 de
+# 18-out-2026: "N3347 W018") e valem 00'. As fronteiras de palavra impedem
+# ler parte de outro token ("W0070000", "N390 W00700" não são coordenadas).
+_COORD_RE = re.compile(r"\b([NS])(\d{2})(\d{2})?\s*([EW])(\d{3})(\d{2})?\b")
 _RUMO = {"N": 0, "NNE": 22.5, "NE": 45, "ENE": 67.5, "E": 90, "ESE": 112.5,
          "SE": 135, "SSE": 157.5, "S": 180, "SSW": 202.5, "SW": 225,
          "WSW": 247.5, "W": 270, "WNW": 292.5, "NW": 315, "NNW": 337.5}
 
 
 def _coord(m):
-    lat = int(m[1]) + int(m[2]) / 60
-    lon = int(m[4]) + int(m[5]) / 60
+    lat = int(m[1]) + int(m[2] or 0) / 60
+    lon = int(m[4]) + int(m[5] or 0) / 60
     return (-lon if m[3] == "W" else lon, -lat if m[0] == "S" else lat)
 
 
@@ -2609,12 +2701,14 @@ def _area_wi(seg):
     Área de UM troço "WI …" (polígono ou círculo). Devolve a geometria ou None
     se houver alguma coisa que não se perceba (cai para toda a área).
     """
-    m = re.match(r"\s*(\d{1,3})\s*NM\s+OF\s+([NS]\d{4}\s*[EW]\d{5})\s*$", seg)
+    m = re.match(r"\s*(\d{1,3})\s*NM\s+OF\s+([NS]\d{2}(?:\d{2})?\s*[EW]\d{3}(?:\d{2})?)\s*$", seg)
     if m:
         c = _COORD_RE.search(m.group(2))
         return _buffer_nm(Point(_coord(c.groups())), int(m.group(1)))
-    # Polígono: tudo o que não for coordenada completa ou separador é motivo
-    # para não confiar na área (ex.: "N39 W007" sem minutos).
+    # Polígono: tudo o que não for coordenada ou separador é motivo para não
+    # confiar na área (ex.: "N39 W07", "N390 W00700"). Coordenadas só com
+    # graus ("N39 W007", "W018") são lidas desde a 3.5 — até à 3.4 davam
+    # toda a área.
     if _COORD_RE.sub(" ", seg).replace("-", " ").strip():
         return None
     pts = list(dict.fromkeys(_coord(c) for c in _COORD_RE.findall(seg)))
@@ -3319,8 +3413,8 @@ def analisar_gamet(texto, fonte="manual", boletins=None, boletins_at=None,
             av.append(("aviso", f"⏱️ {r['validity_label']} — ⚠️ **FORA DO PERÍODO DE "
                                 "VALIDADE**: os dados podem estar desactualizados."))
 
-    sem_area = []
-    blocks, fz, qnh, wind = parse_gamet(texto, sem_area)
+    sem_area, alargadas = [], []
+    blocks, fz, qnh, wind = parse_gamet(texto, sem_area, alargadas)
     has_sigmet, sigmet_text = extract_sigmet_applicable(texto)
     # Falhar em voz alta (3.4): a subentrada foi aplicada a toda a FIR porque
     # a área não foi lida. O texto vai como código; as interfaces escapam-no.
@@ -3328,6 +3422,12 @@ def analisar_gamet(texto, fonte="manual", boletins=None, boletins_at=None,
         av.append(("aviso", f"⚠️ **Área não reconhecida** em «`{s.replace('`', '')}`» — "
                             "aplicada a **toda a FIR**. Confirma no texto do GAMET onde "
                             "se aplica."))
+    # Cardinal solto antes de BTN (3.5): lido de forma alargada, nunca menor
+    # do que a faixa BTN — mas o piloto tem de saber que houve interpretação.
+    for s, leitura in alargadas:
+        av.append(("aviso", f"⚠️ **Área alargada** em «`{s.replace('`', '')}`» — cardinal "
+                            f"solto antes de BTN: lido como **{leitura}** (inclui a faixa "
+                            "BTN). Confirma no texto do GAMET onde se aplica."))
 
     if fonte == "arquivo_hist":
         av.append(("aviso", "📚 **GAMET DO ARQUIVO — não é o GAMET actual.** Serve para rever "
