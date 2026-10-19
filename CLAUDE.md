@@ -71,6 +71,20 @@ Três pormenores que já causaram erros reais:
   sozinhos não são área. Só conta o que já é início de linha (quebra injectada
   antes de `N OF N…`/`BTN N…` etc., ou quebra do texto) — não se injectam
   quebras novas.
+- **Cardinal solto antes de BTN** (`S BTN N3720 - N3800`, GAMET real
+  182100/190300; 3.5, opção (b) do Duarte a 19-out-2026): cardinal simples
+  (N/S/E/W, sem `OF`/`PART`) imediatamente antes de `BTN` dá a **união** da
+  faixa com o semiplano nessa direcção, a partir do limite mais extremo nessa
+  direcção — `S BTN N3720 - N3800` → `S OF N3800`; `N BTN` → `N OF` a menor
+  latitude; com longitudes, `E BTN` → `E OF` a mais a oeste, `W BTN` → `W OF`
+  a mais a leste. Mantém as intersecções com LAN/MAR/COT e os outros
+  qualificadores da linha. Gera sempre o aviso "Área alargada"
+  (`subentradas_alargadas`; alerta no `scripts/analisar.py`). Eixo trocado
+  (`E BTN N…`, `N BTN W…`) ou limites ilegíveis → a linha fica sem área (toda
+  a FIR + aviso "Área não reconhecida"). A quebra injectada antes de `BTN N…`
+  leva o cardinal (e a janela antes dele) consigo. Até à 3.4 o cardinal era
+  ignorado em silêncio e a janela `23/03` perdia-se. A área nova contém
+  sempre a antiga.
 - **Diagonais** (`NE/NW/SE/SW OF …`, `_DIAGONAL_RE`) não são interpretadas: a
   linha onde aparecem, em qualquer posição, fica sem área legível → toda a FIR
   + aviso; num SIGMET sem `WI`, toda a área. Os cardinais `N/S/E/W OF` exigem
@@ -120,7 +134,9 @@ SIGMET punha NO-GO em toda a FIR, porque a app só tinha o campo
 `SIGMET APPLICABLE` do GAMET, que não traz geometria. Desde que lê o SIGMET
 completo (página do IPMA e arquivo), usa a área dele: `area_sigmet()` lê
 `WI <polígono>`, `WI nnNM OF <ponto>` e os qualificadores do GAMET
-(`N OF …`, `BTN …`), junta `_SIGMET_MARGEM_NM` (10 NM) e, com `MOV dir nnKT`,
+(`N OF …`, `BTN …`) — coordenadas `Nnn[nn] Wnnn[nn]` (os minutos podem faltar
+e valem 00', Anexo 3; 3.5, decisão do Duarte a 19-out-2026 — o SIGMET real U02
+de 18-out com `N3347 W018` punha NO-GO em toda a FIR) —, junta `_SIGMET_MARGEM_NM` (10 NM) e, com `MOV dir nnKT`,
 estende a área na direcção do movimento desde a hora da observação
 (`OBS AT`, se anterior) até ao fim da validade.
 `blocos_sigmet()` transforma cada SIGMET num `MetBlock("SIGMET")`, que entra
@@ -180,7 +196,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-595 testes. Devem passar a 100%.
+739 testes. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -213,6 +229,10 @@ python3 -m pytest
   (GAMET real 171500 com `BTN N4050 ~ N3840`), casos que não mudam, `SW OF`
   colado na mesma linha (OCNL TS continua NO-GO no NE), diagonais `NE/NW/SE/SW OF`
   (toda a FIR + aviso; SIGMET → toda a área)
+- `tests/test_v35.py` — cardinal solto antes de BTN (GAMET real 182100:
+  `S BTN N3720 - N3800` → `S OF N3800`, aviso; N/E/W, eixo trocado → toda a
+  FIR, área nova ⊇ antiga) e coordenadas de SIGMET só com graus (SIGMET real
+  U02 com `W018`; U01, T01, T02 inalterados)
 - `tests/conftest.py` — extrai o motor da app sem executar a UI. Os imports
   vêm da própria app (nunca de uma lista fixa — escondia imports em falta)
 
