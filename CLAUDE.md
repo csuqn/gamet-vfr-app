@@ -176,6 +176,15 @@ de `TS_RISK`), mesmo sem TS em `SIGWX`. Até à 1.6 era só o tipo de nuvem, e o
 GAMET real 160300/160900 (`ISOL/EMBD TCU/CB` no NE, sem TS) dava GO em
 Trás-os-Montes. Não é lido como TS: os motivos dizem "CB …".
 
+**Nuvens baixas na Secção II (3.6, pedido do Duarte a 20-out-2026).** O `CLD`
+da Secção II é a nuvem que não cumpre os critérios de SIG CLD e **não entra na
+decisão**. Desde a 3.6, `nuvens_baixas_secn2()` lê esse campo com a mesma
+máquina do SIG CLD (áreas, janelas, AGL/AMSL; sem referência = AGL) e, se
+alguma base ficar < 500 ft AGL (AMSL contra o MEF), `analisar_gamet` junta um
+aviso `info` "Nuvens baixas na Secção II" com a base, janela, superfície e os
+aeródromos abrangidos. Nunca vai a `compute_dynamic_regions`. Caso real:
+GAMET 192100/200300 (`SCT ST 004-008/012HFT` a N de N4000, 00–03Z).
+
 ## Princípios que orientam o código
 
 **O erro optimista é inaceitável.** Reportar pior do que a realidade é
@@ -203,7 +212,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-1142 testes. Devem passar a 100%.
+1147 testes. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -240,6 +249,8 @@ python3 -m pytest
   `S BTN N3720 - N3800` → `S OF N3800`, aviso; N/E/W, eixo trocado → toda a
   FIR, área nova ⊇ antiga) e coordenadas de SIGMET só com graus (SIGMET real
   U02 com `W018`; U01, T01, T02 inalterados)
+- `tests/test_v36.py` — nota informativa de nuvens baixas na Secção II (GAMET
+  real 192100: 18 aeródromos, decisão inalterada)
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva

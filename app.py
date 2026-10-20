@@ -29,7 +29,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "3.5"
+APP_VERSION = "3.6"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -3385,6 +3385,83 @@ def generate_pdf(regions, gamet_text, fzlvl_min, qnh_min, validity_label) -> byt
 # antigo do arquivo) | "manual" (colado ou editado: SIGMETs não verificados).
 # Avisos: lista de (tipo, texto em markdown), tipo ∈ erro/aviso/info/ok.
 
+# Nuvens baixas na Secção II (3.6, pedido do Duarte a 20-out-2026). O CLD da
+# Secção II é a nuvem que NÃO cumpre os critérios de SIG CLD (ex.: SCT ST 004,
+# GAMET real 192100/200300) — não entra na decisão, mas um piloto quer saber
+# que há ST baixo. Lê-se o campo com a mesma máquina do SIG CLD (áreas,
+# janelas, AGL/AMSL) e só se devolve o que tem base < 500 ft AGL.
+_NUVEM_BAIXA_FT = 500
+_SECN2_CLD_RE = re.compile(
+    r"(?:\bSIG\s+)?\bCLD\s*:(.*?)(?=\b(?:WIND/T|FZLVL|MNM\s+QNH|PSYS|SFC\s+VIS|SFC\s+WSPD"
+    r"|SIGWX|TURB|ICE|MTW|SEA|VA|MT\s+OBSC)\b\s*:?|\bMNM\b|=|$)", re.DOTALL)
+
+
+def nuvens_baixas_secn2(texto):
+    """
+    Nuvens da Secção II (CLD) com base < 500 ft AGL. Devolve
+    (conteúdo do campo CLD, [(base_ft, ref, janela, superfície, pontos, área_lida, lca)]),
+    em que `pontos` são os nomes de AERODROMES onde a base fica abaixo de
+    500 ft AGL (bases AMSL contra o MEF da quadrícula). Só informativo: nunca
+    entra em compute_dynamic_regions.
+    """
+    norm = normalize(texto)
+    partes = re.split(r"SECN\s+II", norm, maxsplit=1)
+    if len(partes) < 2:
+        return "", []
+    m = _SECN2_CLD_RE.search(partes[1])
+    if not m or not m.group(1).strip() or re.fullmatch(r"\s*NIL\W*", m.group(1)):
+        return "", []
+    conteudo = " ".join(m.group(1).split())
+    cab = partes[0].split("SECN I", 1)[0]
+    sem_area = []
+    blocos, *_ = parse_gamet(f"{cab} SECN I SIG CLD:{conteudo} SECN II", sem_area)
+    saida = []
+    for b in blocos:
+        if b.phenomenon not in ("BASE_AGL", "BASE_AMSL"):
+            continue
+        pontos = []
+        for nome, (la, lo) in AERODROMES.items():
+            if not b.polygon.buffer(1e-9).contains(Point(lo, la)):
+                continue
+            agl = b.value if b.phenomenon == "BASE_AGL" else \
+                b.value - _terrain_elevation_ft(lo, la)
+            if agl < _NUVEM_BAIXA_FT:
+                pontos.append(nome)
+        if b.phenomenon == "BASE_AGL" and b.value >= _NUVEM_BAIXA_FT:
+            continue
+        if b.phenomenon == "BASE_AMSL" and not pontos:
+            continue
+        # área_lida=False: alguma linha do campo ficou sem área (toda a FIR, 3.4)
+        saida.append((b.value, "AGL" if b.phenomenon == "BASE_AGL" else "AMSL",
+                      b.window, b.surface, pontos, not sem_area,
+                      "LCA" in (b.qualifier or "")))
+    return conteudo, saida
+
+
+def _aviso_nuvens_baixas(texto):
+    conteudo, nuvens = nuvens_baixas_secn2(texto)
+    if not nuvens:
+        return None
+    linhas, por_ler = [], False
+    for base, ref, janela, sup, pontos, lida, lca in nuvens:
+        por_ler = por_ler or not lida
+        quando = f", {janela}" if janela else ""
+        onde = f" sobre {_SURFACE_LABEL.get(sup, sup)}" if sup else ""
+        cod = [re.search(r"\(([A-Z0-9]{4})\)", p) for p in pontos]
+        cod = [c.group(1) if c else p for c, p in zip(cod, pontos)]
+        alvo = (f"aeródromos abrangidos: {', '.join(cod)}" if cod
+                else "nenhum dos aeródromos da lista")
+        local = " (LCA — localmente)" if lca else ""
+        linhas.append(f"- base **{base} ft {ref}**{local}{onde}{quando} — {alvo}")
+    return ("info",
+            "☁️ **Nuvens baixas na Secção II** (informativo — **não altera** a decisão "
+            "GO/MARGINAL/NO-GO; o GAMET não as considera significativas, porque não "
+            "estão em SIG CLD). Base abaixo de 500 ft:\n\n" + "\n".join(linhas)
+            + ("\n\n⚠️ Uma linha deste campo tem **área não reconhecida** e foi lida "
+               "como **toda a FIR** — confirma no texto onde se aplica." if por_ler else "")
+            + f"\n\nTexto: `{conteudo.replace('`', '')}`")
+
+
 def analisar_gamet(texto, fonte="manual", boletins=None, boletins_at=None,
                    boletins_fonte="", indice=None, entrada=None, agora=None,
                    boletins_arquivo=None):
@@ -3519,6 +3596,9 @@ def analisar_gamet(texto, fonte="manual", boletins=None, boletins_at=None,
                    "Isto pode significar que o GAMET está incompleto, mal colado, "
                    "ou num formato não suportado — **não** que as condições estão "
                    "calmas. Confirma o texto antes de confiar na decisão abaixo."))
+    nb = _aviso_nuvens_baixas(texto)
+    if nb:
+        av.append(nb)
     ventos = check_strong_wind(wind)
     if ventos:
         av.append(("aviso",
