@@ -167,6 +167,13 @@
    "inicio": "2026-10-19T21:00Z",
    "fim": "2026-10-20T03:00Z",
    "tipo": "GAMET"
+  },
+  {
+   "ficheiro": "gamets/2026/10/20261020T0846Z_200900-201500_7ed0e6d4aa.txt",
+   "recolhido": "2026-10-20T08:46Z",
+   "inicio": "2026-10-20T09:00Z",
+   "fim": "2026-10-20T15:00Z",
+   "tipo": "GAMET"
   }
  ],
  "sigmets": [
