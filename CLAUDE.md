@@ -212,7 +212,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-1150 testes. Devem passar a 100%.
+1147 testes. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**

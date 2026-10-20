@@ -3399,7 +3399,7 @@ _SECN2_CLD_RE = re.compile(
 def nuvens_baixas_secn2(texto):
     """
     Nuvens da Secção II (CLD) com base < 500 ft AGL. Devolve
-    (conteúdo do campo CLD, [(base_ft, ref, janela, superfície, pontos, área_lida)]),
+    (conteúdo do campo CLD, [(base_ft, ref, janela, superfície, pontos, área_lida, lca)]),
     em que `pontos` são os nomes de AERODROMES onde a base fica abaixo de
     500 ft AGL (bases AMSL contra o MEF da quadrícula). Só informativo: nunca
     entra em compute_dynamic_regions.
@@ -3433,7 +3433,8 @@ def nuvens_baixas_secn2(texto):
             continue
         # área_lida=False: alguma linha do campo ficou sem área (toda a FIR, 3.4)
         saida.append((b.value, "AGL" if b.phenomenon == "BASE_AGL" else "AMSL",
-                      b.window, b.surface, pontos, not sem_area))
+                      b.window, b.surface, pontos, not sem_area,
+                      "LCA" in (b.qualifier or "")))
     return conteudo, saida
 
 
@@ -3442,7 +3443,7 @@ def _aviso_nuvens_baixas(texto):
     if not nuvens:
         return None
     linhas, por_ler = [], False
-    for base, ref, janela, sup, pontos, lida in nuvens:
+    for base, ref, janela, sup, pontos, lida, lca in nuvens:
         por_ler = por_ler or not lida
         quando = f", {janela}" if janela else ""
         onde = f" sobre {_SURFACE_LABEL.get(sup, sup)}" if sup else ""
@@ -3450,7 +3451,8 @@ def _aviso_nuvens_baixas(texto):
         cod = [c.group(1) if c else p for c, p in zip(cod, pontos)]
         alvo = (f"aeródromos abrangidos: {', '.join(cod)}" if cod
                 else "nenhum dos aeródromos da lista")
-        linhas.append(f"- base **{base} ft {ref}**{onde}{quando} — {alvo}")
+        local = " (LCA — localmente)" if lca else ""
+        linhas.append(f"- base **{base} ft {ref}**{local}{onde}{quando} — {alvo}")
     return ("info",
             "☁️ **Nuvens baixas na Secção II** (informativo — **não altera** a decisão "
             "GO/MARGINAL/NO-GO; o GAMET não as considera significativas, porque não "

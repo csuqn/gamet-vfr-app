@@ -49,8 +49,8 @@ def test_gamet_real_192100_da_nota_com_os_aerodromos_certos(eng):
     conteudo, nuvens = eng.nuvens_baixas_secn2(G192100)
     assert conteudo.startswith("00/03 N OF N4000 LAN SCT ST 004")
     assert len(nuvens) == 1
-    base, ref, janela, sup, pontos, lida = nuvens[0]
-    assert (base, ref, sup, lida) == (400, "AGL", "LAN", True)
+    base, ref, janela, sup, pontos, lida, lca = nuvens[0]
+    assert (base, ref, sup, lida, lca) == (400, "AGL", "LAN", True, False)
     assert janela.startswith("00")
     assert {_cod(p) for p in pontos} == NORTE_4000
 
@@ -116,3 +116,10 @@ def test_area_ilegivel_na_secn2_marca_toda_a_fir(eng):
     assert nuvens and nuvens[0][5] is False
     assert len(nuvens[0][4]) == len(eng.AERODROMES)
     assert "área não reconhecida" in _nota(eng.analisar_gamet(g, "manual", agora=AGORA))[1]
+
+
+def test_lca_aparece_na_nota(eng):
+    g = G192100.replace("LAN SCT ST 004", "LAN LCA SCT ST 004")
+    _, nuvens = eng.nuvens_baixas_secn2(g)
+    assert nuvens and nuvens[0][6] is True
+    assert "LCA" in _nota(eng.analisar_gamet(g, "manual", agora=AGORA))[1]
