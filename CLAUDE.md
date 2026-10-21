@@ -61,6 +61,15 @@ Três pormenores que já causaram erros reais:
   ser o primeiro número e o topo é ignorado. Até à 3.7 a base desaparecia em
   silêncio. Na Secção II, AS/AC a 5000–6000 ft AMSL contra o MEF passa a dar a
   nota "Nuvens baixas" em muitos GAMETs (18/28 do arquivo a 21-out-2026).
+- **MT OBSC e VA: um bloco por subentrada** (3.10). Até à 3.9 só a linha que
+  abre o campo gerava bloco: em `MT OBSC:N OF N4100 LAN S OF N3800 LAN` o S de
+  N3800 ficava fora da decisão. Cada subentrada gera agora o seu, com a sua
+  janela; a linha de abertura vazia (`MT OBSC:` antes de `17/19 N OF …`, ou
+  `MT OBSC S OF …`) continua a dar toda a FIR. VA dentro de SIGWX abre o campo
+  VA (quebra antes de `VA`) e fica em toda a FIR, como antes.
+- **Vírgula decimal nos KM** (3.10): `LCA 1,5KM BR` → 1500 m (até à 3.9, 5000 m:
+  apanhava o `5KM`). Só `\d{1,2},\d+` colado (`0800M BR, 5KM`, `1200M,5KM`,
+  `2500,5KM` continuam a ser dois valores). Só a VIS lê KM.
 - Qualificadores seguidos, com ou sem AND (`BTN N3840 AND N4100 E OF W00800`),
   são uma só área (2.3). A janela `HH/HH` pertence à subentrada que vem a
   seguir; uma subentrada sem janela vale para todo o período.
@@ -206,9 +215,10 @@ janela/NIL/pontuação. O `scripts/analisar.py` ("Campo sem fenómeno gerado") u
 a mesma função; até à 3.8 verificava por campo, com lógica própria. Dentro de
 uma só subentrada basta um fenómeno lido para não avisar (ex.: duas bases na
 mesma linha, uma ilegível). Caso real: GAMET 201500/202100 até à 3.6
-(`008/010HTF`). 0 avisos no arquivo a 21-out-2026 (28 GAMETs). Achado pendente: em `MT OBSC` e `VA` só
-a linha que abre o campo gera bloco — uma 2.ª subentrada (`MT OBSC: N OF N4100
-LAN S OF N3800 LAN`) fica de fora da decisão; desde a 3.9 pelo menos avisa.
+(`008/010HTF`). 0 avisos no arquivo a 21-out-2026 (28 GAMETs). Em `MT OBSC` e
+`VA`, até à 3.9 só a linha que abre o campo gerava bloco e a 2.ª subentrada
+(`MT OBSC: N OF N4100 LAN S OF N3800 LAN`) só avisava; desde a 3.10 gera bloco
+(ver abaixo) e deixa de avisar.
 
 ## Princípios que orientam o código
 
@@ -237,7 +247,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-1233 testes. Devem passar a 100%.
+1270 testes. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -287,7 +297,12 @@ python3 -m pytest
   a gralha nova `HTX`; campo ilegível; subentrada ilegível ao lado de uma
   legível; NIL, `HAZARDOUS WX NIL`, área fora da FIR e todo o arquivo não
   avisam; Streamlit e NiceGUI mostram o aviso; decisão inalterada; 2.ª
-  subentrada de MT OBSC/VA nunca em silêncio)
+  subentrada de MT OBSC/VA nunca em silêncio — desde a 3.10 gera bloco)
+- `tests/test_v310.py` — MT OBSC/VA com 2 e 3 subentradas (GAMET real 201500
+  com a Secção I trocada: LAN/MAR, janelas, fora da FIR, ENTIRE FIR, área
+  ilegível, VA em SIGWX) e vírgula decimal nos KM (`1,5KM` → 1500,
+  `0,8KM` → 800, `LCA 1,5KM` → MARGINAL; `1.5KM` e vírgulas que separam
+  valores inalterados)
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva
