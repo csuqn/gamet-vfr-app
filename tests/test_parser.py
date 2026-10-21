@@ -199,10 +199,18 @@ def test_mt_obsc_com_geo_e_local(analyse, geo):
 
 
 def test_mt_obsc_nao_duplica(analyse):
-    """REGRESSÃO: a linha de geografia seguinte duplicava a entrada."""
+    """REGRESSÃO: a linha de geografia seguinte duplicava a entrada.
+
+    Desde a 3.10 cada subentrada gera o seu bloco: "S OF N3900" (a quebra é
+    injectada antes do qualificador) dá um bloco a S de N3900, e a linha que
+    abre o campo, vazia, continua a dar o bloco de toda a FIR que dava até à
+    3.9 (leitura conservadora). Nunca dois blocos iguais."""
     r = analyse(build_gamet("SECN I MT OBSC S OF N3900"))
-    n = sum(1 for b in r["blocks"] if b.phenomenon == "MT_OBSC")
-    assert n == 1
+    mt = [b for b in r["blocks"] if b.phenomenon == "MT_OBSC"]
+    chaves = [(b.polygon.wkt, b.window, b.surface) for b in mt]
+    assert len(chaves) == len(set(chaves)), "bloco duplicado"
+    assert len(mt) == 2
+    assert sum(1 for b in mt if b.polygon.bounds[3] <= 39 + 1e-6) == 1
 
 
 # ── QUALIFICADORES DE SUPERFÍCIE E TEMPO (v30) ───────────────────────

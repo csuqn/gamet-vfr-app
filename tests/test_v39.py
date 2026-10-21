@@ -232,11 +232,15 @@ def test_nicegui_mostra_o_aviso():
     "SECN I VA: N OF N4100 LCA S OF N3800 LCA",
 ])
 def test_segunda_subentrada_de_mt_obsc_ou_va_nunca_em_silencio(eng, corpo):
-    """Até à 3.9 a máquina de estados só cria MT_OBSC/VA na linha que abre o
-    campo: a 2.ª subentrada (S OF N3800) não gera bloco. Enquanto for assim,
-    tem de avisar; se um dia gerar bloco, deixa de avisar."""
+    """Até à 3.9 a máquina de estados só criava MT_OBSC/VA na linha que abre o
+    campo e a 2.ª subentrada (S OF N3800) só avisava. Desde a 3.10 gera o seu
+    bloco — e deixa de avisar. Nunca em silêncio: gera bloco ou avisa."""
     g = build_gamet(corpo)
     blocos, *_ = eng.parse_gamet(g)
     sul = [b for b in blocos if b.polygon.bounds[3] <= 38 + 1e-6]
     avisos = eng.campos_nao_interpretados(g)
     assert sul or any("S OF N3800" in a for a in avisos), (blocos, avisos)
+    # 3.10: gera bloco, com o fenómeno do campo, e já não avisa
+    fen = "MT_OBSC" if corpo.startswith("SECN I MT OBSC") else "VA"
+    assert [b.phenomenon for b in sul] == [fen], blocos
+    assert avisos == [], avisos

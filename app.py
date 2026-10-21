@@ -29,7 +29,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "3.9"
+APP_VERSION = "3.10"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -1827,11 +1827,17 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
             def _already_consumed(pos):
                 return any(s <= pos < e for s, e in consumed_spans)
 
-            # Captura KM
-            for m in re.finditer(r"\b(\d+(?:\.\d+)?)\s*KM\b", vis_content):
+            # Captura KM. A vírgula decimal ("1,5KM", 3.10) vale como ponto —
+            # até à 3.9 só se apanhava o "5KM" (5000 m em vez de 1500 m, erro
+            # optimista). Só com 1–2 algarismos antes da vírgula e colada a
+            # eles: "0800M BR, 5KM", "1200M,5KM" ou "2500,5KM" continuam a ser
+            # dois valores.
+            for m in re.finditer(r"(?:(?<![\d.,])(\d{1,2}),(\d+)|\b(\d+(?:\.\d+)?))\s*KM\b",
+                                 vis_content):
                 if _already_consumed(m.start()):
                     continue
-                val = int(float(m.group(1)) * 1000)
+                km = f"{m.group(1)}.{m.group(2)}" if m.group(1) else m.group(3)
+                val = int(float(km) * 1000)
                 blocks.append(MetBlock("VIS", poly, val, qualifier, surface=surface, window=window))
 
             # Intervalo: 2000-5000M → mínimo
@@ -2025,16 +2031,17 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
             if severity:
                 blocks.append(MetBlock("ICE", poly, severity, qualifier, layer + (f" {trend}" if trend else ""), surface=surface, window=window))
 
-        elif state == "MT_OBSC":
-            # Montanhas obscurecidas — sempre NO-GO para VFR
-            # Só appenda quando a linha activa o estado (new_state presente)
-            if new_state == "MT_OBSC":
-                blocks.append(MetBlock("MT_OBSC", poly, "MT OBSC", qualifier, surface=surface, window=window))
-
-        elif state == "VA":
-            # Cinzas vulcânicas — sempre NO-GO
-            if new_state == "VA":
-                blocks.append(MetBlock("VA", poly, "VA", qualifier, surface=surface, window=window))
+        elif state in ("MT_OBSC", "VA"):
+            # Montanhas obscurecidas / cinzas vulcânicas — sempre NO-GO.
+            # Um bloco por subentrada (3.10), com a área e a janela dela; as
+            # linhas sem qualificador que continuam a subentrada não geram
+            # outro. Até à 3.9 só a linha que abre o campo gerava bloco: em
+            # "MT OBSC:N OF N4100 LAN S OF N3800 LAN" a parte a S de N3800
+            # ficava fora da decisão (erro optimista). A linha que abre o
+            # campo continua a gerar sempre o seu bloco (vazia → toda a FIR).
+            if len(blocks) == sub["n0"]:
+                valor = "MT OBSC" if state == "MT_OBSC" else "VA"
+                blocks.append(MetBlock(state, poly, valor, qualifier, surface=surface, window=window))
 
     _fechar_sub()
 
