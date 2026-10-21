@@ -53,6 +53,9 @@ Três pormenores que já causaram erros reais:
   **AGL** (3.3, decisão do Duarte a 18-out-2026: em SIG CLD o IPMA dá as
   bases em AGL e a falta da referência é tida por gralha). Só `AMSL`
   explícito é convertido contra o MEF. Até à 3.2 era descartada em silêncio.
+- `HTF` numa base de nuvem (`BKN 008/010HTF AGL`, GAMET real 201500/202100)
+  é gralha do IPMA e vale como `HFT` (3.7) — só em `_CLD_BASE_RE`, colado ao
+  número; até à 3.6 a base desaparecia em silêncio (SIG CLD e Secção II).
 - Qualificadores seguidos, com ou sem AND (`BTN N3840 AND N4100 E OF W00800`),
   são uma só área (2.3). A janela `HH/HH` pertence à subentrada que vem a
   seguir; uma subentrada sem janela vale para todo o período.
@@ -212,7 +215,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-1147 testes. Devem passar a 100%.
+1161 testes. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -251,6 +254,9 @@ python3 -m pytest
   U02 com `W018`; U01, T01, T02 inalterados)
 - `tests/test_v36.py` — nota informativa de nuvens baixas na Secção II (GAMET
   real 192100: 18 aeródromos, decisão inalterada)
+- `tests/test_v37.py` — `HTF` como gralha de `HFT` nas bases (GAMET real
+  201500: base 800 ft a N de N4100, GO inalterado; 004/002HTF → MARGINAL/NO-GO;
+  nota da Secção II; `analisar.py` sem "Campo sem fenómeno gerado")
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva
