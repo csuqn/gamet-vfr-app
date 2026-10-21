@@ -116,10 +116,13 @@ def test_formas_da_base_com_htf(analyse, corpo, fen, valor):
 def test_nota_secn2_com_htf(eng):
     """Secção II com HTF e base < 500 ft → nota "Nuvens baixas na Secção II"."""
     _, nuvens = eng.nuvens_baixas_secn2(G201500)
-    assert nuvens == []   # texto real: 1200 ft, sem nota
+    # Texto real: 1200 ft AGL, sem nota AGL. Desde a 3.8 a base AS/AC
+    # "050-090/100-130HTF AMSL" (topo em intervalo) é lida e, contra o MEF,
+    # dá uma entrada AMSL — ver test_v38.
+    assert [(n[0], n[1]) for n in nuvens] == [(5000, "AMSL")]
     g = G201500.replace("SCT/BKN SC/CU 012-025/050HTF AGL", "SCT/BKN SC/CU 004-025/050HTF AGL")
     _, nuvens = eng.nuvens_baixas_secn2(g)
-    assert [(n[0], n[1]) for n in nuvens] == [(400, "AGL")]
+    assert sorted((n[0], n[1]) for n in nuvens) == [(400, "AGL"), (5000, "AMSL")]
     r = eng.analisar_gamet(g, "manual", agora=AGORA)
     notas = [x for t, x in r["avisos"] if "Nuvens baixas na Secção II" in x]
     assert len(notas) == 1 and "400 ft AGL" in notas[0]

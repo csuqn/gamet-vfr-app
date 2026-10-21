@@ -56,6 +56,11 @@ Três pormenores que já causaram erros reais:
 - `HTF` numa base de nuvem (`BKN 008/010HTF AGL`, GAMET real 201500/202100)
   é gralha do IPMA e vale como `HFT` (3.7) — só em `_CLD_BASE_RE`, colado ao
   número; até à 3.6 a base desaparecia em silêncio (SIG CLD e Secção II).
+- Topo de nuvem em intervalo (`050-090/100-130HTF AMSL`, GAMET real
+  201500/202100, Secção II) é aceite em `_CLD_BASE_RE` (3.8); a base continua a
+  ser o primeiro número e o topo é ignorado. Até à 3.7 a base desaparecia em
+  silêncio. Na Secção II, AS/AC a 5000–6000 ft AMSL contra o MEF passa a dar a
+  nota "Nuvens baixas" em muitos GAMETs (18/28 do arquivo a 21-out-2026).
 - Qualificadores seguidos, com ou sem AND (`BTN N3840 AND N4100 E OF W00800`),
   são uma só área (2.3). A janela `HH/HH` pertence à subentrada que vem a
   seguir; uma subentrada sem janela vale para todo o período.
@@ -215,7 +220,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-1161 testes. Devem passar a 100%.
+1179 testes. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -257,6 +262,10 @@ python3 -m pytest
 - `tests/test_v37.py` — `HTF` como gralha de `HFT` nas bases (GAMET real
   201500: base 800 ft a N de N4100, GO inalterado; 004/002HTF → MARGINAL/NO-GO;
   nota da Secção II; `analisar.py` sem "Campo sem fenómeno gerado")
+- `tests/test_v38.py` — topo em intervalo (GAMET real 201500: AS/AC
+  `050-090/100-130HTF AMSL` lida, nota AMSL contra o MEF; SIG CLD
+  `002-004/010-015HFT` → NO-GO, `004/010-015HFT` → MARGINAL, igual a topo
+  simples; o topo nunca é lido como base)
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva
