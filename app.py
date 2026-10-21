@@ -29,7 +29,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "3.7"
+APP_VERSION = "3.8"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -1487,7 +1487,11 @@ _SIGWX_SEVEROS = {
 _CLD_BASE_RE = re.compile(
     r"(?<![\dA-Z])(?P<base>SFC|\d{3,5})"
     r"(?:-\d{3,5})?"                      # fim do intervalo de bases
-    r"(?:/(?:\d{3,5}|XXX))?"              # topo
+    # Topo, simples ou em intervalo (3.8): "050-090/100-130HTF AMSL" (GAMET
+    # real 201500/202100, Secção II). Com um só número no topo a expressão
+    # não casava a partir da base e a base desaparecia em silêncio. O topo
+    # é ignorado.
+    r"(?:/(?:\d{3,5}(?:-\d{3,5})?|XXX))?"
     # "HTF" (3.7) é gralha do IPMA para "HFT" (GAMET real 201500/202100:
     # "LCA BKN 008/010HTF AGL"). Sem ela a base desaparecia em silêncio.
     r"\s*(?P<unit>HFT|HTF|FT)\b"
@@ -1822,6 +1826,7 @@ def parse_gamet(text, sem_area=None, alargadas=None):
             #   "002HFT AGL"          base única
             #   "002/010HFT AGL"      base/topo (forma-modelo OACI)
             #   "002-004/010HFT AGL"  intervalo de bases/topo
+            #   "050-090/100-130HFT"  topo em intervalo (3.8)
             #   "004/XXXHFT AGL"      topo desconhecido
             #   "SFC/010HFT AGL"      base à superfície → 0 ft
             #   "800/1100FT AGL"      valores em pés (sem o H de centenas)
