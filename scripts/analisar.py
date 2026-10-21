@@ -65,8 +65,8 @@ WSPD MTW SQL FC TC MPS -
 """.split())
 _PADROES = [
     r"N\d{4}", r"W\d{5}", r"FL\d{3}", r"\d{2}/\d{2}", r"\d{3,4}M",
-    r"\d{3,4}-\d{3,4}M", r"\d{3,5}(?:-\d{3,5})?(?:/(?:\d{3,5}|XXX))?(?:HFT|FT)",
-    r"SFC/(?:FL\d{3}|\d{3,5}(?:HFT|FT))", r"FL\d{3}/FL\d{3}", r"\d{3}/\d{3}",
+    r"\d{3,4}-\d{3,4}M", r"\d{3,5}(?:-\d{3,5})?(?:/(?:\d{3,5}|XXX))?(?:HFT|HTF|FT)",
+    r"SFC/(?:FL\d{3}|\d{3,5}(?:HFT|HTF|FT))", r"FL\d{3}/FL\d{3}", r"\d{3}/\d{3}",
     r"[A-Z]{2,4}/[A-Z]{2,4}", r"SFC/\d{3}(?:HFT)?", r"\d+", r"MOD/SEV", r"MOD/HVY",
     r"\d{2,3}(?:-\d{2,3})?(?:KT|MPS)",
 ]
