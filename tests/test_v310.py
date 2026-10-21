@@ -107,15 +107,15 @@ def test_mt_obsc_tres_subentradas_com_janela(eng, analyse):
 
 def test_mt_obsc_janela_antes_da_primeira_subentrada(eng):
     """"MT OBSC:17/19 N OF N4100 LAN 19/21 S OF N3800 LAN": a 2.ª subentrada
-    gera bloco com a sua janela. (A linha que abre o campo, vazia, continua a
-    dar MT OBSC em toda a FIR, como até à 3.9 — leitura conservadora.)"""
+    gera bloco com a sua janela. (A linha que abre o campo, vazia, dava MT
+    OBSC em toda a FIR até à 3.10; desde a 3.11 já não — test_v311.)"""
     g = _g("MT OBSC:17/19 N OF N4100 LAN 19/21 S OF N3800 LAN")
     mt = _blocos(eng, g, "MT_OBSC")
     norte = [b for b in mt if _a_norte(b, 41.0)]
     sul = [b for b in mt if _a_sul(b, 38.0)]
     assert [b.window for b in norte] == ["17–19Z"]
     assert [b.window for b in sul] == ["19–21Z"]
-    assert any(b.polygon.equals(eng.FIR_POLYGON) for b in mt)   # inalterado
+    assert not any(b.polygon.equals(eng.FIR_POLYGON) for b in mt)   # 3.11
     assert eng.campos_nao_interpretados(g) == []
 
 

@@ -64,9 +64,32 @@ Três pormenores que já causaram erros reais:
 - **MT OBSC e VA: um bloco por subentrada** (3.10). Até à 3.9 só a linha que
   abre o campo gerava bloco: em `MT OBSC:N OF N4100 LAN S OF N3800 LAN` o S de
   N3800 ficava fora da decisão. Cada subentrada gera agora o seu, com a sua
-  janela; a linha de abertura vazia (`MT OBSC:` antes de `17/19 N OF …`, ou
-  `MT OBSC S OF …`) continua a dar toda a FIR. VA dentro de SIGWX abre o campo
-  VA (quebra antes de `VA`) e fica em toda a FIR, como antes.
+  janela. VA dentro de SIGWX abre o campo VA (quebra antes de `VA`) e fica em
+  toda a FIR, como antes.
+- **Linha de abertura vazia em MT OBSC / VA** (3.11, pedido do Duarte a
+  21-out-2026): em `MT OBSC:17/19 N OF N4100 LAN` (a janela passa para a linha
+  seguinte) ou `MT OBSC S OF N3900` a abertura vazia dava, até à 3.10, toda a
+  FIR em todo o período. O bloco dela sai só quando: a linha é vazia, só janela
+  ou só pontuação (**NIL não** — `MT OBSC: NIL` fica à espera do Duarte); é a
+  única linha da sua subentrada; é `MT OBSC` ou `VA:` com dois pontos (`VA`
+  sem eles é o VA de SIGWX, em toda a FIR); e uma subentrada seguinte do campo
+  gera o seu bloco (área legível ou "Área não reconhecida"; uma área fora da
+  FIR não conta). Tudo o resto mantém toda a FIR (`MT OBSC: LAN`, `MT OBSC:`
+  seguido de outro campo, `MT OBSC:17/19` sozinho). É a única mudança MAIS
+  PERMISSIVA da 3.11 — testada em `test_v311.py` e em 700 GAMETs gerados.
+- **`ENTIRE FIR` a meio da linha** (3.11, decisão do Duarte a 21-out-2026):
+  injecta-se uma quebra antes de `ENTIRE FIR` (com a janela `HH/HH` que o
+  precede), em todos os campos da Secção I. Até à 3.10
+  `MT OBSC: N OF N4100 LAN ENTIRE FIR` dava só o N de N4100 (41 GO / 11 NO-GO;
+  erro optimista) e em `S OF N3800 LAN 19/21 ENTIRE FIR` perdia-se a 2.ª
+  subentrada. Não parte quando antes só está o nome do campo e a janela
+  (`MT OBSC: ENTIRE FIR`, `SIG CLD:19/21 ENTIRE FIR`). A subentrada
+  `ENTIRE FIR` sem janela vale todo o período (não herda a anterior); uma
+  janela no fim da linha anterior passa para ela; `ENTIRE FIR LAN/MAR/COT`
+  recorta pela superfície. `… AND ENTIRE FIR` **não** é junção: o `ENTIRE FIR`
+  fica sozinho (toda a FIR, conservador) e, fora de MT OBSC/VA, o resto
+  (`N OF N4100 AND`) dá o aviso "Campo não interpretado". A área do SIGMET
+  (`area_sigmet`) não tinha o problema (procura `ENTIRE FIR` em todo o texto).
 - **Vírgula decimal nos KM** (3.10): `LCA 1,5KM BR` → 1500 m (até à 3.9, 5000 m:
   apanhava o `5KM`). Só `\d{1,2},\d+` colado (`0800M BR, 5KM`, `1200M,5KM`,
   `2500,5KM` continuam a ser dois valores). Só a VIS lê KM.
@@ -87,7 +110,8 @@ Três pormenores que já causaram erros reais:
   qualificador fora da FIR continua a descartar o fenómeno; MAR/LAN/COT
   sozinhos não são área. Só conta o que já é início de linha (quebra injectada
   antes de `N OF N…`/`BTN N…` etc., ou quebra do texto) — não se injectam
-  quebras novas.
+  quebras novas, com uma só excepção: antes de `ENTIRE FIR` (3.11, decisão
+  do Duarte a 21-out-2026; ver acima).
 - **Cardinal solto antes de BTN** (`S BTN N3720 - N3800`, GAMET real
   182100/190300; 3.5, opção (b) do Duarte a 19-out-2026): cardinal simples
   (N/S/E/W, sem `OF`/`PART`) imediatamente antes de `BTN` dá a **união** da
@@ -247,7 +271,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-1270 testes. Devem passar a 100%.
+1325 testes. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -303,6 +327,13 @@ python3 -m pytest
   ilegível, VA em SIGWX) e vírgula decimal nos KM (`1,5KM` → 1500,
   `0,8KM` → 800, `LCA 1,5KM` → MARGINAL; `1.5KM` e vírgulas que separam
   valores inalterados)
+- `tests/test_v311.py` — `ENTIRE FIR` a meio da linha (GAMET real 201500 com
+  a Secção I trocada: MT OBSC 41 GO → 52 NO-GO; SIG CLD, SFC VIS, SIGWX, TURB,
+  ICE, MTW, SFC WSPD e VA; com janela, LAN/MAR, depois de AND; no início do
+  campo não muda; SIGMET já era toda a área) e linha de abertura vazia em
+  MT OBSC/VA (`MT OBSC:17/19 N OF N4100 LAN` → só a subentrada; `MT OBSC S OF
+  N3900`; casos que não mudam: `LAN`, outro campo a seguir, só janela, área
+  fora da FIR, continuação, `VA` sem dois pontos, NIL)
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva
