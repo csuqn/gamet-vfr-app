@@ -1558,11 +1558,26 @@ _ABERTURA_VAZIA_RE = re.compile(r"[\W_]*(?:\d{2}/\d{2}[\W_]*)?")
 # Campo MT OBSC / VA cujo conteúdo é exactamente NIL (3.11, decisão do
 # Duarte a 21-out-2026): espaços, ":" e "=" à volta e uma janela antes.
 _CAMPO_NIL_RE = re.compile(r"[\s:=]*(?:\d{2}/\d{2}\s+)?NIL[\s:=]*")
-# Só o nome de um campo da Secção I (e a janela), no início de uma linha:
-# antes de um "ENTIRE FIR" que já abre o campo (3.11).
-_CAMPO_SO_RE = re.compile(
-    r"\s*(?:SFC\s+VIS|SIG\s+VIS|VIS|SIG\s+CLD|CLD|SIGWX|TURB|ICE|MT\s+OBSC"
-    r"|SFC\s+WSPD|MTW|VA)\s*:?\s*(?:\d{2}/\d{2}\s*)?")
+# "ENTIRE FIR" a meio do conteúdo de uma linha (3.11): o que vem antes não é
+# só a janela. Devolve as posições (no conteúdo) onde começa cada parte
+# "[HH/HH] ENTIRE FIR …".
+_ENTIRE_PARTE_RE = re.compile(r"(?:\d{2}/\d{2}\s+)?ENTIRE\s+FIR\b")
+# Uma parte "ENTIRE FIR …" sem fenómeno próprio: só janela, ENTIRE FIR,
+# superfície, AND, qualificadores (diagonais, coordenadas, BTN, WI…) e
+# pontuação. Ex.: "TURB: SEV SFC/FL050 ENTIRE FIR".
+_PARTE_SO_AREA_RE = re.compile(
+    r"\d{2}/\d{2}|ENTIRE\s+FIR\b|\b(?:MAR|LAN|COT|AND|BTN|WI|ALONG)\b"
+    r"|\b[NSEW]{1,3}\s+(?:OF|PART)\b|\b[NS]\d{2,4}\b|\b[WE]\d{3,5}\b|[\W_]")
+# Prefixo do nome do campo, como o tira o estado de parse_gamet.
+_CAMPO_PREFIXO_RE = re.compile(
+    r"^(SFC\s+VIS\s*:?|SIG\s+VIS\s*:?|VIS\s*:|SIG\s+CLD\s*:?|CLD\s*:|SIGWX\s*:?|TURB\s*:?|ICE\s*:?"
+    r"|MT\s+OBSC\s*:?|SFC\s+WSPD\s*:?|MTW\s*:|VA\s*:?)\s*")
+
+
+def _partes_entire(content):
+    """Inícios das partes "[HH/HH] ENTIRE FIR …" a meio do conteúdo (3.11)."""
+    return [m.start() for m in _ENTIRE_PARTE_RE.finditer(content)
+            if not re.fullmatch(r"[\s:=]*(?:\d{2}/\d{2}\s*)?", content[:m.start()])]
 
 
 def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
@@ -1633,21 +1648,17 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
     secn1 = re.sub(r"(\w)\s+(BTN\s+N\d{4})", _quebra_btn, secn1)
     secn1 = secn1.replace(" && ", " AND ")
 
-    # "ENTIRE FIR" a meio de uma linha abre uma subentrada nova (3.11,
-    # decisão do Duarte a 21-out-2026 — a única quebra injectada que não vem
-    # de um campo nem de um qualificador cardinal/BTN). Até à 3.10 ficava na
-    # linha anterior e a área era só a do primeiro qualificador: em
-    # "MT OBSC: N OF N4100 LAN ENTIRE FIR" só o N de N4100 ficava NO-GO (erro
-    # optimista). A janela "HH/HH" imediatamente antes vai com ele. Não se
-    # parte quando antes só está o nome do campo (e a janela): "MT OBSC:
-    # ENTIRE FIR", "SIG CLD:19/21 ENTIRE FIR". "… AND ENTIRE FIR" não é
-    # junção: o ENTIRE FIR fica sozinho (toda a FIR, leitura conservadora).
-    def _quebra_entire(m):
-        ini = m.string.rfind("\n", 0, m.start()) + 1
-        if _CAMPO_SO_RE.fullmatch(m.string[ini:m.start(2)]):
-            return m.group(0)               # já abre o campo
-        return f"{m.group(1)}\n{m.group(2)}"
-    secn1 = re.sub(r"(\S)[ \t]+((?:\d{2}/\d{2}[ \t]+)?ENTIRE\s+FIR\b)", _quebra_entire, secn1)
+    # "ENTIRE FIR" a meio de uma linha (3.11, decisão do Duarte a
+    # 21-out-2026). Até à 3.10 era ignorado: em "MT OBSC: N OF N4100 LAN
+    # ENTIRE FIR" só o N de N4100 ficava NO-GO (erro optimista). A linha
+    # continua a ser lida INTEIRA como até à 3.10 (mesma área, mesmos avisos
+    # "Área não reconhecida"/"Área alargada" — nunca menos do que a 3.10) e
+    # cada parte "[HH/HH] ENTIRE FIR …" é lida A MAIS, como subentrada
+    # virtual de toda a FIR (com a sua janela e superfície). Uma parte sem
+    # fenómeno próprio ("TURB: SEV SFC/FL050 ENTIRE FIR") alarga antes a
+    # linha inteira a toda a FIR (fora de MT OBSC/VA). Não actua quando antes
+    # só está o nome do campo e a janela ("MT OBSC: ENTIRE FIR",
+    # "SIG CLD:19/21 ENTIRE FIR"). Ver o estado em parse_gamet.
 
     lines = [l.strip() for l in secn1.splitlines() if l.strip()]
 
@@ -1663,6 +1674,15 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
                    or re.match(r"ENTIRE\s+FIR\b", lines[i + 1])):   # 3.11
             lines[i] = lines[i][:mj.start()].rstrip()
             lines[i + 1] = f"{mj.group(1)} {lines[i + 1]}"
+
+    linhas = []
+    for l in lines:
+        linhas.append((l, False))
+        conteudo = _CAMPO_PREFIXO_RE.sub("", l, count=1)
+        cortes = _partes_entire(conteudo)
+        for k, c in enumerate(cortes):
+            fim = cortes[k + 1] if k + 1 < len(cortes) else len(conteudo)
+            linhas.append((conteudo[c:fim].strip(), True))
 
     state = "IDLE"
     blocks = []
@@ -1694,12 +1714,12 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
 
     def _fechar_sub():
         if (sub is not None and sem_fenomeno is not None and not sub["descartada"]
-                and len(blocks) == sub["n0"]):
+                and not sub.get("virtual") and len(blocks) == sub["n0"]):
             txt = " ".join(t for t in sub["linhas"] if t)
             if not _SEM_CONTEUDO_RE.fullmatch(txt):
                 sem_fenomeno.append(f"{sub['campo']}: {txt}")
 
-    for raw_line in lines:
+    for raw_line, virtual in linhas:
 
         line = raw_line.strip()
         if not line:
@@ -1762,6 +1782,23 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
         if state == "IDLE":
             continue
 
+        # ---- "ENTIRE FIR" a meio da linha (3.11) ----
+        # A linha é lida inteira como até à 3.10; as partes "[HH/HH] ENTIRE
+        # FIR …" vêm a seguir como linhas virtuais (sem avisos próprios: os da
+        # linha inteira mantêm-se). Uma parte sem fenómeno próprio alarga a
+        # linha inteira a toda a FIR (MT OBSC/VA: a parte virtual já dá o
+        # bloco de toda a FIR).
+        mv = state in ("MT_OBSC", "VA")
+        if virtual:
+            cortes = []
+            if not mv and not _PARTE_SO_AREA_RE.sub("", content).strip():
+                continue                    # já alargou a linha inteira
+        else:
+            cortes = _partes_entire(content)
+        alargar = (not mv and any(
+            not _PARTE_SO_AREA_RE.sub("", content[c:f]).strip()
+            for c, f in zip(cortes, cortes[1:] + [len(content)])))
+
         # ---- Contexto geográfico ----
         # Um qualificador geográfico que caia fora dos limites da FIR
         # (ex.: "N OF N4200", quando a FIR termina em N41°54') produz um
@@ -1774,7 +1811,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
         if new_poly is not None:
             current_polygon = new_poly
             # Cardinal solto antes de BTN (3.5): área alargada, com aviso
-            if alargadas is not None:
+            if alargadas is not None and not virtual:
                 for leitura in lidas:
                     alargadas.append((f"{campo_txt}: {content}", leitura))
         elif (_AREA_INI_RE.match(content) or _DIAGONAL_RE.search(content)
@@ -1787,7 +1824,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
             # qualificador nenhum continuam a usar a área da subentrada;
             # "ENTIRE FIR" é toda a FIR lida e não gera aviso.
             current_polygon = FIR_POLYGON
-            if sem_area is not None and not _ENTIRE_FIR_RE.match(content):
+            if sem_area is not None and not virtual and not _ENTIRE_FIR_RE.match(content):
                 sem_area.append(f"{campo_txt}: {content}")
 
         # Subentrada nova (3.9): a linha abre o campo ou traz qualificador
@@ -1798,13 +1835,15 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
         if nova_sub:
             _fechar_sub()
             sub = {"campo": campo_txt, "linhas": [], "n0": len(blocks),
-                   "descartada": False}
+                   "descartada": False, "virtual": virtual}
         sub["linhas"].append(content)
         # Campo novo, ou a subentrada de abertura continua noutra linha: o
         # bloco de toda a FIR da abertura vazia fica (3.11).
         if new_state or not nova_sub:
             abertura_vazia = None
 
+        if alargar:
+            current_polygon = FIR_POLYGON   # "… ENTIRE FIR" sem fenómeno (3.11)
         poly = current_polygon
         if poly is not None and poly.is_empty:
             sub["descartada"] = True
@@ -1843,7 +1882,9 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
         # ---- Janela temporal (HH/HH) ----
         # Um fenómeno pode aplicar-se só a parte do período do GAMET
         # (ex.: "TURB:11/15 ..." num GAMET válido 0900/1500).
-        wm = re.search(r"(?:^|\s)(\d{2})/(\d{2})(?=\s|$)", content[:24])
+        # A janela de uma parte "HH/HH ENTIRE FIR" é dela, não da linha (3.11).
+        wm = re.search(r"(?:^|\s)(\d{2})/(\d{2})(?=\s|$)",
+                       content[:min([24] + cortes)])
         if wm:
             h1, h2 = int(wm.group(1)), int(wm.group(2))
             if h1 <= 23 and h2 <= 23:

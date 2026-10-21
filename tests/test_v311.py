@@ -6,10 +6,11 @@ testes usam o GAMET real 201500/202100 (arquivo,
 
 1. `ENTIRE FIR` a meio de uma linha era ignorado (erro OPTIMISTA): em
    "MT OBSC: N OF N4100 LAN ENTIRE FIR" a área ficava só a N de N4100 (41
-   aeródromos GO). Por decisão do Duarte injecta-se agora uma quebra antes de
-   `ENTIRE FIR` (com a janela HH/HH que o precede), em todos os campos da
-   Secção I. Uma subentrada `ENTIRE FIR` sem janela vale para todo o período.
-   `… AND ENTIRE FIR` não é junção: toda a FIR (leitura conservadora).
+   aeródromos GO). A linha continua a ser lida inteira como na 3.10 e cada
+   parte "[HH/HH] ENTIRE FIR …" é lida a mais, como subentrada de toda a FIR
+   (com a sua janela e superfície); uma parte sem fenómeno próprio alarga a
+   linha a toda a FIR. Nunca mais permissivo do que a 3.10 (casos do revisor
+   do PR #24 abaixo; prova geral em test_v311_contra_310.py).
 
 2. A linha que abre o campo MT OBSC (ou `VA:`) vazia — só a janela, ou nada,
    porque a janela/qualificador passou para a linha seguinte — dava sempre um
@@ -132,13 +133,14 @@ def test_entire_fir_a_meio_com_janela_noutro_campo(eng):
 
 
 def test_entire_fir_lan_a_seguir(eng):
-    """"ENTIRE FIR LAN": toda a terra da FIR (a superfície da subentrada)."""
+    """"ENTIRE FIR LAN": a parte virtual dá toda a terra da FIR; a linha
+    inteira continua lida como na 3.10 (N de N4100, superfície LAN/MAR)."""
     g = _g("MT OBSC: N OF N4100 MAR ENTIRE FIR LAN")
     terra = eng.surface_polygon("LAN").intersection(eng.FIR_POLYGON)
     mt = _blocos(eng, g, "MT_OBSC")
     assert any(b.surface == "LAN" and b.polygon.symmetric_difference(terra).area < 1e-6
                for b in mt), mt
-    assert any(b.surface == "MAR" and _a_norte(b, 41.0) for b in mt)
+    assert any(b.surface == "LAN/MAR" and _a_norte(b, 41.0) for b in mt)
     assert set(_decisoes(eng, g).values()) == {"NO-GO"}   # aeródromos em terra
 
 
@@ -146,8 +148,13 @@ def test_entire_fir_mar_a_seguir(eng):
     g = _g("SIG CLD: N OF N4100 LAN BKN 010HFT AGL ENTIRE FIR MAR BKN 002HFT AGL")
     b200 = [b for b in _blocos(eng, g, "BASE_AGL") if b.value == 200]
     mar = eng.surface_polygon("MAR").intersection(eng.FIR_POLYGON)
-    assert len(b200) == 1 and b200[0].surface == "MAR"
-    assert b200[0].polygon.symmetric_difference(mar).area < 1e-6
+    virtual = [b for b in b200 if b.surface == "MAR"]
+    assert len(virtual) == 1
+    assert virtual[0].polygon.symmetric_difference(mar).area < 1e-6
+    # A linha inteira, como na 3.10: 200 ft a N de N4100 (terra e mar)
+    assert any(b.surface == "LAN/MAR" and _a_norte(b, 41.0) for b in b200)
+    d = _decisoes(eng, g)
+    assert {d[n] for n in _norte(eng)} == {"NO-GO"}
 
 
 def test_entire_fir_depois_de_and_toda_a_fir(eng):
@@ -159,10 +166,62 @@ def test_entire_fir_depois_de_and_toda_a_fir(eng):
 
     g = _g("SIG CLD: N OF N4100 AND ENTIRE FIR BKN 002HFT AGL")
     b200 = [b for b in _blocos(eng, g, "BASE_AGL") if b.value == 200]
-    assert len(b200) == 1 and _toda(eng, b200[0])
+    assert any(_toda(eng, b) for b in b200)
     assert set(_decisoes(eng, g).values()) == {"NO-GO"}
-    # O resto da linha ("N OF N4100 AND") fica sem fenómeno e avisa.
-    assert eng.campos_nao_interpretados(g) == ["SIG CLD: N OF N4100 AND"]
+    assert eng.campos_nao_interpretados(g) == []
+
+
+# ---- Casos do revisor do PR #24: nunca mais permissivo do que a 3.10 ----
+
+def test_revisor_diagonal_depois_de_entire_fir(eng):
+    """Na 3.10 a diagonal deixa a linha sem área → OCNL TS em toda a FIR, com
+    aviso. Tem de continuar assim (no 979aeeb o OCNL TS ficava só a N de
+    N4100 e o aviso desaparecia)."""
+    corpo = "SIGWX: N OF N4100 OCNL TS ENTIRE FIR SW OF W00800 ISOL TS"
+    g = _g(corpo)
+    ts = _blocos(eng, g, "TS")
+    assert any(b.value == "OCNL" and _toda(eng, b) for b in ts), ts
+    assert set(_decisoes(eng, g).values()) == {"NO-GO"}
+    assert eng.subentradas_sem_area(g) == [corpo]
+
+
+@pytest.mark.parametrize("corpo", [
+    "SIGWX: S OF N3800 LAN OCNL TS ENTIRE FIR MAR ISOL TS",
+    "SIG CLD: S OF N3800 LAN BKN 002HFT AGL ENTIRE FIR MAR BKN 040HFT AGL",
+    "SFC VIS: S OF N3800 LAN 1000M FG ENTIRE FIR MAR 4000M RA",
+])
+def test_revisor_superficies_diferentes(eng, corpo):
+    """A linha inteira (superfície LAN/MAR, como na 3.10) mantém o NO-GO a S
+    de N3800; a parte ENTIRE FIR MAR é lida a mais."""
+    g = _g(corpo)
+    d = _decisoes(eng, g)
+    assert {d[n] for n in _sul(eng)} == {"NO-GO"}
+    assert any(_a_sul(b, 38.0) and b.surface == "LAN/MAR" for b in _blocos(eng, g))
+
+
+def test_revisor_entire_fir_no_fim_da_linha(eng):
+    """"TURB: SEV SFC/FL050 ENTIRE FIR": a linha inteira passa a toda a FIR,
+    sem "Campo não interpretado"."""
+    g = _g("TURB: N OF N4100 SEV SFC/FL050 ENTIRE FIR")
+    turb = _blocos(eng, g, "TURB")
+    assert len(turb) == 1 and _toda(eng, turb[0])
+    assert set(_decisoes(eng, g).values()) == {"NO-GO"}
+    assert eng.campos_nao_interpretados(g) == []
+    assert eng.subentradas_sem_area(g) == []
+
+
+def test_revisor_janela_em_inicio_de_linha(eng):
+    """"SIG CLD:\n19/21 ENTIRE FIR …" não perde a janela."""
+    g = _g("SIG CLD:\n19/21 ENTIRE FIR BKN 002HFT AGL")
+    b = _blocos(eng, g, "BASE_AGL")
+    assert len(b) == 1 and _toda(eng, b[0]) and b[0].window == "19–21Z"
+
+
+def test_area_alargada_mantem_aviso(eng):
+    """O aviso "Área alargada" (3.5) da linha inteira mantém-se."""
+    g = _g("SIG CLD: S BTN N3720 - N3800 BKN 002HFT AGL ENTIRE FIR BKN 040HFT AGL")
+    assert [l for _, l in eng.subentradas_alargadas(g)] == ["S OF N3800"]
+    assert any(_toda(eng, b) and b.value == 4000 for b in _blocos(eng, g, "BASE_AGL"))
 
 
 @pytest.mark.parametrize("corpo, fen, janela", [

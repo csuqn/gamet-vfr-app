@@ -89,18 +89,27 @@ Três pormenores que já causaram erros reais:
   sem qualificador continua essa subentrada e não gera bloco próprio (já era
   assim), e `S OF N3800 NIL` continua a gerar o bloco a S de N3800
   (conservador: não é o campo inteiro a NIL).
-- **`ENTIRE FIR` a meio da linha** (3.11, decisão do Duarte a 21-out-2026):
-  injecta-se uma quebra antes de `ENTIRE FIR` (com a janela `HH/HH` que o
-  precede), em todos os campos da Secção I. Até à 3.10
-  `MT OBSC: N OF N4100 LAN ENTIRE FIR` dava só o N de N4100 (41 GO / 11 NO-GO;
-  erro optimista) e em `S OF N3800 LAN 19/21 ENTIRE FIR` perdia-se a 2.ª
-  subentrada. Não parte quando antes só está o nome do campo e a janela
-  (`MT OBSC: ENTIRE FIR`, `SIG CLD:19/21 ENTIRE FIR`). A subentrada
-  `ENTIRE FIR` sem janela vale todo o período (não herda a anterior); uma
-  janela no fim da linha anterior passa para ela; `ENTIRE FIR LAN/MAR/COT`
-  recorta pela superfície. `… AND ENTIRE FIR` **não** é junção: o `ENTIRE FIR`
-  fica sozinho (toda a FIR, conservador) e, fora de MT OBSC/VA, o resto
-  (`N OF N4100 AND`) dá o aviso "Campo não interpretado". A área do SIGMET
+- **`ENTIRE FIR` a meio da linha** (3.11, pedido do Duarte a 21-out-2026):
+  até à 3.10 era ignorado — `MT OBSC: N OF N4100 LAN ENTIRE FIR` dava só o N
+  de N4100 (41 GO / 11 NO-GO; erro optimista). A linha continua a ser lida
+  **inteira, como na 3.10** (mesma área, valores e avisos "Área não
+  reconhecida"/"Área alargada") e cada parte `[HH/HH] ENTIRE FIR …` é lida **a
+  mais**, como subentrada virtual de toda a FIR, com a sua janela e superfície
+  (`_partes_entire`, linhas virtuais em `parse_gamet`; sem avisos próprios).
+  Uma parte sem fenómeno próprio (`TURB: SEV SFC/FL050 ENTIRE FIR`,
+  `… ENTIRE FIR SW OF W00800`) alarga antes a linha inteira a toda a FIR (fora
+  de MT OBSC/VA, onde a parte virtual já dá o bloco). Não actua quando antes só
+  está o nome do campo e a janela (`MT OBSC: ENTIRE FIR`,
+  `SIG CLD:\n19/21 ENTIRE FIR …`). Por isso nunca é mais permissivo do que a
+  3.10 — testado contra o motor da 3.10 (`tests/referencia/app_3_10.py`,
+  `test_v311_contra_310.py`). A 1.ª versão (979aeeb, rejeitada pelo revisor)
+  partia a linha e perdia a leitura da 3.10: em
+  `SIGWX: N OF N4100 OCNL TS ENTIRE FIR SW OF W00800 ISOL TS` o OCNL TS (toda a
+  FIR por causa da diagonal) ficava só a N de N4100 e o aviso desaparecia; e
+  com superfícies diferentes (`S OF N3800 LAN … ENTIRE FIR MAR …`) também. Uma
+  janela no fim da linha anterior (quebra do texto) passa para a linha
+  `ENTIRE FIR`; a subentrada `ENTIRE FIR` sem janela vale todo o período; a
+  janela da linha inteira procura-se só antes da 1.ª parte. A área do SIGMET
   (`area_sigmet`) não tinha o problema (procura `ENTIRE FIR` em todo o texto).
 - **Vírgula decimal nos KM** (3.10): `LCA 1,5KM BR` → 1500 m (até à 3.9, 5000 m:
   apanhava o `5KM`). Só `\d{1,2},\d+` colado (`0800M BR, 5KM`, `1200M,5KM`,
@@ -122,8 +131,8 @@ Três pormenores que já causaram erros reais:
   qualificador fora da FIR continua a descartar o fenómeno; MAR/LAN/COT
   sozinhos não são área. Só conta o que já é início de linha (quebra injectada
   antes de `N OF N…`/`BTN N…` etc., ou quebra do texto) — não se injectam
-  quebras novas, com uma só excepção: antes de `ENTIRE FIR` (3.11, decisão
-  do Duarte a 21-out-2026; ver acima).
+  quebras novas (`ENTIRE FIR` a meio da linha, 3.11, é lido como parte
+  virtual sem partir a linha; ver acima).
 - **Cardinal solto antes de BTN** (`S BTN N3720 - N3800`, GAMET real
   182100/190300; 3.5, opção (b) do Duarte a 19-out-2026): cardinal simples
   (N/S/E/W, sem `OF`/`PART`) imediatamente antes de `BTN` dá a **união** da
@@ -283,7 +292,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-1342 testes. Devem passar a 100%.
+1751 testes. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -348,7 +357,17 @@ python3 -m pytest
   fora da FIR, continuação, `VA` sem dois pontos) e `MT OBSC: NIL` /
   `VA: NIL` exactos (sem bloco, 52 GO, sem aviso; com janela, `=`, entre
   outros campos; não mudam: `NIL N OF …`, `NIL LAN`, `NILL`, VA de SIGWX, NIL
-  depois de outra subentrada)
+  depois de outra subentrada); casos do revisor do PR #24 (diagonal depois
+  de `ENTIRE FIR` mantém OCNL TS em toda a FIR e o aviso; superfícies
+  diferentes; `ENTIRE FIR` no fim da linha sem "Campo não interpretado";
+  janela em início de linha; aviso "Área alargada")
+- `tests/test_v311_contra_310.py` — 400 linhas geradas com `ENTIRE FIR` a meio
+  (todos os campos, qualificadores antes/depois, diagonais, coordenadas, WI,
+  BTN, MAR/LAN/COT, AND, janela, duas partes): nos 52 aeródromos e numa grelha
+  de 0,2°, a decisão nunca é mais permissiva do que a do motor da **3.10**
+  (`tests/referencia/app_3_10.py`, cópia fixa do `app.py` do main d2ccf2e) e
+  os avisos de área da 3.10 mantêm-se. Os casos não activam as outras duas
+  correcções da 3.11 (sem NIL, abertura com conteúdo). Não editar a cópia.
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva
