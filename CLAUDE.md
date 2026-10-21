@@ -70,13 +70,25 @@ Três pormenores que já causaram erros reais:
   21-out-2026): em `MT OBSC:17/19 N OF N4100 LAN` (a janela passa para a linha
   seguinte) ou `MT OBSC S OF N3900` a abertura vazia dava, até à 3.10, toda a
   FIR em todo o período. O bloco dela sai só quando: a linha é vazia, só janela
-  ou só pontuação (**NIL não** — `MT OBSC: NIL` fica à espera do Duarte); é a
+  ou só pontuação (NIL não — ver o ponto seguinte); é a
   única linha da sua subentrada; é `MT OBSC` ou `VA:` com dois pontos (`VA`
   sem eles é o VA de SIGWX, em toda a FIR); e uma subentrada seguinte do campo
   gera o seu bloco (área legível ou "Área não reconhecida"; uma área fora da
   FIR não conta). Tudo o resto mantém toda a FIR (`MT OBSC: LAN`, `MT OBSC:`
-  seguido de outro campo, `MT OBSC:17/19` sozinho). É a única mudança MAIS
-  PERMISSIVA da 3.11 — testada em `test_v311.py` e em 700 GAMETs gerados.
+  seguido de outro campo, `MT OBSC:17/19` sozinho). É uma das duas mudanças MAIS
+  PERMISSIVAS da 3.11 (a outra é o NIL) — testada em `test_v311.py` e em 700 GAMETs gerados.
+- **`MT OBSC: NIL` / `VA: NIL`** (3.11, decisão do Duarte a 21-out-2026): até
+  à 3.10 davam o fenómeno em toda a FIR (NO-GO nos 52 aeródromos), ao contrário
+  de SIG CLD/TURB/SIGWX: NIL. Regra estrita: só não gera bloco quando TODO o
+  conteúdo do campo (todas as linhas até ao campo seguinte) é exactamente
+  `NIL`, com espaços, `:` e `=` à volta e, opcionalmente, uma janela antes
+  (`MT OBSC: 17/19 NIL`) — `_CAMPO_NIL_RE`, `_fechar_campo` em `parse_gamet`.
+  Não avisa "Campo não interpretado". Fica tudo como estava (toda a FIR, ou a
+  área lida): `NIL N OF N4100`, `NIL LAN`, `NILL`, duas janelas, `VA` sem dois
+  pontos (VA de SIGWX), e NIL depois de outra subentrada — uma linha `NIL`
+  sem qualificador continua essa subentrada e não gera bloco próprio (já era
+  assim), e `S OF N3800 NIL` continua a gerar o bloco a S de N3800
+  (conservador: não é o campo inteiro a NIL).
 - **`ENTIRE FIR` a meio da linha** (3.11, decisão do Duarte a 21-out-2026):
   injecta-se uma quebra antes de `ENTIRE FIR` (com a janela `HH/HH` que o
   precede), em todos os campos da Secção I. Até à 3.10
@@ -271,7 +283,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-1325 testes. Devem passar a 100%.
+1342 testes. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -333,7 +345,10 @@ python3 -m pytest
   campo não muda; SIGMET já era toda a área) e linha de abertura vazia em
   MT OBSC/VA (`MT OBSC:17/19 N OF N4100 LAN` → só a subentrada; `MT OBSC S OF
   N3900`; casos que não mudam: `LAN`, outro campo a seguir, só janela, área
-  fora da FIR, continuação, `VA` sem dois pontos, NIL)
+  fora da FIR, continuação, `VA` sem dois pontos) e `MT OBSC: NIL` /
+  `VA: NIL` exactos (sem bloco, 52 GO, sem aviso; com janela, `=`, entre
+  outros campos; não mudam: `NIL N OF …`, `NIL LAN`, `NILL`, VA de SIGWX, NIL
+  depois de outra subentrada)
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva

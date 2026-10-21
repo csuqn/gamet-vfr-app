@@ -17,8 +17,13 @@ testes usam o GAMET real 201500/202100 (arquivo,
    toda a FIR). Esse bloco só sai quando a linha de abertura é vazia/só
    janela/só pontuação, é a única linha da sua subentrada e uma subentrada
    seguinte do mesmo campo gera o seu bloco. Tudo o resto fica igual.
-   `MT OBSC: NIL` / `VA: NIL` não mudam (questão à espera do Duarte); "VA"
-   sem dois pontos (VA dentro de SIGWX) não muda.
+   "VA" sem dois pontos (VA dentro de SIGWX) não muda.
+
+3. `MT OBSC: NIL` / `VA: NIL` davam o fenómeno em toda a FIR (NO-GO nos 52
+   aeródromos). Decisão do Duarte (21-out-2026): só não geram bloco quando
+   todo o conteúdo do campo é exactamente NIL (":", "=", espaços e uma janela
+   HH/HH antes admitidos). "NIL N OF …", "NIL LAN", "NILL", NIL depois de
+   outra subentrada e "VA" de SIGWX ficam como estavam.
 """
 import pytest
 
@@ -324,11 +329,75 @@ def test_va_sem_dois_pontos_inalterado(eng, corpo):
     assert set(_decisoes(eng, g).values()) == {"NO-GO"}
 
 
+# ---------------------------------------------------------------------
+# 3. MT OBSC: NIL / VA: NIL (decisão do Duarte a 21-out-2026)
+# ---------------------------------------------------------------------
+# Até à 3.10 davam o fenómeno em toda a FIR (NO-GO nos 52 aeródromos). Só
+# deixam de gerar bloco quando TODO o conteúdo do campo é exactamente NIL.
+
 @pytest.mark.parametrize("corpo, fen", [
     ("MT OBSC: NIL", "MT_OBSC"),
+    ("MT OBSC:NIL", "MT_OBSC"),
+    ("MT OBSC NIL", "MT_OBSC"),
+    ("MT OBSC: NIL=", "MT_OBSC"),
+    ("MT OBSC: 17/19 NIL", "MT_OBSC"),
+    ("MT OBSC:17/19 NIL", "MT_OBSC"),
+    ("MT OBSC:\nNIL", "MT_OBSC"),
     ("VA: NIL", "VA"),
-    ("MT OBSC: NIL N OF N4100", "MT_OBSC"),
+    ("VA:NIL", "VA"),
+    ("VA: 19/21 NIL", "VA"),
 ])
-def test_nil_nao_mexe(eng, corpo, fen):
-    """NIL fica como na 3.10 (questão à espera do Duarte): toda a FIR."""
-    assert any(_toda(eng, b) for b in _blocos(eng, _g(corpo), fen))
+def test_nil_exacto_nao_gera_bloco(eng, corpo, fen):
+    g = _g(corpo)
+    assert _blocos(eng, g, fen) == []
+    assert _decisoes(eng, g) == {n: "GO" for n in eng.AERODROMES}
+    assert eng.campos_nao_interpretados(g) == []
+    assert eng.subentradas_sem_area(g) == []
+
+
+def test_nil_exacto_entre_outros_campos(eng):
+    g = _g("SIG CLD: N OF N4100 BKN 002HFT AGL MT OBSC: NIL VA: NIL "
+           "SFC VIS: S OF N3800 1000M BR")
+    assert _blocos(eng, g, "MT_OBSC") == [] and _blocos(eng, g, "VA") == []
+    assert [b.value for b in _blocos(eng, g, "BASE_AGL")] == [200]
+    assert [b.value for b in _blocos(eng, g, "VIS")] == [1000]
+    d = _decisoes(eng, g)
+    assert {d[n] for n in _norte(eng)} == {"NO-GO"}
+    assert {d[n] for n in _sul(eng)} == {"NO-GO"}
+    meio = {n for n, (la, _lo) in eng.AERODROMES.items() if 38.02 < la < 40.98}
+    assert {d[n] for n in meio} == {"GO"}
+    assert eng.campos_nao_interpretados(g) == []
+
+
+@pytest.mark.parametrize("corpo, fen", [
+    ("MT OBSC: NIL N OF N4100", "MT_OBSC"),     # NIL seguido de área
+    ("MT OBSC: NIL LAN", "MT_OBSC"),
+    ("MT OBSC: NILL", "MT_OBSC"),
+    ("MT OBSC: 17/19 18/20 NIL", "MT_OBSC"),
+    ("VA: NIL N OF N4000", "VA"),
+    ("VA: NILL", "VA"),
+    ("SIGWX: S OF N3800 VA NIL", "VA"),          # VA dentro de SIGWX
+    ("SIGWX: NIL VA", "VA"),
+])
+def test_nil_nao_exacto_inalterado(eng, corpo, fen):
+    """Fica como na 3.10: o fenómeno em toda a FIR (em "NIL LAN", em toda a
+    terra) — NO-GO nos 52 aeródromos."""
+    g = _g(corpo)
+    terra = eng.surface_polygon("LAN").intersection(eng.FIR_POLYGON)
+    assert any(b.polygon.buffer(1e-9).contains(terra) for b in _blocos(eng, g, fen))
+    assert set(_decisoes(eng, g).values()) == {"NO-GO"}
+
+
+def test_nil_depois_de_outra_subentrada_inalterado(eng):
+    """Um NIL que continua uma subentrada com área não gera bloco próprio (já
+    era assim): só a subentrada com área. Um NIL com qualificador próprio
+    ("S OF N3800 NIL") continua a gerar o bloco dessa área (conservador:
+    não é o campo inteiro a NIL)."""
+    g = _g("MT OBSC: N OF N4100 LAN\nNIL")
+    mt = _blocos(eng, g, "MT_OBSC")
+    assert len(mt) == 1 and _a_norte(mt[0], 41.0)
+
+    g = _g("MT OBSC: N OF N4100 LAN S OF N3800 NIL")
+    mt = _blocos(eng, g, "MT_OBSC")
+    assert len(mt) == 2
+    assert any(_a_norte(b, 41.0) for b in mt) and any(_a_sul(b, 38.0) for b in mt)

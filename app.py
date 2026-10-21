@@ -1555,6 +1555,9 @@ _SEM_CONTEUDO_RE = re.compile(r"[\W_]*(?:\d{2}/\d{2}[\W_]*)?(?:NIL[\W_]*)?")
 # Linha de abertura de MT OBSC / VA sem conteúdo: vazia, só pontuação ou só
 # a janela — NIL não (3.11).
 _ABERTURA_VAZIA_RE = re.compile(r"[\W_]*(?:\d{2}/\d{2}[\W_]*)?")
+# Campo MT OBSC / VA cujo conteúdo é exactamente NIL (3.11, decisão do
+# Duarte a 21-out-2026): espaços, ":" e "=" à volta e uma janela antes.
+_CAMPO_NIL_RE = re.compile(r"[\s:=]*(?:\d{2}/\d{2}\s+)?NIL[\s:=]*")
 # Só o nome de um campo da Secção I (e a janela), no início de uma linha:
 # antes de um "ENTIRE FIR" que já abre o campo (3.11).
 _CAMPO_SO_RE = re.compile(
@@ -1673,6 +1676,21 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
     # Índice do bloco de toda a FIR da linha que abre MT OBSC / VA: quando
     # vazia (3.11); sai se uma subentrada seguinte do campo gerar o seu bloco.
     abertura_vazia = None
+    # Campo MT OBSC / "VA:" em curso, para o NIL exacto (3.11): índice do
+    # primeiro bloco do campo e os conteúdos das suas linhas.
+    campo_nil = [None]
+
+    def _fechar_campo():
+        # "MT OBSC: NIL" / "VA: NIL" (3.11, decisão do Duarte a 21-out-2026):
+        # até à 3.10 davam o fenómeno em toda a FIR (NO-GO nos 52
+        # aeródromos), ao contrário dos outros campos. Só quando TODO o
+        # conteúdo do campo é exactamente NIL (com ":", "=" e espaços à
+        # volta, ou uma janela antes): "NIL N OF N4100", "NIL LAN", "NILL"
+        # ou um NIL depois de outra subentrada ficam como estavam.
+        c = campo_nil[0]
+        campo_nil[0] = None
+        if c is not None and _CAMPO_NIL_RE.fullmatch(" ".join(c["linhas"])):
+            del blocks[c["n0"]:]
 
     def _fechar_sub():
         if (sub is not None and sem_fenomeno is not None and not sub["descartada"]
@@ -1714,6 +1732,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
         elif re.match(r"VA\b", line):
             new_state = "VA"
         elif re.match(r"SECN\s+I\b", line):
+            _fechar_campo()
             _fechar_sub()
             sub = None
             state = "IDLE"
@@ -1721,6 +1740,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
             continue
 
         if new_state:
+            _fechar_campo()
             state = new_state
             current_polygon = FIR_POLYGON  # reset geo ao mudar de campo
             current_window = ""            # reset janela temporal
@@ -1731,8 +1751,13 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
             ).strip()
             # Nome do campo, para o aviso de área não reconhecida (3.4)
             campo_txt = line[:len(line) - len(content)].strip().rstrip(":").strip()
+            # "VA" sem dois pontos é o VA dentro de SIGWX: não entra (3.11)
+            if new_state == "MT_OBSC" or (new_state == "VA" and re.match(r"VA\s*:", line)):
+                campo_nil[0] = {"n0": len(blocks), "linhas": []}
         else:
             content = line
+        if campo_nil[0] is not None:
+            campo_nil[0]["linhas"].append(content)
 
         if state == "IDLE":
             continue
@@ -2092,6 +2117,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
                         and (state == "MT_OBSC" or re.match(r"VA\s*:", line))):
                     abertura_vazia = len(blocks) - 1
 
+    _fechar_campo()
     _fechar_sub()
 
     # ---- Extração Secção II: FZLVL, QNH e vento ----
