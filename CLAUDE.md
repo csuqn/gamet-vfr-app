@@ -108,7 +108,12 @@ Três pormenores que já causaram erros reais:
   FIR por causa da diagonal) ficava só a N de N4100 e o aviso desaparecia; e
   com superfícies diferentes (`S OF N3800 LAN … ENTIRE FIR MAR …`) também. Uma
   janela no fim da linha anterior (quebra do texto) passa para a linha
-  `ENTIRE FIR`; a subentrada `ENTIRE FIR` sem janela vale todo o período; a
+  `ENTIRE FIR`. As linhas virtuais **não mudam o que as linhas seguintes sem
+  qualificador herdam** (área, janela, subentrada: guardadas e repostas — 2.ª
+  revisão do PR #24: em `SIGWX: N OF N4100 LAN ISOL TS 19/21 ENTIRE FIR ISOL TS`
+  + `SEV SQL` o SQL passava a só 19–21Z); e uma linha que a 3.10 descartava
+  (sem área ou vazia depois de MAR/LAN/COT) e que a parte sem fenómeno alarga
+  lê a sua janela sem a passar às seguintes; a subentrada `ENTIRE FIR` sem janela vale todo o período; a
   janela da linha inteira procura-se só antes da 1.ª parte. A área do SIGMET
   (`area_sigmet`) não tinha o problema (procura `ENTIRE FIR` em todo o texto).
 - **Vírgula decimal nos KM** (3.10): `LCA 1,5KM BR` → 1500 m (até à 3.9, 5000 m:
@@ -292,7 +297,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-1751 testes. Devem passar a 100%.
+2154 testes. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -360,13 +365,17 @@ python3 -m pytest
   depois de outra subentrada); casos do revisor do PR #24 (diagonal depois
   de `ENTIRE FIR` mantém OCNL TS em toda a FIR e o aviso; superfícies
   diferentes; `ENTIRE FIR` no fim da linha sem "Campo não interpretado";
-  janela em início de linha; aviso "Área alargada")
+  janela em início de linha; aviso "Área alargada"; linhas seguintes herdam
+  a janela e a área da 3.10)
 - `tests/test_v311_contra_310.py` — 400 linhas geradas com `ENTIRE FIR` a meio
   (todos os campos, qualificadores antes/depois, diagonais, coordenadas, WI,
   BTN, MAR/LAN/COT, AND, janela, duas partes): nos 52 aeródromos e numa grelha
   de 0,2°, a decisão nunca é mais permissiva do que a do motor da **3.10**
   (`tests/referencia/app_3_10.py`, cópia fixa do `app.py` do main d2ccf2e) e
-  os avisos de área da 3.10 mantêm-se. Os casos não activam as outras duas
+  os avisos de área da 3.10 mantêm-se; com linhas seguintes sem qualificador
+  (com e sem janela) e um **oráculo por hora** (15–20Z, por ponto, com as
+  janelas dos blocos e `decision()`, porque a decisão por regiões ignora as
+  janelas). Os casos não activam as outras duas
   correcções da 3.11 (sem NIL, abertura com conteúdo). Não editar a cópia.
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):

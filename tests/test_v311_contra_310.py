@@ -16,10 +16,12 @@ grelha sobre a FIR, que a decisão nunca é mais permissiva do que a da 3.10, e
 que os avisos "Área não reconhecida" e "Área alargada" da 3.10 se mantêm.
 """
 import random
+import re
 import types
 from pathlib import Path
 
 import pytest
+from shapely.prepared import prep
 
 import conftest
 from conftest import build_gamet
@@ -79,7 +81,14 @@ QUAL = ["N OF N4100", "S OF N3800", "BTN N3840 AND N4100", "E OF W00800", "W OF 
 DEPOIS = ["", "", "SW OF W00800", "NE OF N3900", "N4000 W00800", "BTN W00800 - W00700",
           "WI N3900 W00900 - N3900 W00800 - N4000 W00800"]
 SUP = ["", "", " LAN", " MAR", " COT", " MAR AND COT"]
-JANELA = ["", "", "19/21 "]
+JANELA = ["", "", "19/21 ", "17/18 "]
+# Linhas seguintes sem qualificador (herdam área, janela e subentrada)
+SEGUINTES = {"SIGWX:": ["SEV SQL", "OCNL TS", "20/21 SEV SQL"],
+             "SIG CLD:": ["OVC 002HFT AGL", "16/17 OVC 002HFT AGL", "BKN 004HFT AGL"],
+             "SFC VIS:": ["0800M FG", "16/17 1000M FG"],
+             "TURB:": ["SEV SFC/FL050", "16/17 SEV SFC/FL050"],
+             "ICE:": ["SEV FL050/FL080"], "MTW:": ["SEV SFC/FL080"],
+             "SFC WSPD:": ["40KT", "16/17 40KT"], "MT OBSC:": ["LAN"], "VA:": ["MAR"]}
 LIGA = [" ", " ", " AND "]
 
 
@@ -94,6 +103,17 @@ def _casos(n=400, semente=311):
         "TURB: SEV SFC/FL050 ENTIRE FIR",
         "SIGWX: N OF N4100 FRQ ENTIRE FIR ISOL TS",
         "SIG CLD: N OF N4100 OCNL ENTIRE FIR ISOL TCU/CB 030/XXXHFT AGL",
+        # 2.ª revisão do PR #24: herança da janela pelas linhas seguintes
+        "SIGWX: N OF N4100 LAN ISOL TS 19/21 ENTIRE FIR ISOL TS\nSEV SQL",
+        "SIG CLD: N OF N4100 BKN 010HFT AGL 17/18 ENTIRE FIR BKN 030HFT AGL\nOVC 002HFT AGL",
+        "TURB: N OF N4100 MOD FL050/FL100 19/21 ENTIRE FIR\nSEV SFC/FL050",
+        # Linha descartada na 3.10 (E OF W00800 ∩ COT vazio) alargada pela
+        # parte sem fenómeno: as seguintes herdam a janela da 3.10
+        "MTW: 17/19 N OF N4000 AND E OF W00800 SEV SFC/FL100 ENTIRE FIR AND "
+        "ENTIRE FIR COT SEV SFC/FL100\nMOD FL080\nSEV SFC/FL100",
+        "SIG CLD: N OF N4100 BKN 010HFT AGL\n17/19 E OF W00700 COT BKN 004HFT AGL ENTIRE FIR"
+        "\nOVC 002HFT AGL",
+        "SIGWX: 19/21 N OF N4300 OCNL TS ENTIRE FIR\nSEV SQL",
     ]
     while len(casos) < n:
         campo, fens = rnd.choice(CAMPOS)
@@ -108,7 +128,10 @@ def _casos(n=400, semente=311):
             partes.append(f"{rnd.choice(JANELA)}ENTIRE FIR"
                           f"{' ' + depois if depois else ''}{rnd.choice(SUP)} {fen}")
         corpo = campo + " " + anterior + rnd.choice(LIGA).join(partes)
-        casos.append(" ".join(corpo.split()))
+        corpo = " ".join(corpo.split())
+        for _ in range(rnd.choice([0, 0, 1, 2])):
+            corpo += "\n" + rnd.choice(SEGUINTES[campo])
+        casos.append(corpo)
     return casos
 
 
@@ -118,7 +141,9 @@ CASOS = _casos()
 def test_casos_nao_activam_as_outras_correcoes():
     for c in CASOS:
         assert "NIL" not in c
-        assert not c.split(":", 1)[1].lstrip()[:2].isdigit(), c
+        if c.startswith(("MT OBSC", "VA")):    # abertura vazia (correcção 2)
+            assert not c.split(":", 1)[1].lstrip()[:2].isdigit(), c
+    assert sum("\n" in c for c in CASOS) > 100
 
 
 @pytest.mark.parametrize("corpo", CASOS)
@@ -132,6 +157,76 @@ def test_nunca_mais_permissivo_que_a_3_10(eng, eng310, pontos, corpo):
     # Os avisos de área da 3.10 mantêm-se
     assert set(eng310.subentradas_sem_area(texto)) <= set(eng.subentradas_sem_area(texto))
     assert set(eng310.subentradas_alargadas(texto)) <= set(eng.subentradas_alargadas(texto))
+
+
+# ---- Oráculo por hora ----
+# A decisão por regiões ignora as janelas HH/HH. Aqui, por ponto e por hora da
+# validade (15–20Z), junta-se os blocos em vigor que contêm o ponto e aplica-se
+# decision(); pontos a menos de ~1 km de uma fronteira de bloco saltam-se.
+HORAS = range(15, 21)
+
+
+def _em_vigor(janela, h):
+    m = re.match(r"(\d{2})–(\d{2})Z", janela or "")
+    if not m:
+        return True
+    a, b = int(m.group(1)), int(m.group(2))
+    return (a <= h < b) if a < b else (h >= a or h < b)
+
+
+def _preparar(blocos):
+    return [(b, prep(b.polygon.buffer(0.01)), prep(b.polygon.buffer(-0.01))) for b in blocos]
+
+
+def _eventos(e, blocos, lo, la, h):
+    p = e.Point(lo, la)
+    ev = []
+    for b, fora, dentro in blocos:
+        if not _em_vigor(b.window, h) or not fora.contains(p):
+            continue
+        if not dentro.contains(p):
+            return None                     # na fronteira: não se compara
+        if b.phenomenon == "BASE_AMSL":
+            ev.append(("BASE", max(0, round(b.value - e._terrain_elevation_ft(lo, la))),
+                       b.qualifier, b.layer))
+        elif b.phenomenon == "BASE_AGL":
+            ev.append(("BASE", b.value, b.qualifier, b.layer))
+        else:
+            ev.append((b.phenomenon, b.value, b.qualifier, b.layer))
+    return ev
+
+
+@pytest.fixture(scope="module")
+def pontos_hora(eng):
+    pts = [(la, lo) for la, lo in eng.AERODROMES.values()]
+    minx, miny, maxx, maxy = eng.FIR_POLYGON.bounds
+    interior = eng.FIR_POLYGON.buffer(-0.03)
+    y = miny + 0.12
+    while y < maxy:
+        x = minx + 0.12
+        while x < maxx:
+            if interior.contains(eng.Point(x, y)):
+                pts.append((y, x))
+            x += 0.3
+        y += 0.3
+    return pts
+
+
+@pytest.mark.parametrize("corpo", CASOS)
+def test_nunca_mais_permissivo_que_a_3_10_por_hora(eng, eng310, pontos_hora, corpo):
+    texto = build_gamet("SECN I " + corpo)
+    bn = _preparar(eng.parse_gamet(texto)[0])
+    bo = _preparar(eng310.parse_gamet(texto)[0])
+    piores = []
+    for la, lo in pontos_hora:
+        for h in HORAS:
+            eo, en = _eventos(eng310, bo, lo, la, h), _eventos(eng, bn, lo, la, h)
+            if eo is None or en is None:
+                continue
+            do, dn = eng310.decision(eo)[0], eng.decision(en)[0]
+            if GRAV[dn] < GRAV[do]:
+                piores.append(((la, lo, h), do, dn))
+    assert not piores, piores[:5]
 
 
 def test_referencia_e_a_3_10_do_main():

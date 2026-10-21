@@ -217,6 +217,38 @@ def test_revisor_janela_em_inicio_de_linha(eng):
     assert len(b) == 1 and _toda(eng, b[0]) and b[0].window == "19–21Z"
 
 
+@pytest.mark.parametrize("corpo, fen, valor", [
+    ("SIGWX: N OF N4100 LAN ISOL TS 19/21 ENTIRE FIR ISOL TS\nSEV SQL", "WX", "SQL"),
+    ("SIG CLD: N OF N4100 BKN 010HFT AGL 17/18 ENTIRE FIR BKN 030HFT AGL\nOVC 002HFT AGL",
+     "BASE_AGL", 200),
+])
+def test_revisor_linha_seguinte_herda_como_na_3_10(eng, corpo, fen, valor):
+    """2.ª revisão do PR #24: a parte virtual "HH/HH ENTIRE FIR" não muda a
+    janela nem a área que a linha seguinte (sem qualificador) herda. Como na
+    3.10: a N de N4100, em todo o período (no 7789689 ficava em toda a FIR, só
+    na janela da parte — "ainda não começou" no LPPR às 16Z)."""
+    g = _g(corpo)
+    b = [x for x in _blocos(eng, g, fen) if x.value == valor]
+    assert len(b) == 1, b
+    assert b[0].window == ""
+    assert _a_norte(b[0], 41.0)
+    d = _decisoes(eng, g)
+    assert {d[n] for n in _norte(eng)} == {"NO-GO"}
+
+
+def test_linha_descartada_na_3_10_e_alargada_nao_muda_a_janela_herdada(eng):
+    """Na 3.10 "17/19 … E OF W00800 … COT" ficava sem área (descartada antes
+    de ler a janela) e as linhas seguintes valiam todo o período. Alargada
+    pela parte "ENTIRE FIR" sem fenómeno, a linha lê a sua janela, mas as
+    seguintes continuam a valer todo o período."""
+    g = _g("MTW: 17/19 N OF N4000 AND E OF W00800 SEV SFC/FL100 ENTIRE FIR AND "
+           "ENTIRE FIR COT SEV SFC/FL100\nMOD FL080\nSEV SFC/FL100")
+    mtw = _blocos(eng, g, "MTW")
+    seguintes = [b for b in mtw if b.surface == "" and _toda(eng, b)]
+    assert sorted(b.value for b in seguintes) == ["MOD", "SEV"]
+    assert all(b.window == "" for b in seguintes)
+
+
 def test_area_alargada_mantem_aviso(eng):
     """O aviso "Área alargada" (3.5) da linha inteira mantém-se."""
     g = _g("SIG CLD: S BTN N3720 - N3800 BKN 002HFT AGL ENTIRE FIR BKN 040HFT AGL")

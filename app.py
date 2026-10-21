@@ -1719,7 +1719,19 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
             if not _SEM_CONTEUDO_RE.fullmatch(txt):
                 sem_fenomeno.append(f"{sub['campo']}: {txt}")
 
+    # Estado que as linhas seguintes herdam (área, janela, subentrada),
+    # guardado antes das linhas virtuais "ENTIRE FIR" e reposto depois: as
+    # partes virtuais são lidas a mais e não mudam o que a 3.10 dava às
+    # linhas seguintes sem qualificador (3.11).
+    salvo = None
+
     for raw_line, virtual in linhas:
+
+        if not virtual and salvo is not None:
+            current_polygon, current_window, sub = salvo
+            salvo = None
+        elif virtual and salvo is None:
+            salvo = (current_polygon, current_window, sub)
 
         line = raw_line.strip()
         if not line:
@@ -1833,7 +1845,8 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
                 _AREA_INI_RE.match(content) or _DIAGONAL_RE.search(content)
                 or _CARDINAL_BTN_RE.search(content)))
         if nova_sub:
-            _fechar_sub()
+            if not virtual:
+                _fechar_sub()
             sub = {"campo": campo_txt, "linhas": [], "n0": len(blocks),
                    "descartada": False, "virtual": virtual}
         sub["linhas"].append(content)
@@ -1842,7 +1855,18 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
         if new_state or not nova_sub:
             abertura_vazia = None
 
+        # Na 3.10 a linha podia ficar sem área (fora da FIR, ou vazia depois de
+        # MAR/LAN/COT) e era descartada ANTES de ler a janela — as linhas
+        # seguintes herdavam a janela anterior. Alargada, a linha lê a sua
+        # janela, mas as seguintes continuam a herdar a da 3.10 (3.11).
+        janela_antes = current_window
+        descartada_310 = False
         if alargar:
+            sp310 = surface_polygon("/".join(
+                x for x in ("COT", "LAN", "MAR") if re.search(rf"\b{x}\b", content)))
+            descartada_310 = current_polygon is not None and (
+                current_polygon.is_empty or (sp310 is not None and _clean_poly(
+                    current_polygon.intersection(sp310)).is_empty))
             current_polygon = FIR_POLYGON   # "… ENTIRE FIR" sem fenómeno (3.11)
         poly = current_polygon
         if poly is not None and poly.is_empty:
@@ -1895,6 +1919,8 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
             # aparecer como "ainda não começou"). "ENTIRE FIR" também (3.11).
             current_window = ""
         window = current_window
+        if descartada_310:
+            current_window = janela_antes
 
         # ---- PARSE por estado ----
 
@@ -2158,6 +2184,8 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
                         and (state == "MT_OBSC" or re.match(r"VA\s*:", line))):
                     abertura_vazia = len(blocks) - 1
 
+    if salvo is not None:
+        current_polygon, current_window, sub = salvo
     _fechar_campo()
     _fechar_sub()
 
