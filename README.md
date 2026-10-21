@@ -201,7 +201,9 @@ Em cada zona, a app aplica estas regras. Fica a pior decisão que se aplicar.
   terreno na zona (MEF do SkyDemon por quadrícula de 1° × 30'), ou seja, a
   pior situação que se encontra lá.
 - **Falhar em voz alta.** Se a app não perceber o texto, avisa. Nunca mostra
-  um GO silencioso.
+  um GO silencioso. Desde a 3.9, uma parte da Secção I que a app não consegue
+  ler (ex.: gralha do IPMA numa base de nuvem) aparece no briefing como
+  "Campo não interpretado" — e não entra na decisão.
 - **Sem IA.** A app usa regras fixas e expressões regulares. O mesmo GAMET dá
   sempre o mesmo resultado, e um erro é sempre localizável e corrigível.
 
@@ -258,7 +260,7 @@ Algarve não afecta Lisboa.
 
 ## 10. Qualidade e testes
 
-- **1179 testes automáticos** cobrem a leitura do texto, a geometria, as
+- **1233 testes automáticos** cobrem a leitura do texto, a geometria, as
   decisões, os dados aeronáuticos e a app completa. Cada erro alguma vez
   encontrado tem um teste que impede que volte a aparecer.
 - **Verificação cruzada:** em centenas de GAMETs gerados, a decisão de cada
@@ -278,7 +280,7 @@ Algarve não afecta Lisboa.
 pip install -r requirements.txt -r requirements-dev.txt
 cd nicegui_app && python main.py   # a app principal (NiceGUI), http://localhost:8080
 streamlit run app.py               # a versão de reserva (Streamlit)
-python3 -m pytest                  # os testes (1179)
+python3 -m pytest                  # os testes (1233)
 ```
 
 | Ficheiro / pasta | Conteúdo |

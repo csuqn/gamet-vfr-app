@@ -193,6 +193,23 @@ aviso `info` "Nuvens baixas na Secção II" com a base, janela, superfície e os
 aeródromos abrangidos. Nunca vai a `compute_dynamic_regions`. Caso real:
 GAMET 192100/200300 (`SCT ST 004-008/012HFT` a N de N4000, 00–03Z).
 
+**Campo não interpretado (3.9, pedido do Duarte a 21-out-2026).**
+`campos_nao_interpretados()` devolve as subentradas da Secção I com conteúdo
+(não NIL) que não geraram nenhum fenómeno, e `analisar_gamet` junta um aviso
+`aviso` "Campo não interpretado" (o texto NÃO entra na decisão; não muda
+decisões). A verificação é **por subentrada**, dentro de `parse_gamet`
+(parâmetro `sem_fenomeno`): uma subentrada é a linha que abre o campo ou traz
+qualificador geográfico, mais as linhas sem qualificador que se lhe seguem —
+uma subentrada ilegível num campo com outra legível também avisa. Não conta a
+que tem área lida fora da FIR/superfície (descartada de propósito), nem só
+janela/NIL/pontuação. O `scripts/analisar.py` ("Campo sem fenómeno gerado") usa
+a mesma função; até à 3.8 verificava por campo, com lógica própria. Dentro de
+uma só subentrada basta um fenómeno lido para não avisar (ex.: duas bases na
+mesma linha, uma ilegível). Caso real: GAMET 201500/202100 até à 3.6
+(`008/010HTF`). 0 avisos no arquivo a 21-out-2026 (28 GAMETs). Achado pendente: em `MT OBSC` e `VA` só
+a linha que abre o campo gera bloco — uma 2.ª subentrada (`MT OBSC: N OF N4100
+LAN S OF N3800 LAN`) fica de fora da decisão; desde a 3.9 pelo menos avisa.
+
 ## Princípios que orientam o código
 
 **O erro optimista é inaceitável.** Reportar pior do que a realidade é
@@ -220,7 +237,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-1179 testes. Devem passar a 100%.
+1233 testes. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -266,6 +283,11 @@ python3 -m pytest
   `050-090/100-130HTF AMSL` lida, nota AMSL contra o MEF; SIG CLD
   `002-004/010-015HFT` → NO-GO, `004/010-015HFT` → MARGINAL, igual a topo
   simples; o topo nunca é lido como base)
+- `tests/test_v39.py` — aviso "Campo não interpretado" (GAMET real 201500 com
+  a gralha nova `HTX`; campo ilegível; subentrada ilegível ao lado de uma
+  legível; NIL, `HAZARDOUS WX NIL`, área fora da FIR e todo o arquivo não
+  avisam; Streamlit e NiceGUI mostram o aviso; decisão inalterada; 2.ª
+  subentrada de MT OBSC/VA nunca em silêncio)
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva
