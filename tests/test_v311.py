@@ -1,6 +1,7 @@
 """
-3.11 — Duas leituras que já existiam (confirmadas pelo revisor do PR #23;
-pedido do Duarte a 21-out-2026). Nenhuma apareceu ainda num GAMET real: os
+3.11 — Uma leitura optimista que já existia (confirmada pelo revisor do PR
+#23; pedido do Duarte a 21-out-2026) e duas que ficam como estavam. Nenhuma
+apareceu ainda num GAMET real: os
 testes usam o GAMET real 201500/202100 (arquivo,
 `20261020T1447Z_201500-202100_9641d0d85f.txt`) com a Secção I trocada.
 
@@ -12,19 +13,9 @@ testes usam o GAMET real 201500/202100 (arquivo,
    linha a toda a FIR. Nunca mais permissivo do que a 3.10 (casos do revisor
    do PR #24 abaixo; prova geral em test_v311_contra_310.py).
 
-2. A linha que abre o campo MT OBSC (ou `VA:`) vazia — só a janela, ou nada,
-   porque a janela/qualificador passou para a linha seguinte — dava sempre um
-   bloco de toda a FIR em todo o período ("MT OBSC:17/19 N OF N4100 LAN" →
-   toda a FIR). Esse bloco só sai quando a linha de abertura é vazia/só
-   janela/só pontuação, é a única linha da sua subentrada e uma subentrada
-   seguinte do mesmo campo gera o seu bloco. Tudo o resto fica igual.
-   "VA" sem dois pontos (VA dentro de SIGWX) não muda.
-
-3. `MT OBSC: NIL` / `VA: NIL` davam o fenómeno em toda a FIR (NO-GO nos 52
-   aeródromos). Decisão do Duarte (21-out-2026): só não geram bloco quando
-   todo o conteúdo do campo é exactamente NIL (":", "=", espaços e uma janela
-   HH/HH antes admitidos). "NIL N OF …", "NIL LAN", "NILL", NIL depois de
-   outra subentrada e "VA" de SIGWX ficam como estavam.
+2. `MT OBSC: NIL` / `VA: NIL` e a linha de abertura vazia de MT OBSC/VA
+   continuam a dar toda a FIR, como na 3.10 (decisão do Duarte a 21-out-2026:
+   mais vale conservador do que permissivo).
 """
 import pytest
 
@@ -99,7 +90,7 @@ def test_mt_obsc_entire_fir_com_janela(eng):
 
 def test_entire_fir_sem_janela_nao_herda_a_anterior(eng):
     """Uma subentrada sem janela vale para todo o período."""
-    g = _g("MT OBSC:17/19 N OF N4100 LAN ENTIRE FIR")
+    g = _g("MT OBSC: S OF N3800 LAN 17/19 N OF N4100 LAN ENTIRE FIR")
     toda = [b for b in _blocos(eng, g, "MT_OBSC") if _toda(eng, b)]
     assert [b.window for b in toda] == [""]
 
@@ -297,198 +288,38 @@ def test_gamet_real_inalterado(eng):
 
 
 # ---------------------------------------------------------------------
-# 2. Linha de abertura vazia em MT OBSC / VA
+# 2. MT OBSC / VA: NIL e abertura vazia continuam a dar toda a FIR
 # ---------------------------------------------------------------------
-
-@pytest.mark.parametrize("campo, fen", [("MT OBSC:", "MT_OBSC"), ("VA:", "VA")])
-def test_abertura_so_com_janela(eng, campo, fen):
-    """"MT OBSC:17/19 N OF N4100 LAN": só a N de N4100, terra, 17–19Z."""
-    g = _g(f"{campo}17/19 N OF N4100 LAN")
-    blocos = _blocos(eng, g, fen)
-    assert len(blocos) == 1, blocos
-    assert _a_norte(blocos[0], 41.0)
-    assert blocos[0].window == "17–19Z" and blocos[0].surface == "LAN"
-    d = _decisoes(eng, g)
-    assert {d[n] for n in _norte(eng)} == {"NO-GO"}
-    assert {d[n] for n in _sul(eng, 40.9)} == {"GO"}
-    assert eng.campos_nao_interpretados(g) == []
-
-
-def test_abertura_mt_obsc_sem_dois_pontos(eng):
-    """"MT OBSC S OF N3900": só a S de N3900."""
-    g = _g("MT OBSC S OF N3900")
-    mt = _blocos(eng, g, "MT_OBSC")
-    assert len(mt) == 1 and _a_sul(mt[0], 39.0)
-    d = _decisoes(eng, g)
-    assert {d[n] for n in _norte(eng, 39.02)} == {"GO"}
-    assert {d[n] for n in _sul(eng, 38.98)} == {"NO-GO"}
-
-
-@pytest.mark.parametrize("campo, fen", [("MT OBSC:", "MT_OBSC"), ("VA:", "VA")])
-def test_abertura_vazia_duas_subentradas(eng, campo, fen):
-    g = _g(f"{campo}17/19 N OF N4100 LAN 19/21 S OF N3800 LAN")
-    blocos = _blocos(eng, g, fen)
-    assert len(blocos) == 2 and not any(_toda(eng, b) for b in blocos)
-    assert sorted(b.window for b in blocos) == ["17–19Z", "19–21Z"]
-    d = _decisoes(eng, g)
-    meio = {n for n, (la, _lo) in eng.AERODROMES.items() if 38.02 < la < 40.98}
-    assert {d[n] for n in meio} == {"GO"}
-
-
-@pytest.mark.parametrize("campo, fen", [("MT OBSC:", "MT_OBSC"), ("VA:", "VA")])
-def test_abertura_vazia_com_subentrada_de_area_ilegivel(eng, campo, fen):
-    """A subentrada seguinte sem área legível já dá toda a FIR, com aviso."""
-    g = _g(f"{campo}17/19 N OF N4100 LAN NW OF W00800")
-    blocos = _blocos(eng, g, fen)
-    assert len(blocos) == 1 and blocos[0].window == "17–19Z"
-    terra = eng.surface_polygon("LAN").intersection(eng.FIR_POLYGON)
-    assert blocos[0].polygon.symmetric_difference(terra).area < 1e-6
-    assert eng.subentradas_sem_area(g)
-    assert set(_decisoes(eng, g).values()) == {"NO-GO"}
-
-
-@pytest.mark.parametrize("campo, fen", [("MT OBSC:", "MT_OBSC"), ("VA:", "VA")])
-def test_abertura_vazia_com_entire_fir_a_seguir(eng, campo, fen):
-    g = _g(f"{campo}19/21 ENTIRE FIR")
-    blocos = _blocos(eng, g, fen)
-    assert len(blocos) == 1 and _toda(eng, blocos[0]) and blocos[0].window == "19–21Z"
-
-
-# ---- Casos que não mudam ----
-
-@pytest.mark.parametrize("campo, fen", [("MT OBSC:", "MT_OBSC"), ("VA:", "VA")])
-def test_abertura_com_conteudo_inalterada(eng, campo, fen):
-    """"MT OBSC: LAN": toda a terra da FIR."""
-    g = _g(f"{campo} LAN")
-    blocos = _blocos(eng, g, fen)
-    terra = eng.surface_polygon("LAN").intersection(eng.FIR_POLYGON)
-    assert len(blocos) == 1
-    assert blocos[0].polygon.symmetric_difference(terra).area < 1e-6
-    assert set(_decisoes(eng, g).values()) == {"NO-GO"}
-
-
-@pytest.mark.parametrize("campo, fen", [("MT OBSC:", "MT_OBSC"), ("VA:", "VA")])
-def test_abertura_seguida_de_outro_campo_inalterada(eng, campo, fen):
-    """"MT OBSC:" seguido directamente de outro campo: toda a FIR."""
-    g = _g(f"{campo} SFC VIS: N OF N4100 5000M RA")
-    blocos = _blocos(eng, g, fen)
-    assert len(blocos) == 1 and _toda(eng, blocos[0])
-    assert set(_decisoes(eng, g).values()) == {"NO-GO"}
-
-
-@pytest.mark.parametrize("campo, fen", [("MT OBSC:", "MT_OBSC"), ("VA:", "VA")])
-def test_abertura_so_com_janela_e_nada_mais_inalterada(eng, campo, fen):
-    g = _g(f"{campo}17/19")
-    blocos = _blocos(eng, g, fen)
-    assert len(blocos) == 1 and _toda(eng, blocos[0]) and blocos[0].window == "17–19Z"
-
-
-@pytest.mark.parametrize("campo, fen", [("MT OBSC:", "MT_OBSC"), ("VA:", "VA")])
-def test_uma_subentrada_na_abertura_inalterada(eng, campo, fen):
-    g = _g(f"{campo} N OF N4100 LAN")
-    blocos = _blocos(eng, g, fen)
-    assert len(blocos) == 1 and _a_norte(blocos[0], 41.0)
-
-
-@pytest.mark.parametrize("campo, fen", [("MT OBSC:", "MT_OBSC"), ("VA:", "VA")])
-def test_abertura_vazia_e_subentrada_fora_da_fir_inalterada(eng, campo, fen):
-    """A única subentrada cai fora da FIR (descartada): fica o bloco de toda a
-    FIR da linha de abertura, como até à 3.10 (conservador)."""
-    g = _g(f"{campo}17/19 N OF N4300")
-    blocos = _blocos(eng, g, fen)
-    assert len(blocos) == 1 and _toda(eng, blocos[0])
-
-
-def test_abertura_vazia_com_continuacao_inalterada(eng):
-    """Linha sem qualificador a seguir à abertura ("LAN") pertence à
-    subentrada de abertura: fica o bloco de toda a FIR."""
-    g = _g("MT OBSC:\nLAN\nN OF N4100")
-    mt = _blocos(eng, g, "MT_OBSC")
-    assert any(_toda(eng, b) for b in mt)
-    assert set(_decisoes(eng, g).values()) == {"NO-GO"}
-
-
-@pytest.mark.parametrize("corpo", [
-    "SIGWX: VA S OF N3800 ISOL TS",
-    "SIGWX: S OF N3800 VA",
-    "VA S OF N3900",
-])
-def test_va_sem_dois_pontos_inalterado(eng, corpo):
-    """"VA" sem dois pontos é o VA dentro de SIGWX: continua em toda a FIR."""
-    g = _g(corpo)
-    assert any(_toda(eng, b) for b in _blocos(eng, g, "VA"))
-    assert set(_decisoes(eng, g).values()) == {"NO-GO"}
-
-
-# ---------------------------------------------------------------------
-# 3. MT OBSC: NIL / VA: NIL (decisão do Duarte a 21-out-2026)
-# ---------------------------------------------------------------------
-# Até à 3.10 davam o fenómeno em toda a FIR (NO-GO nos 52 aeródromos). Só
-# deixam de gerar bloco quando TODO o conteúdo do campo é exactamente NIL.
+# Decisão do Duarte (21-out-2026): mais vale conservador do que permissivo.
+# Estas leituras ficam como na 3.10 (as correcções propostas no PR #24 foram
+# retiradas por tornarem decisões mais permissivas).
 
 @pytest.mark.parametrize("corpo, fen", [
     ("MT OBSC: NIL", "MT_OBSC"),
     ("MT OBSC:NIL", "MT_OBSC"),
-    ("MT OBSC NIL", "MT_OBSC"),
-    ("MT OBSC: NIL=", "MT_OBSC"),
     ("MT OBSC: 17/19 NIL", "MT_OBSC"),
-    ("MT OBSC:17/19 NIL", "MT_OBSC"),
-    ("MT OBSC:\nNIL", "MT_OBSC"),
     ("VA: NIL", "VA"),
-    ("VA:NIL", "VA"),
     ("VA: 19/21 NIL", "VA"),
 ])
-def test_nil_exacto_nao_gera_bloco(eng, corpo, fen):
+def test_nil_continua_toda_a_fir(eng, corpo, fen):
     g = _g(corpo)
-    assert _blocos(eng, g, fen) == []
-    assert _decisoes(eng, g) == {n: "GO" for n in eng.AERODROMES}
-    assert eng.campos_nao_interpretados(g) == []
-    assert eng.subentradas_sem_area(g) == []
-
-
-def test_nil_exacto_entre_outros_campos(eng):
-    g = _g("SIG CLD: N OF N4100 BKN 002HFT AGL MT OBSC: NIL VA: NIL "
-           "SFC VIS: S OF N3800 1000M BR")
-    assert _blocos(eng, g, "MT_OBSC") == [] and _blocos(eng, g, "VA") == []
-    assert [b.value for b in _blocos(eng, g, "BASE_AGL")] == [200]
-    assert [b.value for b in _blocos(eng, g, "VIS")] == [1000]
-    d = _decisoes(eng, g)
-    assert {d[n] for n in _norte(eng)} == {"NO-GO"}
-    assert {d[n] for n in _sul(eng)} == {"NO-GO"}
-    meio = {n for n, (la, _lo) in eng.AERODROMES.items() if 38.02 < la < 40.98}
-    assert {d[n] for n in meio} == {"GO"}
+    assert any(_toda(eng, b) for b in _blocos(eng, g, fen))
+    assert set(_decisoes(eng, g).values()) == {"NO-GO"}
     assert eng.campos_nao_interpretados(g) == []
 
 
 @pytest.mark.parametrize("corpo, fen", [
-    ("MT OBSC: NIL N OF N4100", "MT_OBSC"),     # NIL seguido de área
-    ("MT OBSC: NIL LAN", "MT_OBSC"),
-    ("MT OBSC: NILL", "MT_OBSC"),
-    ("MT OBSC: 17/19 18/20 NIL", "MT_OBSC"),
-    ("VA: NIL N OF N4000", "VA"),
-    ("VA: NILL", "VA"),
-    ("SIGWX: S OF N3800 VA NIL", "VA"),          # VA dentro de SIGWX
-    ("SIGWX: NIL VA", "VA"),
+    ("MT OBSC:17/19 N OF N4100 LAN", "MT_OBSC"),
+    ("MT OBSC S OF N3900", "MT_OBSC"),
+    ("MT OBSC:17/19 N OF N4100 LAN 19/21 S OF N3800 LAN", "MT_OBSC"),
+    ("VA:17/19 N OF N4100 LAN", "VA"),
+    ("VA S OF N3900", "VA"),
 ])
-def test_nil_nao_exacto_inalterado(eng, corpo, fen):
-    """Fica como na 3.10: o fenómeno em toda a FIR (em "NIL LAN", em toda a
-    terra) — NO-GO nos 52 aeródromos."""
+def test_abertura_vazia_continua_toda_a_fir(eng, corpo, fen):
+    """A linha que abre o campo, vazia (ou só com a janela, que passa para a
+    linha seguinte), dá toda a FIR em todo o período, além das subentradas."""
     g = _g(corpo)
-    terra = eng.surface_polygon("LAN").intersection(eng.FIR_POLYGON)
-    assert any(b.polygon.buffer(1e-9).contains(terra) for b in _blocos(eng, g, fen))
+    blocos = _blocos(eng, g, fen)
+    assert any(_toda(eng, b) and b.window == "" for b in blocos), blocos
+    assert len(blocos) >= 2
     assert set(_decisoes(eng, g).values()) == {"NO-GO"}
-
-
-def test_nil_depois_de_outra_subentrada_inalterado(eng):
-    """Um NIL que continua uma subentrada com área não gera bloco próprio (já
-    era assim): só a subentrada com área. Um NIL com qualificador próprio
-    ("S OF N3800 NIL") continua a gerar o bloco dessa área (conservador:
-    não é o campo inteiro a NIL)."""
-    g = _g("MT OBSC: N OF N4100 LAN\nNIL")
-    mt = _blocos(eng, g, "MT_OBSC")
-    assert len(mt) == 1 and _a_norte(mt[0], 41.0)
-
-    g = _g("MT OBSC: N OF N4100 LAN S OF N3800 NIL")
-    mt = _blocos(eng, g, "MT_OBSC")
-    assert len(mt) == 2
-    assert any(_a_norte(b, 41.0) for b in mt) and any(_a_sul(b, 38.0) for b in mt)

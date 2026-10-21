@@ -64,31 +64,16 @@ Três pormenores que já causaram erros reais:
 - **MT OBSC e VA: um bloco por subentrada** (3.10). Até à 3.9 só a linha que
   abre o campo gerava bloco: em `MT OBSC:N OF N4100 LAN S OF N3800 LAN` o S de
   N3800 ficava fora da decisão. Cada subentrada gera agora o seu, com a sua
-  janela. VA dentro de SIGWX abre o campo VA (quebra antes de `VA`) e fica em
-  toda a FIR, como antes.
-- **Linha de abertura vazia em MT OBSC / VA** (3.11, pedido do Duarte a
-  21-out-2026): em `MT OBSC:17/19 N OF N4100 LAN` (a janela passa para a linha
-  seguinte) ou `MT OBSC S OF N3900` a abertura vazia dava, até à 3.10, toda a
-  FIR em todo o período. O bloco dela sai só quando: a linha é vazia, só janela
-  ou só pontuação (NIL não — ver o ponto seguinte); é a
-  única linha da sua subentrada; é `MT OBSC` ou `VA:` com dois pontos (`VA`
-  sem eles é o VA de SIGWX, em toda a FIR); e uma subentrada seguinte do campo
-  gera o seu bloco (área legível ou "Área não reconhecida"; uma área fora da
-  FIR não conta). Tudo o resto mantém toda a FIR (`MT OBSC: LAN`, `MT OBSC:`
-  seguido de outro campo, `MT OBSC:17/19` sozinho). É uma das duas mudanças MAIS
-  PERMISSIVAS da 3.11 (a outra é o NIL) — testada em `test_v311.py` e em 700 GAMETs gerados.
-- **`MT OBSC: NIL` / `VA: NIL`** (3.11, decisão do Duarte a 21-out-2026): até
-  à 3.10 davam o fenómeno em toda a FIR (NO-GO nos 52 aeródromos), ao contrário
-  de SIG CLD/TURB/SIGWX: NIL. Regra estrita: só não gera bloco quando TODO o
-  conteúdo do campo (todas as linhas até ao campo seguinte) é exactamente
-  `NIL`, com espaços, `:` e `=` à volta e, opcionalmente, uma janela antes
-  (`MT OBSC: 17/19 NIL`) — `_CAMPO_NIL_RE`, `_fechar_campo` em `parse_gamet`.
-  Não avisa "Campo não interpretado". Fica tudo como estava (toda a FIR, ou a
-  área lida): `NIL N OF N4100`, `NIL LAN`, `NILL`, duas janelas, `VA` sem dois
-  pontos (VA de SIGWX), e NIL depois de outra subentrada — uma linha `NIL`
-  sem qualificador continua essa subentrada e não gera bloco próprio (já era
-  assim), e `S OF N3800 NIL` continua a gerar o bloco a S de N3800
-  (conservador: não é o campo inteiro a NIL).
+  janela; a linha de abertura vazia (`MT OBSC:` antes de `17/19 N OF …`, ou
+  `MT OBSC S OF …`) continua a dar toda a FIR. VA dentro de SIGWX abre o campo
+  VA (quebra antes de `VA`) e fica em toda a FIR, como antes.
+- **NIL em MT OBSC/VA e abertura vazia continuam a dar toda a FIR — mais vale
+  conservador do que permissivo** (decisão do Duarte a 21-out-2026).
+  `MT OBSC: NIL` / `VA: NIL` dão o fenómeno em toda a FIR (NO-GO nos 52
+  aeródromos) e a linha de abertura vazia (`MT OBSC:17/19 N OF N4100 LAN`,
+  `MT OBSC S OF N3900`) dá toda a FIR em todo o período, além das subentradas.
+  Foram propostas correcções no PR #24 e retiradas por tornarem decisões mais
+  permissivas.
 - **`ENTIRE FIR` a meio da linha** (3.11, pedido do Duarte a 21-out-2026):
   até à 3.10 era ignorado — `MT OBSC: N OF N4100 LAN ENTIRE FIR` dava só o N
   de N4100 (41 GO / 11 NO-GO; erro optimista). A linha continua a ser lida
@@ -106,15 +91,15 @@ Três pormenores que já causaram erros reais:
   partia a linha e perdia a leitura da 3.10: em
   `SIGWX: N OF N4100 OCNL TS ENTIRE FIR SW OF W00800 ISOL TS` o OCNL TS (toda a
   FIR por causa da diagonal) ficava só a N de N4100 e o aviso desaparecia; e
-  com superfícies diferentes (`S OF N3800 LAN … ENTIRE FIR MAR …`) também. Uma
-  janela no fim da linha anterior (quebra do texto) passa para a linha
-  `ENTIRE FIR`. As linhas virtuais **não mudam o que as linhas seguintes sem
+  com superfícies diferentes (`S OF N3800 LAN … ENTIRE FIR MAR …`) também. As
+  linhas virtuais **não mudam o que as linhas seguintes sem
   qualificador herdam** (área, janela, subentrada: guardadas e repostas — 2.ª
   revisão do PR #24: em `SIGWX: N OF N4100 LAN ISOL TS 19/21 ENTIRE FIR ISOL TS`
   + `SEV SQL` o SQL passava a só 19–21Z); e uma linha que a 3.10 descartava
   (sem área ou vazia depois de MAR/LAN/COT) e que a parte sem fenómeno alarga
-  lê a sua janela sem a passar às seguintes; a subentrada `ENTIRE FIR` sem janela vale todo o período; a
-  janela da linha inteira procura-se só antes da 1.ª parte. A área do SIGMET
+  lê a sua janela sem a passar às seguintes; a subentrada `ENTIRE FIR` sem
+  janela vale todo o período; a janela da linha inteira procura-se só antes
+  da 1.ª parte. A área do SIGMET
   (`area_sigmet`) não tinha o problema (procura `ENTIRE FIR` em todo o texto).
 - **Vírgula decimal nos KM** (3.10): `LCA 1,5KM BR` → 1500 m (até à 3.9, 5000 m:
   apanhava o `5KM`). Só `\d{1,2},\d+` colado (`0800M BR, 5KM`, `1200M,5KM`,
@@ -297,7 +282,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-2154 testes. Devem passar a 100%.
+2121 testes. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -356,13 +341,8 @@ python3 -m pytest
 - `tests/test_v311.py` — `ENTIRE FIR` a meio da linha (GAMET real 201500 com
   a Secção I trocada: MT OBSC 41 GO → 52 NO-GO; SIG CLD, SFC VIS, SIGWX, TURB,
   ICE, MTW, SFC WSPD e VA; com janela, LAN/MAR, depois de AND; no início do
-  campo não muda; SIGMET já era toda a área) e linha de abertura vazia em
-  MT OBSC/VA (`MT OBSC:17/19 N OF N4100 LAN` → só a subentrada; `MT OBSC S OF
-  N3900`; casos que não mudam: `LAN`, outro campo a seguir, só janela, área
-  fora da FIR, continuação, `VA` sem dois pontos) e `MT OBSC: NIL` /
-  `VA: NIL` exactos (sem bloco, 52 GO, sem aviso; com janela, `=`, entre
-  outros campos; não mudam: `NIL N OF …`, `NIL LAN`, `NILL`, VA de SIGWX, NIL
-  depois de outra subentrada); casos do revisor do PR #24 (diagonal depois
+  campo não muda; SIGMET já era toda a área); `MT OBSC: NIL` / `VA: NIL` e a
+  abertura vazia continuam a dar toda a FIR (52 NO-GO); casos do revisor do PR #24 (diagonal depois
   de `ENTIRE FIR` mantém OCNL TS em toda a FIR e o aviso; superfícies
   diferentes; `ENTIRE FIR` no fim da linha sem "Campo não interpretado";
   janela em início de linha; aviso "Área alargada"; linhas seguintes herdam
@@ -375,8 +355,8 @@ python3 -m pytest
   os avisos de área da 3.10 mantêm-se; com linhas seguintes sem qualificador
   (com e sem janela) e um **oráculo por hora** (15–20Z, por ponto, com as
   janelas dos blocos e `decision()`, porque a decisão por regiões ignora as
-  janelas). Os casos não activam as outras duas
-  correcções da 3.11 (sem NIL, abertura com conteúdo). Não editar a cópia.
+  janelas). Inclui MT OBSC/VA com NIL e com abertura vazia. **0 decisões mais
+  permissivas, sem excepções.** Não editar a cópia.
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva

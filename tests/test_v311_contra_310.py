@@ -9,9 +9,9 @@ só a N de N4100 e o aviso desaparecia). Desde então a linha é lida inteira
 como na 3.10 e as partes ENTIRE FIR são lidas a mais.
 
 `tests/referencia/app_3_10.py` é uma cópia fixa do app.py do main d2ccf2e
-(3.10). Não editar. Os casos gerados não activam as outras duas correcções da
-3.11 (abertura vazia de MT OBSC/VA e NIL exacto): a linha que abre o campo
-tem sempre conteúdo e não há NIL. Verifica-se, nos 52 aeródromos e numa
+(3.10). Não editar. Os casos incluem MT OBSC/VA com NIL e com a linha de
+abertura vazia (só janela), que ficam como na 3.10 (decisão do Duarte a
+21-out-2026: mais vale conservador). Verifica-se, sem excepções,, nos 52 aeródromos e numa
 grelha sobre a FIR, que a decisão nunca é mais permissiva do que a da 3.10, e
 que os avisos "Área não reconhecida" e "Área alargada" da 3.10 se mantêm.
 """
@@ -114,13 +114,21 @@ def _casos(n=400, semente=311):
         "SIG CLD: N OF N4100 BKN 010HFT AGL\n17/19 E OF W00700 COT BKN 004HFT AGL ENTIRE FIR"
         "\nOVC 002HFT AGL",
         "SIGWX: 19/21 N OF N4300 OCNL TS ENTIRE FIR\nSEV SQL",
+        # MT OBSC / VA: NIL e abertura vazia (ficam como na 3.10)
+        "MT OBSC: NIL", "VA: NIL", "MT OBSC: 17/19 NIL", "MT OBSC: NIL N OF N4100",
+        "MT OBSC:17/19 N OF N4100 LAN", "MT OBSC S OF N3900", "VA:17/19 N OF N4100 LAN",
+        "MT OBSC:17/19 N OF N4100 LAN 19/21 S OF N3800 LAN",
+        "MT OBSC:17/19 N OF N4100 LAN ENTIRE FIR", "VA: 19/21 ENTIRE FIR",
+        "MT OBSC: NIL ENTIRE FIR", "MT OBSC:\nNIL", "VA:19/21 S OF N3800 MAR 17/19 ENTIRE FIR",
     ]
     while len(casos) < n:
         campo, fens = rnd.choice(CAMPOS)
         anterior = ""
         if rnd.random() < .3:
             anterior = f"{rnd.choice(QUAL)}{rnd.choice(SUP)} {rnd.choice(fens)} "
-        janela1 = rnd.choice(JANELA) if anterior else ""
+        janela1 = rnd.choice(JANELA)
+        if campo in ("MT OBSC:", "VA:") and rnd.random() < .3:
+            anterior = rnd.choice(["NIL ", "17/19 NIL ", "", "NIL\n"]) + anterior
         partes = [f"{janela1}{rnd.choice(QUAL)}{rnd.choice(SUP)} {rnd.choice(fens)}"]
         for _ in range(rnd.choice([1, 1, 1, 2])):
             depois = rnd.choice(DEPOIS)
@@ -138,11 +146,11 @@ def _casos(n=400, semente=311):
 CASOS = _casos()
 
 
-def test_casos_nao_activam_as_outras_correcoes():
-    for c in CASOS:
-        assert "NIL" not in c
-        if c.startswith(("MT OBSC", "VA")):    # abertura vazia (correcção 2)
-            assert not c.split(":", 1)[1].lstrip()[:2].isdigit(), c
+def test_casos_cobrem_nil_abertura_vazia_e_linhas_seguintes():
+    mv = [c for c in CASOS if c.startswith(("MT OBSC", "VA"))]
+    assert sum("NIL" in c for c in mv) > 10
+    assert sum(re.match(r"(?:MT OBSC|VA):?\s*\d{2}/\d{2} [NSEWB]", c) is not None
+               for c in mv) > 10
     assert sum("\n" in c for c in CASOS) > 100
 
 

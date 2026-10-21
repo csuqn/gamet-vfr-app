@@ -1552,12 +1552,6 @@ def campos_nao_interpretados(text):
 
 # Conteúdo que não pede fenómeno: vazio, só pontuação, só a janela ou NIL.
 _SEM_CONTEUDO_RE = re.compile(r"[\W_]*(?:\d{2}/\d{2}[\W_]*)?(?:NIL[\W_]*)?")
-# Linha de abertura de MT OBSC / VA sem conteúdo: vazia, só pontuação ou só
-# a janela — NIL não (3.11).
-_ABERTURA_VAZIA_RE = re.compile(r"[\W_]*(?:\d{2}/\d{2}[\W_]*)?")
-# Campo MT OBSC / VA cujo conteúdo é exactamente NIL (3.11, decisão do
-# Duarte a 21-out-2026): espaços, ":" e "=" à volta e uma janela antes.
-_CAMPO_NIL_RE = re.compile(r"[\s:=]*(?:\d{2}/\d{2}\s+)?NIL[\s:=]*")
 # "ENTIRE FIR" a meio do conteúdo de uma linha (3.11): o que vem antes não é
 # só a janela. Devolve as posições (no conteúdo) onde começa cada parte
 # "[HH/HH] ENTIRE FIR …".
@@ -1670,8 +1664,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
     _qual_ini = re.compile(r"(?:[NSEW]\s+OF\s+[NWE]\d{4,5}|(?:[NSEW]\s+)?BTN\s+[NWE]\d{4,5})")
     for i in range(len(lines) - 1):
         mj = re.search(r"(?<=[\s:])(\d{2}/\d{2})$", lines[i])
-        if mj and (_qual_ini.match(lines[i + 1])
-                   or re.match(r"ENTIRE\s+FIR\b", lines[i + 1])):   # 3.11
+        if mj and _qual_ini.match(lines[i + 1]):
             lines[i] = lines[i][:mj.start()].rstrip()
             lines[i + 1] = f"{mj.group(1)} {lines[i + 1]}"
 
@@ -1693,24 +1686,6 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
     # Subentrada em curso, para o aviso de campo não interpretado (3.9):
     # campo, textos das linhas, nº de blocos ao abrir, área descartada.
     sub = None
-    # Índice do bloco de toda a FIR da linha que abre MT OBSC / VA: quando
-    # vazia (3.11); sai se uma subentrada seguinte do campo gerar o seu bloco.
-    abertura_vazia = None
-    # Campo MT OBSC / "VA:" em curso, para o NIL exacto (3.11): índice do
-    # primeiro bloco do campo e os conteúdos das suas linhas.
-    campo_nil = [None]
-
-    def _fechar_campo():
-        # "MT OBSC: NIL" / "VA: NIL" (3.11, decisão do Duarte a 21-out-2026):
-        # até à 3.10 davam o fenómeno em toda a FIR (NO-GO nos 52
-        # aeródromos), ao contrário dos outros campos. Só quando TODO o
-        # conteúdo do campo é exactamente NIL (com ":", "=" e espaços à
-        # volta, ou uma janela antes): "NIL N OF N4100", "NIL LAN", "NILL"
-        # ou um NIL depois de outra subentrada ficam como estavam.
-        c = campo_nil[0]
-        campo_nil[0] = None
-        if c is not None and _CAMPO_NIL_RE.fullmatch(" ".join(c["linhas"])):
-            del blocks[c["n0"]:]
 
     def _fechar_sub():
         if (sub is not None and sem_fenomeno is not None and not sub["descartada"]
@@ -1764,7 +1739,6 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
         elif re.match(r"VA\b", line):
             new_state = "VA"
         elif re.match(r"SECN\s+I\b", line):
-            _fechar_campo()
             _fechar_sub()
             sub = None
             state = "IDLE"
@@ -1772,7 +1746,6 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
             continue
 
         if new_state:
-            _fechar_campo()
             state = new_state
             current_polygon = FIR_POLYGON  # reset geo ao mudar de campo
             current_window = ""            # reset janela temporal
@@ -1783,13 +1756,8 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
             ).strip()
             # Nome do campo, para o aviso de área não reconhecida (3.4)
             campo_txt = line[:len(line) - len(content)].strip().rstrip(":").strip()
-            # "VA" sem dois pontos é o VA dentro de SIGWX: não entra (3.11)
-            if new_state == "MT_OBSC" or (new_state == "VA" and re.match(r"VA\s*:", line)):
-                campo_nil[0] = {"n0": len(blocks), "linhas": []}
         else:
             content = line
-        if campo_nil[0] is not None:
-            campo_nil[0]["linhas"].append(content)
 
         if state == "IDLE":
             continue
@@ -1841,19 +1809,16 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
 
         # Subentrada nova (3.9): a linha abre o campo ou traz qualificador
         # geográfico; senão continua a subentrada anterior.
-        nova_sub = bool(new_state or sub is None or new_poly is not None or (
+        # Uma linha virtual "ENTIRE FIR" (3.11) é uma subentrada própria, mas
+        # não fecha a da linha real (que as linhas seguintes continuam).
+        if new_state or sub is None or new_poly is not None or (
                 _AREA_INI_RE.match(content) or _DIAGONAL_RE.search(content)
-                or _CARDINAL_BTN_RE.search(content)))
-        if nova_sub:
+                or _CARDINAL_BTN_RE.search(content)):
             if not virtual:
                 _fechar_sub()
             sub = {"campo": campo_txt, "linhas": [], "n0": len(blocks),
                    "descartada": False, "virtual": virtual}
         sub["linhas"].append(content)
-        # Campo novo, ou a subentrada de abertura continua noutra linha: o
-        # bloco de toda a FIR da abertura vazia fica (3.11).
-        if new_state or not nova_sub:
-            abertura_vazia = None
 
         # Na 3.10 a linha podia ficar sem área (fora da FIR, ou vazia depois de
         # MAR/LAN/COT) e era descartada ANTES de ler a janela — as linhas
@@ -2163,30 +2128,16 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
             # outro. Até à 3.9 só a linha que abre o campo gerava bloco: em
             # "MT OBSC:N OF N4100 LAN S OF N3800 LAN" a parte a S de N3800
             # ficava fora da decisão (erro optimista). A linha que abre o
-            # campo gera sempre o seu bloco (vazia → toda a FIR).
-            # Linha de abertura vazia (3.11): "MT OBSC:17/19 N OF N4100 LAN" —
-            # a janela passa para a linha seguinte e a abertura ficava a dar
-            # toda a FIR em todo o período. O bloco dela sai quando: a linha
-            # é vazia, só janela ou só pontuação (NIL não); é a única linha
-            # da sua subentrada; é MT OBSC ou "VA:" com dois pontos ("VA"
-            # sem eles é o VA dentro de SIGWX, que fica em toda a FIR); e uma
-            # subentrada seguinte do mesmo campo gera o seu bloco (área fora
-            # da FIR não conta). Senão fica, como até à 3.10 (conservador).
+            # campo continua a gerar sempre o seu bloco (vazia → toda a FIR).
+            # "MT OBSC: NIL" / "VA: NIL" e a abertura vazia continuam a dar
+            # toda a FIR (decisão do Duarte, 21-out-2026: mais vale
+            # conservador do que permissivo).
             if len(blocks) == sub["n0"]:
-                if (abertura_vazia is not None and not new_state
-                        and blocks[abertura_vazia].phenomenon == state):
-                    blocks.pop(abertura_vazia)
-                    sub["n0"] -= 1
-                abertura_vazia = None
                 valor = "MT OBSC" if state == "MT_OBSC" else "VA"
                 blocks.append(MetBlock(state, poly, valor, qualifier, surface=surface, window=window))
-                if (new_state and _ABERTURA_VAZIA_RE.fullmatch(content)
-                        and (state == "MT_OBSC" or re.match(r"VA\s*:", line))):
-                    abertura_vazia = len(blocks) - 1
 
     if salvo is not None:
         current_polygon, current_window, sub = salvo
-    _fechar_campo()
     _fechar_sub()
 
     # ---- Extração Secção II: FZLVL, QNH e vento ----
