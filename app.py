@@ -29,7 +29,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "3.8"
+APP_VERSION = "3.9"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -1535,7 +1535,26 @@ def subentradas_alargadas(text):
     return alargadas
 
 
-def parse_gamet(text, sem_area=None, alargadas=None):
+def campos_nao_interpretados(text):
+    """
+    Subentradas da Secção I com conteúdo (não NIL) que não geraram nenhum
+    fenómeno (3.9, pedido do Duarte a 21-out-2026). Lista de textos
+    ("CAMPO: conteúdo"), para o aviso do briefing e para o relatório do
+    arquivo. Uma subentrada é a linha que abre o campo ou um qualificador
+    geográfico, mais as linhas sem qualificador que se lhe seguem. Não conta
+    a subentrada cuja área cai fora da FIR ou da superfície (MAR/LAN/COT):
+    essa foi lida e descartada de propósito.
+    """
+    sem_fenomeno = []
+    parse_gamet(text, sem_fenomeno=sem_fenomeno)
+    return sem_fenomeno
+
+
+# Conteúdo que não pede fenómeno: vazio, só pontuação, só a janela ou NIL.
+_SEM_CONTEUDO_RE = re.compile(r"[\W_]*(?:\d{2}/\d{2}[\W_]*)?(?:NIL[\W_]*)?")
+
+
+def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
 
     text = normalize(text)
 
@@ -1623,6 +1642,17 @@ def parse_gamet(text, sem_area=None, alargadas=None):
     current_window  = ""
     campo_txt       = ""
 
+    # Subentrada em curso, para o aviso de campo não interpretado (3.9):
+    # campo, textos das linhas, nº de blocos ao abrir, área descartada.
+    sub = None
+
+    def _fechar_sub():
+        if (sub is not None and sem_fenomeno is not None and not sub["descartada"]
+                and len(blocks) == sub["n0"]):
+            txt = " ".join(t for t in sub["linhas"] if t)
+            if not _SEM_CONTEUDO_RE.fullmatch(txt):
+                sem_fenomeno.append(f"{sub['campo']}: {txt}")
+
     for raw_line in lines:
 
         line = raw_line.strip()
@@ -1656,6 +1686,8 @@ def parse_gamet(text, sem_area=None, alargadas=None):
         elif re.match(r"VA\b", line):
             new_state = "VA"
         elif re.match(r"SECN\s+I\b", line):
+            _fechar_sub()
+            sub = None
             state = "IDLE"
             current_polygon = FIR_POLYGON
             continue
@@ -1705,8 +1737,19 @@ def parse_gamet(text, sem_area=None, alargadas=None):
             if sem_area is not None and not _ENTIRE_FIR_RE.match(content):
                 sem_area.append(f"{campo_txt}: {content}")
 
+        # Subentrada nova (3.9): a linha abre o campo ou traz qualificador
+        # geográfico; senão continua a subentrada anterior.
+        if new_state or sub is None or new_poly is not None or (
+                _AREA_INI_RE.match(content) or _DIAGONAL_RE.search(content)
+                or _CARDINAL_BTN_RE.search(content)):
+            _fechar_sub()
+            sub = {"campo": campo_txt, "linhas": [], "n0": len(blocks),
+                   "descartada": False}
+        sub["linhas"].append(content)
+
         poly = current_polygon
         if poly is not None and poly.is_empty:
+            sub["descartada"] = True
             continue  # fenómeno sem área aplicável dentro da FIR
 
         # ---- Qualificador local ----
@@ -1735,6 +1778,7 @@ def parse_gamet(text, sem_area=None, alargadas=None):
                 recortado = _clean_poly(poly.intersection(sp))
                 if recortado.is_empty:
                     # O fenómeno não tem área aplicável dentro da FIR
+                    sub["descartada"] = True
                     continue
                 poly = recortado
 
@@ -1991,6 +2035,8 @@ def parse_gamet(text, sem_area=None, alargadas=None):
             # Cinzas vulcânicas — sempre NO-GO
             if new_state == "VA":
                 blocks.append(MetBlock("VA", poly, "VA", qualifier, surface=surface, window=window))
+
+    _fechar_sub()
 
     # ---- Extração Secção II: FZLVL, QNH e vento ----
     fzlvl_values = [int(m) for m in re.findall(r"(\d{4,5})FT\s+AMSL", secn2)]
@@ -3497,9 +3543,18 @@ def analisar_gamet(texto, fonte="manual", boletins=None, boletins_at=None,
             av.append(("aviso", f"⏱️ {r['validity_label']} — ⚠️ **FORA DO PERÍODO DE "
                                 "VALIDADE**: os dados podem estar desactualizados."))
 
-    sem_area, alargadas = [], []
-    blocks, fz, qnh, wind = parse_gamet(texto, sem_area, alargadas)
+    sem_area, alargadas, sem_fenomeno = [], [], []
+    blocks, fz, qnh, wind = parse_gamet(texto, sem_area, alargadas, sem_fenomeno)
     has_sigmet, sigmet_text = extract_sigmet_applicable(texto)
+    # Falhar em voz alta (3.9, pedido do Duarte a 21-out-2026): subentrada da
+    # Secção I com conteúdo que não gerou nenhum fenómeno — quase sempre uma
+    # gralha do IPMA (GAMET real 201500/202100 até à 3.6: "BKN 008/010HTF
+    # AGL" desaparecia e a app dava GO sem dizer nada). Só aviso: não muda a
+    # decisão.
+    for s in sem_fenomeno:
+        av.append(("aviso", f"⚠️ **Campo não interpretado** — «`{s.replace('`', '')}`»: a "
+                            "app não conseguiu ler este texto e ele **NÃO entra na "
+                            "decisão**. Lê o GAMET original."))
     # Falhar em voz alta (3.4): a subentrada foi aplicada a toda a FIR porque
     # a área não foi lida. O texto vai como código; as interfaces escapam-no.
     for s in sem_area:

@@ -7,8 +7,9 @@ parte do texto e a app dar GO em silêncio:
 
   1. excepções ao processar o GAMET;
   2. GAMET considerado ilegível (looks_unparseable);
-  3. campos da Secção I com conteúdo que não geraram nenhum fenómeno
-     (foi assim que "BKN 002/010HFT AGL" passou 31 versões despercebido);
+  3. campos (subentradas) da Secção I com conteúdo que não geraram nenhum
+     fenómeno (foi assim que "BKN 002/010HFT AGL" passou 31 versões
+     despercebido) — a mesma verificação do aviso do briefing (3.9);
   4. palavras da Secção I fora do vocabulário conhecido (formatos novos);
   5. subentradas com área geográfica não reconhecida, aplicadas a toda a
      FIR (3.4), e com cardinal solto antes de BTN, lidas de forma alargada
@@ -42,18 +43,9 @@ def carregar_motor():
 
 
 # ---------------------------------------------------------------------
-# Campos da Secção I e fenómenos que cada um deve gerar
+# Vocabulário da Secção I. Os campos com conteúdo que não geraram fenómeno
+# são do motor (campos_nao_interpretados, 3.9) — o mesmo aviso do briefing.
 # ---------------------------------------------------------------------
-CAMPOS = {
-    "SFC VIS": {"VIS"}, "SIG VIS": {"VIS"},
-    "SIG CLD": {"BASE_AGL", "BASE_AMSL", "CB"},
-    "SIGWX": {"TS", "WX"},
-    "TURB": {"TURB"}, "ICE": {"ICE"},
-    "MT OBSC": {"MT_OBSC"}, "VA": {"VA"},
-    "SFC WSPD": {"WSPD"}, "MTW": {"MTW"},
-}
-_CAMPO_RE = re.compile(r"\b(SFC VIS|SIG VIS|SIG CLD|SIGWX|TURB|ICE|MT OBSC|VA|SFC WSPD|MTW)\s*:")
-
 # Vocabulário conhecido da Secção I (palavras isoladas ou padrões)
 _VOCAB = set("""
 SECN I SFC VIS SIG CLD SIGWX TURB ICE MT OBSC VA NIL AND OF N S E W BTN TS
@@ -83,21 +75,6 @@ def palavras_desconhecidas(secn1):
             continue
         desconhecidas.add(tok)
     return sorted(desconhecidas)
-
-
-def campos_sem_fenomeno(secn1, blocos):
-    """Campos com conteúdo (não NIL) que não deram origem a nenhum bloco."""
-    gerados = {b.phenomenon for b in blocos}
-    marcas = list(_CAMPO_RE.finditer(secn1))
-    problemas = []
-    for i, m in enumerate(marcas):
-        fim = marcas[i + 1].start() if i + 1 < len(marcas) else len(secn1)
-        conteudo = secn1[m.end():fim].strip()
-        if not conteudo or re.fullmatch(r"NIL\W*", conteudo):
-            continue
-        if not (CAMPOS[m.group(1)] & gerados):
-            problemas.append(f"{m.group(1)}: {conteudo}")
-    return problemas
 
 
 def oraculo(eng, blocos, tem_sigmet, lon, lat):
@@ -141,7 +118,8 @@ def analisar(eng, texto):
         r["alertas"].append(f"Área não reconhecida (aplicada a toda a FIR) → {s}")
     for s, leitura in eng.subentradas_alargadas(texto):
         r["alertas"].append(f"Cardinal solto antes de BTN (área alargada a {leitura}) → {s}")
-    for p in campos_sem_fenomeno(secn1, blocos):
+    # Mesma verificação do aviso do briefing (3.9): por subentrada, no motor.
+    for p in eng.campos_nao_interpretados(texto):
         r["alertas"].append(f"Campo sem fenómeno gerado → {p}")
     desc = palavras_desconhecidas(secn1)
     if desc:
