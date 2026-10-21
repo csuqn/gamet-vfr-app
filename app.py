@@ -1649,10 +1649,12 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
     # "Área não reconhecida"/"Área alargada" — nunca menos do que a 3.10) e
     # cada parte "[HH/HH] ENTIRE FIR …" é lida A MAIS, como subentrada
     # virtual de toda a FIR (com a sua janela e superfície). Uma parte sem
-    # fenómeno próprio ("TURB: SEV SFC/FL050 ENTIRE FIR") alarga antes a
-    # linha inteira a toda a FIR (fora de MT OBSC/VA). Não actua quando antes
-    # só está o nome do campo e a janela ("MT OBSC: ENTIRE FIR",
-    # "SIG CLD:19/21 ENTIRE FIR"). Ver o estado em parse_gamet.
+    # fenómeno próprio ("TURB: SEV SFC/FL050 ENTIRE FIR") faz ler a linha
+    # inteira outra vez, virtual, em toda a FIR (fora de MT OBSC/VA). A
+    # linha real é lida exactamente como na 3.10 (janela, área, herança,
+    # avisos); as virtuais não mudam o estado que as seguintes herdam. Não
+    # actua quando antes só está o nome do campo e a janela ("MT OBSC:
+    # ENTIRE FIR", "SIG CLD:19/21 ENTIRE FIR").
 
     lines = [l.strip() for l in secn1.splitlines() if l.strip()]
 
@@ -1668,14 +1670,23 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
             lines[i] = lines[i][:mj.start()].rstrip()
             lines[i + 1] = f"{mj.group(1)} {lines[i + 1]}"
 
+    # Linhas virtuais (3.11), a seguir à linha real: ("parte", texto) para
+    # cada parte "[HH/HH] ENTIRE FIR …"; e ("toda", conteúdo da linha inteira)
+    # quando alguma parte não tem fenómeno próprio — a linha inteira lida de
+    # novo em toda a FIR. A linha real é lida exactamente como na 3.10.
     linhas = []
     for l in lines:
-        linhas.append((l, False))
+        linhas.append((l, None))
         conteudo = _CAMPO_PREFIXO_RE.sub("", l, count=1)
         cortes = _partes_entire(conteudo)
+        so_area = False
         for k, c in enumerate(cortes):
             fim = cortes[k + 1] if k + 1 < len(cortes) else len(conteudo)
-            linhas.append((conteudo[c:fim].strip(), True))
+            parte = conteudo[c:fim].strip()
+            linhas.append((parte, "parte"))
+            so_area = so_area or not _PARTE_SO_AREA_RE.sub("", parte).strip()
+        if so_area:
+            linhas.append((conteudo.strip(), "toda"))
 
     state = "IDLE"
     blocks = []
@@ -1701,6 +1712,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
     salvo = None
 
     for raw_line, virtual in linhas:
+        # virtual: None (linha real), "parte" ou "toda" (3.11)
 
         if not virtual and salvo is not None:
             current_polygon, current_window, sub = salvo
@@ -1763,21 +1775,15 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
             continue
 
         # ---- "ENTIRE FIR" a meio da linha (3.11) ----
-        # A linha é lida inteira como até à 3.10; as partes "[HH/HH] ENTIRE
-        # FIR …" vêm a seguir como linhas virtuais (sem avisos próprios: os da
-        # linha inteira mantêm-se). Uma parte sem fenómeno próprio alarga a
-        # linha inteira a toda a FIR (MT OBSC/VA: a parte virtual já dá o
-        # bloco de toda a FIR).
+        # Em MT OBSC/VA a parte virtual já dá o bloco de toda a FIR; nos
+        # outros campos uma parte sem fenómeno próprio não é lida (a linha
+        # inteira é lida de novo em toda a FIR, "toda").
         mv = state in ("MT_OBSC", "VA")
-        if virtual:
-            cortes = []
-            if not mv and not _PARTE_SO_AREA_RE.sub("", content).strip():
-                continue                    # já alargou a linha inteira
-        else:
-            cortes = _partes_entire(content)
-        alargar = (not mv and any(
-            not _PARTE_SO_AREA_RE.sub("", content[c:f]).strip()
-            for c, f in zip(cortes, cortes[1:] + [len(content)])))
+        if virtual == "toda" and mv:
+            continue
+        if (virtual == "parte" and not mv
+                and not _PARTE_SO_AREA_RE.sub("", content).strip()):
+            continue
 
         # ---- Contexto geográfico ----
         # Um qualificador geográfico que caia fora dos limites da FIR
@@ -1820,18 +1826,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
                    "descartada": False, "virtual": virtual}
         sub["linhas"].append(content)
 
-        # Na 3.10 a linha podia ficar sem área (fora da FIR, ou vazia depois de
-        # MAR/LAN/COT) e era descartada ANTES de ler a janela — as linhas
-        # seguintes herdavam a janela anterior. Alargada, a linha lê a sua
-        # janela, mas as seguintes continuam a herdar a da 3.10 (3.11).
-        janela_antes = current_window
-        descartada_310 = False
-        if alargar:
-            sp310 = surface_polygon("/".join(
-                x for x in ("COT", "LAN", "MAR") if re.search(rf"\b{x}\b", content)))
-            descartada_310 = current_polygon is not None and (
-                current_polygon.is_empty or (sp310 is not None and _clean_poly(
-                    current_polygon.intersection(sp310)).is_empty))
+        if virtual == "toda":
             current_polygon = FIR_POLYGON   # "… ENTIRE FIR" sem fenómeno (3.11)
         poly = current_polygon
         if poly is not None and poly.is_empty:
@@ -1871,21 +1866,17 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
         # ---- Janela temporal (HH/HH) ----
         # Um fenómeno pode aplicar-se só a parte do período do GAMET
         # (ex.: "TURB:11/15 ..." num GAMET válido 0900/1500).
-        # A janela de uma parte "HH/HH ENTIRE FIR" é dela, não da linha (3.11).
-        wm = re.search(r"(?:^|\s)(\d{2})/(\d{2})(?=\s|$)",
-                       content[:min([24] + cortes)])
+        wm = re.search(r"(?:^|\s)(\d{2})/(\d{2})(?=\s|$)", content[:24])
         if wm:
             h1, h2 = int(wm.group(1)), int(wm.group(2))
             if h1 <= 23 and h2 <= 23:
                 current_window = f"{h1:02d}–{h2:02d}Z"
-        elif _qual_ini.match(content) or re.match(r"ENTIRE\s+FIR\b", content):
+        elif _qual_ini.match(content) or (virtual and re.match(r"ENTIRE\s+FIR\b", content)):
             # Subentrada nova sem janela própria vale para todo o período —
             # não herda a da anterior (senão um NO-GO em vigor podia
             # aparecer como "ainda não começou"). "ENTIRE FIR" também (3.11).
             current_window = ""
         window = current_window
-        if descartada_310:
-            current_window = janela_antes
 
         # ---- PARSE por estado ----
 

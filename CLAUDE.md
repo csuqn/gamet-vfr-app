@@ -76,31 +76,27 @@ Três pormenores que já causaram erros reais:
   permissivas.
 - **`ENTIRE FIR` a meio da linha** (3.11, pedido do Duarte a 21-out-2026):
   até à 3.10 era ignorado — `MT OBSC: N OF N4100 LAN ENTIRE FIR` dava só o N
-  de N4100 (41 GO / 11 NO-GO; erro optimista). A linha continua a ser lida
-  **inteira, como na 3.10** (mesma área, valores e avisos "Área não
-  reconhecida"/"Área alargada") e cada parte `[HH/HH] ENTIRE FIR …` é lida **a
-  mais**, como subentrada virtual de toda a FIR, com a sua janela e superfície
-  (`_partes_entire`, linhas virtuais em `parse_gamet`; sem avisos próprios).
-  Uma parte sem fenómeno próprio (`TURB: SEV SFC/FL050 ENTIRE FIR`,
-  `… ENTIRE FIR SW OF W00800`) alarga antes a linha inteira a toda a FIR (fora
-  de MT OBSC/VA, onde a parte virtual já dá o bloco). Não actua quando antes só
-  está o nome do campo e a janela (`MT OBSC: ENTIRE FIR`,
-  `SIG CLD:\n19/21 ENTIRE FIR …`). Por isso nunca é mais permissivo do que a
-  3.10 — testado contra o motor da 3.10 (`tests/referencia/app_3_10.py`,
-  `test_v311_contra_310.py`). A 1.ª versão (979aeeb, rejeitada pelo revisor)
-  partia a linha e perdia a leitura da 3.10: em
-  `SIGWX: N OF N4100 OCNL TS ENTIRE FIR SW OF W00800 ISOL TS` o OCNL TS (toda a
-  FIR por causa da diagonal) ficava só a N de N4100 e o aviso desaparecia; e
-  com superfícies diferentes (`S OF N3800 LAN … ENTIRE FIR MAR …`) também. As
-  linhas virtuais **não mudam o que as linhas seguintes sem
-  qualificador herdam** (área, janela, subentrada: guardadas e repostas — 2.ª
-  revisão do PR #24: em `SIGWX: N OF N4100 LAN ISOL TS 19/21 ENTIRE FIR ISOL TS`
-  + `SEV SQL` o SQL passava a só 19–21Z); e uma linha que a 3.10 descartava
-  (sem área ou vazia depois de MAR/LAN/COT) e que a parte sem fenómeno alarga
-  lê a sua janela sem a passar às seguintes; a subentrada `ENTIRE FIR` sem
-  janela vale todo o período; a janela da linha inteira procura-se só antes
-  da 1.ª parte. A área do SIGMET
-  (`area_sigmet`) não tinha o problema (procura `ENTIRE FIR` em todo o texto).
+  de N4100 (41 GO / 11 NO-GO; erro optimista). A linha real é lida
+  **exactamente como na 3.10** (janela em `content[:24]`, área, valores,
+  herança, avisos "Área não reconhecida"/"Área alargada"). Depois dela vêm
+  linhas **virtuais**, lidas a mais (`_partes_entire`; `linhas` de
+  `parse_gamet` com `virtual` = None / "parte" / "toda"):
+  - "parte": cada `[HH/HH] ENTIRE FIR …`, como subentrada de toda a FIR com a
+    sua janela e superfície (sem janela, todo o período);
+  - "toda": se alguma parte não tem fenómeno próprio (`TURB: SEV SFC/FL050
+    ENTIRE FIR`, `… ENTIRE FIR SW OF W00800`), o conteúdo da linha inteira
+    outra vez, em toda a FIR (fora de MT OBSC/VA, onde a parte já dá o bloco).
+  As virtuais não geram avisos e não mudam o que as linhas seguintes herdam
+  (área, janela e subentrada são guardadas e repostas). Só acrescentam
+  blocos, por isso nunca é mais permissivo do que a 3.10 — testado contra o
+  motor da 3.10 (`tests/referencia/app_3_10.py`, `test_v311_contra_310.py`,
+  por regiões e por hora). Não actua quando antes só está o nome do campo e a
+  janela (`MT OBSC: ENTIRE FIR`, `SIG CLD:\n19/21 ENTIRE FIR …`). Revisões
+  do PR #24 rejeitadas: partir a linha (979aeeb: diagonal depois de
+  `ENTIRE FIR`, superfícies diferentes), deixar a parte virtual mudar a
+  herança (7789689) e procurar a janela da linha real só antes da parte
+  (2c77f97: `OVC 002HFT 19/21 ENTIRE FIR …` numa linha de continuação perdia
+  a janela 19–21Z). A área do SIGMET (`area_sigmet`) não tinha o problema.
 - **Vírgula decimal nos KM** (3.10): `LCA 1,5KM BR` → 1500 m (até à 3.9, 5000 m:
   apanhava o `5KM`). Só `\d{1,2},\d+` colado (`0800M BR, 5KM`, `1200M,5KM`,
   `2500,5KM` continuam a ser dois valores). Só a VIS lê KM.
@@ -282,7 +278,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-2121 testes. Devem passar a 100%.
+2326 testes. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -346,10 +342,12 @@ python3 -m pytest
   de `ENTIRE FIR` mantém OCNL TS em toda a FIR e o aviso; superfícies
   diferentes; `ENTIRE FIR` no fim da linha sem "Campo não interpretado";
   janela em início de linha; aviso "Área alargada"; linhas seguintes herdam
-  a janela e a área da 3.10)
-- `tests/test_v311_contra_310.py` — 400 linhas geradas com `ENTIRE FIR` a meio
+  a janela e a área da 3.10; janela colada à parte numa linha de continuação
+  é a da linha inteira, como na 3.10)
+- `tests/test_v311_contra_310.py` — 500 casos gerados com `ENTIRE FIR` a meio
   (todos os campos, qualificadores antes/depois, diagonais, coordenadas, WI,
-  BTN, MAR/LAN/COT, AND, janela, duas partes): nos 52 aeródromos e numa grelha
+  BTN, MAR/LAN/COT, AND, janela, duas partes; linhas de continuação com
+  conteúdo antes de `HH/HH ENTIRE FIR` e com `ENTIRE FIR HH/HH`): nos 52 aeródromos e numa grelha
   de 0,2°, a decisão nunca é mais permissiva do que a do motor da **3.10**
   (`tests/referencia/app_3_10.py`, cópia fixa do `app.py` do main d2ccf2e) e
   os avisos de área da 3.10 mantêm-se; com linhas seguintes sem qualificador

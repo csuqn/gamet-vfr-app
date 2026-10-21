@@ -82,7 +82,9 @@ def test_mt_obsc_entire_fir_com_janela(eng):
     mt = _blocos(eng, g, "MT_OBSC")
     sul = [b for b in mt if _a_sul(b, 38.0)]
     toda = [b for b in mt if _toda(eng, b)]
-    assert [b.window for b in sul] == [""]
+    # A linha real fica como na 3.10 (janela lida nos primeiros 24
+    # caracteres, aqui a da parte); a parte virtual dá toda a FIR 19–21Z.
+    assert [b.window for b in sul] == ["19–21Z"]
     assert [b.surface for b in sul] == ["LAN"]
     assert [b.window for b in toda] == ["19–21Z"]
     assert set(_decisoes(eng, g).values()) == {"NO-GO"}
@@ -191,11 +193,12 @@ def test_revisor_superficies_diferentes(eng, corpo):
 
 
 def test_revisor_entire_fir_no_fim_da_linha(eng):
-    """"TURB: SEV SFC/FL050 ENTIRE FIR": a linha inteira passa a toda a FIR,
-    sem "Campo não interpretado"."""
+    """"TURB: SEV SFC/FL050 ENTIRE FIR": a linha inteira é lida outra vez em
+    toda a FIR, sem "Campo não interpretado"."""
     g = _g("TURB: N OF N4100 SEV SFC/FL050 ENTIRE FIR")
     turb = _blocos(eng, g, "TURB")
-    assert len(turb) == 1 and _toda(eng, turb[0])
+    assert len(turb) == 2 and any(_toda(eng, b) for b in turb)
+    assert any(_a_norte(b, 41.0) for b in turb)          # a leitura da 3.10
     assert set(_decisoes(eng, g).values()) == {"NO-GO"}
     assert eng.campos_nao_interpretados(g) == []
     assert eng.subentradas_sem_area(g) == []
@@ -227,17 +230,37 @@ def test_revisor_linha_seguinte_herda_como_na_3_10(eng, corpo, fen, valor):
     assert {d[n] for n in _norte(eng)} == {"NO-GO"}
 
 
-def test_linha_descartada_na_3_10_e_alargada_nao_muda_a_janela_herdada(eng):
+def test_linha_descartada_na_3_10_continua_descartada(eng):
     """Na 3.10 "17/19 … E OF W00800 … COT" ficava sem área (descartada antes
-    de ler a janela) e as linhas seguintes valiam todo o período. Alargada
-    pela parte "ENTIRE FIR" sem fenómeno, a linha lê a sua janela, mas as
-    seguintes continuam a valer todo o período."""
+    de ler a janela) e as linhas seguintes herdavam N OF N4000 ∩ E OF W00800
+    em todo o período. A linha real fica igual; a cópia virtual "toda" (por
+    causa do "ENTIRE FIR AND" sem fenómeno) dá o SEV na faixa costeira."""
     g = _g("MTW: 17/19 N OF N4000 AND E OF W00800 SEV SFC/FL100 ENTIRE FIR AND "
            "ENTIRE FIR COT SEV SFC/FL100\nMOD FL080\nSEV SFC/FL100")
     mtw = _blocos(eng, g, "MTW")
-    seguintes = [b for b in mtw if b.surface == "" and _toda(eng, b)]
+    seguintes = [b for b in mtw if b.surface == ""]
     assert sorted(b.value for b in seguintes) == ["MOD", "SEV"]
-    assert all(b.window == "" for b in seguintes)
+    assert all(b.window == "" and _a_norte(b, 40.0) for b in seguintes)
+    costa = [b for b in mtw if b.surface == "COT"]
+    assert costa and all(b.value == "SEV" for b in costa)
+
+
+@pytest.mark.parametrize("corpo, fen, valor, janela", [
+    # 3.ª revisão do PR #24: a janela colada à parte ENTIRE FIR numa linha de
+    # continuação é, como na 3.10, a janela da linha inteira.
+    ("SIG CLD: 15/17 N OF N4100 BKN 030HFT AGL\nOVC 002HFT 19/21 ENTIRE FIR BKN 040HFT AGL",
+     "BASE_AGL", 200, "19–21Z"),
+    ("SIGWX: 15/17 N OF N4100 ISOL TS\nSEV SQL 19/21 ENTIRE FIR ISOL TS", "WX", "SQL", "19–21Z"),
+    ("SIGWX: 15/17 N OF N4100 ISOL TS\nFRQ TS ENTIRE FIR 19/21 ISOL TS", "TS", "FRQ", "19–21Z"),
+    ("SFC VIS: 15/17 N OF N4100 5000M RA\n1000M FG 18/20 ENTIRE FIR 4000M BR", "VIS", 1000,
+     "18–20Z"),
+    ("MTW: 16/20 E OF W00800 MOD FL080\nSEV SFC/FL100 19/21 ENTIRE FIR MOD FL080", "MTW", "SEV",
+     "19–21Z"),
+])
+def test_revisor_janela_da_linha_de_continuacao_como_na_3_10(eng, corpo, fen, valor, janela):
+    g = _g(corpo)
+    b = [x for x in _blocos(eng, g, fen) if x.value == valor and not _toda(eng, x)]
+    assert [x.window for x in b] == [janela], b
 
 
 def test_area_alargada_mantem_aviso(eng):

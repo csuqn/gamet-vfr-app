@@ -92,7 +92,7 @@ SEGUINTES = {"SIGWX:": ["SEV SQL", "OCNL TS", "20/21 SEV SQL"],
 LIGA = [" ", " ", " AND "]
 
 
-def _casos(n=400, semente=311):
+def _casos(n=500, semente=311):
     rnd = random.Random(semente)
     casos = [
         "SIGWX: N OF N4100 OCNL TS ENTIRE FIR SW OF W00800 ISOL TS",
@@ -120,6 +120,13 @@ def _casos(n=400, semente=311):
         "MT OBSC:17/19 N OF N4100 LAN 19/21 S OF N3800 LAN",
         "MT OBSC:17/19 N OF N4100 LAN ENTIRE FIR", "VA: 19/21 ENTIRE FIR",
         "MT OBSC: NIL ENTIRE FIR", "MT OBSC:\nNIL", "VA:19/21 S OF N3800 MAR 17/19 ENTIRE FIR",
+        # 3.ª revisão do PR #24: janela colada à parte numa linha de continuação
+        "SIG CLD: 15/17 N OF N4100 BKN 030HFT AGL\nOVC 002HFT 19/21 ENTIRE FIR BKN 040HFT AGL",
+        "SIGWX: 15/17 N OF N4100 ISOL TS\nSEV SQL 19/21 ENTIRE FIR ISOL TS",
+        "SIGWX: 15/17 N OF N4100 ISOL TS\nOCNL TS 19/21 ENTIRE FIR ISOL TS",
+        "SIGWX: 15/17 N OF N4100 ISOL TS\nFRQ TS ENTIRE FIR 19/21 ISOL TS",
+        "SFC VIS: 15/17 N OF N4100 5000M RA\n1000M FG 18/20 ENTIRE FIR 4000M BR",
+        "MTW: 16/20 E OF W00800 MOD FL080\nSEV SFC/FL100 19/21 ENTIRE FIR MOD FL080",
     ]
     while len(casos) < n:
         campo, fens = rnd.choice(CAMPOS)
@@ -137,8 +144,19 @@ def _casos(n=400, semente=311):
                           f"{' ' + depois if depois else ''}{rnd.choice(SUP)} {fen}")
         corpo = campo + " " + anterior + rnd.choice(LIGA).join(partes)
         corpo = " ".join(corpo.split())
-        for _ in range(rnd.choice([0, 0, 1, 2])):
-            corpo += "\n" + rnd.choice(SEGUINTES[campo])
+        for _ in range(rnd.choice([0, 0, 1, 2, 3])):
+            if rnd.random() < .45:
+                # Continuação com conteúdo antes de uma ou mais partes ENTIRE
+                # FIR, com a janela antes, colada ou depois da parte
+                seg = rnd.choice(["", "", "15/17 "]) + rnd.choice(fens or ["LAN"])
+                for _ in range(rnd.choice([1, 1, 2])):
+                    j = rnd.choice(["15/17 ", "19/21 ", "16/20 ", ""])
+                    resto = f"{rnd.choice(SUP)} {rnd.choice(fens) if rnd.random() < .8 else ''}"
+                    seg += (f" {j}ENTIRE FIR{resto}" if rnd.random() < .5
+                            else f" ENTIRE FIR {j}{resto}")
+                corpo += "\n" + " ".join(seg.split())
+            else:
+                corpo += "\n" + rnd.choice(SEGUINTES[campo])
         casos.append(corpo)
     return casos
 
@@ -152,6 +170,11 @@ def test_casos_cobrem_nil_abertura_vazia_e_linhas_seguintes():
     assert sum(re.match(r"(?:MT OBSC|VA):?\s*\d{2}/\d{2} [NSEWB]", c) is not None
                for c in mv) > 10
     assert sum("\n" in c for c in CASOS) > 100
+    # Linhas de continuação com uma parte ENTIRE FIR
+    cont = [l for c in CASOS for l in c.split("\n")[1:] if "ENTIRE FIR" in l
+            and not l.startswith(("ENTIRE", "1"))]
+    assert sum(bool(re.search(r"\d{2}/\d{2} ENTIRE FIR", l)) for l in cont) > 30
+    assert sum(bool(re.search(r"ENTIRE FIR \d{2}/\d{2}", l)) for l in cont) > 30
 
 
 @pytest.mark.parametrize("corpo", CASOS)
