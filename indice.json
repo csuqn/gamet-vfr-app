@@ -223,6 +223,13 @@
    "inicio": "2026-10-22T03:00Z",
    "fim": "2026-10-22T09:00Z",
    "tipo": "GAMET"
+  },
+  {
+   "ficheiro": "gamets/2026/10/20261022T0842Z_220900-221500_3a5ceefdd8.txt",
+   "recolhido": "2026-10-22T08:42Z",
+   "inicio": "2026-10-22T09:00Z",
+   "fim": "2026-10-22T15:00Z",
+   "tipo": "GAMET"
   }
  ],
  "sigmets": [
