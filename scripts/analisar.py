@@ -53,7 +53,7 @@ LCA ISOL OCNL FRQ EMBD GEN MOD SEV HVY ABV BLW TOP TOPS MAR LAN COT
 FEW SCT BKN OVC CB TCU AS AC NS ST SC CU CI FG BR RA DZ SN HZ FU DU SA
 SHRA SHSN TSRA TSGR GR GS FZRA FZDZ FZFG BCFG MIFG PRFG VCFG BLSN DS SS
 INTSF WKN NC STNR MOV KT AGL AMSL HFT FT M KM FL INC IN CLD OBS FCST
-WSPD MTW SQL FC TC MPS -
+WSPD MTW SQL FC TC MPS HAZARDOUS WX -
 """.split())
 _PADROES = [
     r"N\d{4}", r"W\d{5}", r"FL\d{3}", r"\d{2}/\d{2}", r"\d{3,4}M",
@@ -72,6 +72,10 @@ def palavras_desconhecidas(secn1):
         if not tok or tok in _VOCAB:
             continue
         if any(p.match(tok) for p in _PADROES_RE):
+            continue
+        # Tempo presente combinado com várias barras (RA/DZ/BR): conhecido se
+        # cada parte for conhecida — "RA/HTX" continua a ser assinalado.
+        if "/" in tok and all(p in _VOCAB for p in tok.split("/")):
             continue
         desconhecidas.add(tok)
     return sorted(desconhecidas)
