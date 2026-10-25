@@ -314,6 +314,13 @@
    "inicio": "2026-10-25T09:00Z",
    "fim": "2026-10-25T15:00Z",
    "tipo": "GAMET"
+  },
+  {
+   "ficheiro": "gamets/2026/10/20261025T1442Z_251500-252100_d41bc44c9b.txt",
+   "recolhido": "2026-10-25T14:42Z",
+   "inicio": "2026-10-25T15:00Z",
+   "fim": "2026-10-25T21:00Z",
+   "tipo": "GAMET"
   }
  ],
  "sigmets": [
