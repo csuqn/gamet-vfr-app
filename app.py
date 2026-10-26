@@ -29,7 +29,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "3.10"
+APP_VERSION = "4.0"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -912,6 +912,7 @@ class MetBlock:
     layer: str = ""       # SFC/FL050, ABV FL070, etc.
     surface: str = ""     # MAR, LAN, COT — superfície afectada
     window: str = ""      # 11–15Z — janela temporal dentro do GAMET
+    origem: str = ""      # "AIRMET 2" (4.0) — vazio = GAMET/SIGMET
 
 # -------------------------------------------------
 # NORMALIZE
@@ -1485,13 +1486,27 @@ _SIGWX_SEVEROS = {
 
 # Base de nuvem em SIG CLD — ver comentário no estado "CLD" de parse_gamet.
 _CLD_BASE_RE = re.compile(
-    r"(?<![\dA-Z])(?P<base>SFC|\d{3,5})"
-    r"(?:-\d{3,5})?"                      # fim do intervalo de bases
+    # Um número COLADO a '-' ou '/' é topo ou fim de intervalo, nunca base
+    # (a regra da 3.10). Desde a 4.0 está no lookbehind e não num "continue"
+    # depois do match: com intervalos com espaços, um match que começasse num
+    # número colado ("-030 - 045HFT") levava consigo a base que vem a seguir.
+    r"(?<![\dA-Z/\-])(?P<base>SFC|\d{3,5})"
+    # Fim do intervalo de bases, colado ou com espaços ("002 - 004", 4.0).
+    # Nas formas coladas a base é o primeiro número, como até à 3.10 (o topo
+    # nunca é base, mesmo se for menor: "020/002HFT" → 2000). Nas formas com
+    # espaços ou ABV, que a 3.10 não lia de seguida, ela lia o número a
+    # seguir ao separador como base — entra no mínimo (ver o estado "CLD"),
+    # para nunca ficar mais alta do que a leitura da 3.10.
+    r"(?:(?P<sfim>\s*-\s*)(?P<fim>\d{3,5}))?"
     # Topo, simples ou em intervalo (3.8): "050-090/100-130HTF AMSL" (GAMET
     # real 201500/202100, Secção II). Com um só número no topo a expressão
     # não casava a partir da base e a base desaparecia em silêncio. O topo
     # é ignorado.
-    r"(?:/(?:\d{3,5}(?:-\d{3,5})?|XXX))?"
+    # Topo com "ABV" e espaços à volta da barra (4.0, revisor do PR #26):
+    # "002/ABV 030HFT", "002/ABV030HFT", "002 / 030HFT". Até à 4.0 a base
+    # não casava e o TOPO era lido como base (3000 ft → GO em silêncio).
+    r"(?:(?P<stopo>\s*/\s*(?:ABV\s*)?)"
+    r"(?:(?P<topo>\d{3,5})(?:(?P<stf>\s*-\s*)(?P<topofim>\d{3,5}))?|XXX))?"
     # "HTF" (3.7) é gralha do IPMA para "HFT" (GAMET real 201500/202100:
     # "LCA BKN 008/010HTF AGL"). Sem ela a base desaparecia em silêncio.
     r"\s*(?P<unit>HFT|HTF|FT)\b"
@@ -1885,18 +1900,25 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
             # forma base/topo sem intervalo não era reconhecida e nuvens a
             # 200 ft passavam como GO.
             for m in _CLD_BASE_RE.finditer(content):
-                # Um número precedido de '-' ou '/' é topo ou fim de intervalo,
-                # não base ("TCU/CB 020HFT" mantém-se: o '/' é do TCU/CB e
-                # está separado do número por um espaço).
-                if m.start() > 0 and content[m.start() - 1] in "-/":
-                    continue
+                # Um número colado a '-' ou '/' nunca começa um match (ver o
+                # lookbehind de _CLD_BASE_RE; "TCU/CB 020HFT" mantém-se: o '/'
+                # é do TCU/CB e está separado do número por um espaço). Com
+                # espaços ("- 002HFT", "/ 030HFT") o número conta, como na
+                # 3.10. O topo a seguir a uma base ("002 / 030HFT",
+                # "002/ABV 030HFT", 4.0) é consumido pela expressão.
                 base_txt, unidade, ref = m.group("base"), m.group("unit"), m.group("ref")
+                # Números lidos depois de um separador com espaços ou ABV
+                # (que a 3.10 lia como base) entram no mínimo; os colados não.
+                nums = [int(base_txt)] if base_txt != "SFC" else []
+                for sep, num in (("sfim", "fim"), ("stopo", "topo"), ("stf", "topofim")):
+                    if m.group(num) and m.group(sep) not in ("-", "/"):
+                        nums.append(int(m.group(num)))
                 if base_txt == "SFC":
                     base_ft = 0
                 elif unidade in ("HFT", "HTF"):   # HTF: gralha de HFT (3.7)
-                    base_ft = int(base_txt) * 100
+                    base_ft = min(nums) * 100
                 else:
-                    base_ft = int(base_txt)
+                    base_ft = min(nums)
                 # Sem AGL/AMSL (3.3) → AGL (decisão do Duarte, 18-out-2026):
                 # em SIG CLD o IPMA dá as bases em AGL, e a falta da
                 # referência é quase certamente uma gralha. Só "AMSL"
@@ -2079,7 +2101,7 @@ _PHENOM_LABEL = {
     "TS": "TS", "TURB": "TURB", "ICE": "ICE",
     "MT_OBSC": "MT OBSC", "VA": "VA",
     "WSPD": "SFC WSPD", "MTW": "MTW", "WX": "SIGWX", "CB": "CB",
-    "SIGMET": "SIGMET",
+    "SIGMET": "SIGMET", "AIRMET": "AIRMET",
 }
 
 
@@ -2124,23 +2146,48 @@ def label_region(poly, max_names=3):
     return f"Zona {ns}/{ew}"
 
 
-_BASE_REASON_RE = re.compile(r"^BASE \d+ft")
+# Motivo de base, com ou sem a origem do AIRMET à frente (4.0)
+_ORIGEM_MOTIVO = r"(?:AIRMET \S+ — )?"
+_BASE_REASON_RE = re.compile(rf"^({_ORIGEM_MOTIVO})BASE \d+ft")
 
 def _dedupe_base_reasons(reasons):
     """
     Numa região que junta células com bases diferentes, manter só o motivo
-    com a base mais baixa por limiar ("< 300ft", "< 500ft").
+    com a base mais baixa por limiar ("< 300ft", "< 500ft") — por origem
+    (GAMET ou cada AIRMET).
     """
     outros, por_limiar = [], {}
     for r in reasons:
-        m = re.match(r"^BASE (\d+)ft (.*)$", r)
+        m = re.match(rf"^({_ORIGEM_MOTIVO})BASE (\d+)ft (.*)$", r)
         if not m:
             outros.append(r)
             continue
-        val, limiar = int(m.group(1)), m.group(2)
+        val, limiar = int(m.group(2)), (m.group(1), m.group(3))
         if limiar not in por_limiar or val < por_limiar[limiar][0]:
             por_limiar[limiar] = (val, r)
     return sorted(outros + [r for _, r in por_limiar.values()])
+
+
+def _motivos_por_origem(dec_result, por_origem):
+    """
+    (4.0) Decisão de uma célula com blocos de AIRMET: a decisão e os valores
+    são os de decision() sobre TODOS os eventos (os limiares não mudam); os
+    motivos são os do GAMET/SIGMET mais os de cada AIRMET, com a origem à
+    frente ("AIRMET 2 — VIS 200m < 1500m"). Devolve (resultado, origens que
+    não deram motivo — informativas).
+    """
+    ordem = {"GO": 0, "MARGINAL": 1, "NO-GO": 2}
+    nivel = dec_result[0]
+    reasons = list(decision(por_origem.get("", []))[-1])
+    informativas = []
+    for origem in sorted(k for k in por_origem if k):
+        sub = decision(por_origem[origem])
+        if ordem[sub[0]] > ordem[nivel]:
+            nivel = sub[0]                  # nunca acontece; só por segurança
+        if not sub[-1]:
+            informativas.append(origem)
+        reasons += [r if r.startswith(origem) else f"{origem} — {r}" for r in sub[-1]]
+    return (nivel,) + tuple(dec_result[1:-1]) + (reasons,), informativas
 
 
 def _aggregate_results(resultados):
@@ -2264,7 +2311,8 @@ def compute_dynamic_regions(blocks):
                 and b.polygon.geom_type in ("Polygon", "MultiPolygon")
                 and b.phenomenon in ("VIS", "BASE_AGL", "BASE_AMSL", "TS",
                                        "TURB", "ICE", "MT_OBSC", "VA",
-                                       "WSPD", "MTW", "WX", "CB", "SIGMET")]
+                                       "WSPD", "MTW", "WX", "CB", "SIGMET",
+                                       "AIRMET")]
 
     def _empty_region():
         dec, vis, base, ts, turb, turb_layers, ice, ice_layers, mt_obsc, va, reasons = decision([])
@@ -2316,6 +2364,8 @@ def compute_dynamic_regions(blocks):
         cell_area = cell.area
         events = []
         notas = set()
+        por_origem = defaultdict(list)     # AIRMET (4.0): eventos por origem
+        rot_origem = defaultdict(set)
         for b in relevant:
             if b.polygon.intersection(cell).area < 0.5 * cell_area:
                 continue
@@ -2323,16 +2373,23 @@ def compute_dynamic_regions(blocks):
                 # Pior caso dentro da célula: terreno mais alto que ela toca.
                 elev_ft = _terrain_max_ft(cell)
                 agl_ft = max(0, round(b.value - elev_ft))
-                events.append(("BASE", agl_ft, b.qualifier, b.layer))
+                ev = ("BASE", agl_ft, b.qualifier, b.layer)
             elif b.phenomenon == "BASE_AGL":
-                events.append(("BASE", b.value, b.qualifier, b.layer))
+                ev = ("BASE", b.value, b.qualifier, b.layer)
             else:
-                events.append((b.phenomenon, b.value, b.qualifier, b.layer))
+                ev = (b.phenomenon, b.value, b.qualifier, b.layer)
+            events.append(ev)
+            origem = getattr(b, "origem", "")
+            por_origem[origem].append(ev)
 
             # Anotações que não alteram a decisão mas restringem o alcance
             # real do aviso — mostradas no briefing para o piloto saber
             # que o fenómeno não cobre tudo o que está desenhado.
             rotulo = _PHENOM_LABEL.get(b.phenomenon, b.phenomenon)
+            if origem:
+                rot_origem[origem].add(f"{rotulo} {b.value}" if b.phenomenon in
+                                       ("TURB", "ICE", "MTW") else rotulo)
+                rotulo = f"{origem} {rotulo}"
             if getattr(b, "surface", ""):
                 notas.add(f"{rotulo}: apenas sobre {_SURFACE_LABEL.get(b.surface, b.surface)} "
                           f"(área já recortada)")
@@ -2340,6 +2397,12 @@ def compute_dynamic_regions(blocks):
                 notas.add(f"{rotulo}: apenas {b.window}")
 
         dec_result = decision(events)
+        if any(por_origem.keys() - {""}):
+            # AIRMET (4.0): a decisão é a mesma; os motivos dizem de onde vêm
+            dec_result, informativas = _motivos_por_origem(dec_result, por_origem)
+            for origem in informativas:
+                notas.add(f"{origem}: {', '.join(sorted(rot_origem[origem]))} "
+                          "(informativo, não altera a decisão)")
         cell_results.append((cell, dec_result))
         cell_notes.append(tuple(sorted(notas)))
 
@@ -2351,8 +2414,8 @@ def compute_dynamic_regions(blocks):
     # Um piloto no Algarve via "VIS 1000m FG" que estava a 500 km dele.
     #
     # Incluir a assinatura de causas no agrupamento garante que cada região
-    # só mostra o que de facto se aplica à sua área.
-    from collections import defaultdict
+    # só mostra o que de facto se aplica à sua área. (defaultdict vem do
+    # import do topo; um import local aqui torná-lo-ia local à função toda.)
 
     def _cause_signature(res):
         """
@@ -2368,7 +2431,7 @@ def compute_dynamic_regions(blocks):
         # violou: com bases AMSL cada quadrícula de relevo dá uma base AGL
         # diferente e o briefing partia-se em dezenas de cartões. A região
         # mostra a base mínima (a conservadora) — ver _dedupe_base_reasons.
-        return tuple(sorted(_BASE_REASON_RE.sub("BASE #ft", r) for r in res[-1]))
+        return tuple(sorted(_BASE_REASON_RE.sub(r"\1BASE #ft", r) for r in res[-1]))
 
     grouped_cells = defaultdict(list)   # (decisão, assinatura) -> células
     group_results = defaultdict(list)   # (decisão, assinatura) -> resultados
@@ -2480,7 +2543,7 @@ def _merge_slivers(regions, min_area_frac=0.015):
                 tuple(r["mt_obsc"]), tuple(r["va"]))
 
     def _motivos(r):
-        return {_BASE_REASON_RE.sub("BASE #ft", m) for m in r.get("reasons", [])}
+        return {_BASE_REASON_RE.sub(r"\1BASE #ft", m) for m in r.get("reasons", [])}
 
     def _bolsa_irma(a, b):
         # Mesmo grupo de compute_dynamic_regions (mesma decisão, mesmos
@@ -2782,15 +2845,35 @@ def _area_wi(seg):
     return pol if pol.area > 0 else None
 
 
+def _corpo_boletim(texto):
+    """(texto normalizado numa linha, corpo depois de 'LISBOA FIR …')."""
+    t = re.sub(r"\s+", " ", normalize(texto or ""))
+    corpo = re.split(r"LISBOA FIR(?:/MAINLAND AREA)?", t, maxsplit=1)
+    corpo = corpo[1] if len(corpo) > 1 else t
+    return t, corpo
+
+
 def area_sigmet(texto, ref=None):
     """
     Área de um SIGMET já recortada à área do GAMET, com margem e movimento.
     Devolve (polígono, descrição). Polígono None = toda a área (não percebida
     ou o próprio SIGMET diz que é toda a FIR). Polígono vazio = fora da área.
     """
-    t = re.sub(r"\s+", " ", normalize(texto or ""))
-    corpo = re.split(r"LISBOA FIR(?:/MAINLAND AREA)?", t, maxsplit=1)
-    corpo = corpo[1] if len(corpo) > 1 else t
+    t, corpo = _corpo_boletim(texto)
+    geom, desc = _area_boletim(t, corpo, ref)
+    if geom is None:
+        return None, desc
+    geom = _clean_poly(FIR_POLYGON.intersection(_buffer_nm(geom, _SIGMET_MARGEM_NM)))
+    return geom, f"{desc} + {_SIGMET_MARGEM_NM} NM"
+
+
+def _area_boletim(t, corpo, ref=None):
+    """
+    Área de um SIGMET/AIRMET, SEM margem e sem recorte à FIR: WI polígono ou
+    círculo, ou os qualificadores do GAMET, estendida pelo MOV. Devolve
+    (geometria, descrição) ou (None, "toda a área (…)") se não se perceber.
+    Partilhada por area_sigmet (3.0) e ler_airmet (4.0).
+    """
     if re.search(r"\bENTIRE FIR\b|\bLINE\b", corpo):
         return None, "toda a área"
 
@@ -2855,9 +2938,7 @@ def area_sigmet(texto, ref=None):
                                     yoff=dist * math.cos(rumo))
         geom = unary_union([geom, movido]).convex_hull
         desc += f", deslocação {mv.group(1)} {mv.group(2)} kt"
-
-    geom = _clean_poly(FIR_POLYGON.intersection(_buffer_nm(geom, _SIGMET_MARGEM_NM)))
-    return geom, f"{desc} + {_SIGMET_MARGEM_NM} NM"
+    return geom, desc
 
 
 _LIGACAO_SIGMET = {"AND", "SIGMET", "SIGMETS", "LPPC", "NR", "NO", "Nº"}
@@ -2988,6 +3069,249 @@ def blocos_sigmet(sigmets, has_sigmet, sigmet_text, ref=None, conhecidos=None,
             descr.append("SIGMET referido no GAMET sem o texto completo disponível: "
                          "NO-GO em toda a área")
     return blocos, descr
+
+
+# -------------------------------------------------
+# AIRMET NA DECISÃO (4.0)
+# -------------------------------------------------
+# Decisão do Duarte a 26-out-2026. Até à 3.10 um AIRMET em vigor era só
+# mostrado. Caso real de 25-out-2026: GAMET 251500/252100 com GO em todo o
+# lado e, às 18:10/18:40Z, "AIRMET 1 … BKN CLD OBS N OF N3930 COT 002HFT AGL"
+# e "AIRMET 2 … SFC VIS 0200-5000M FG/BR OBS N OF N3930 COT AND LAN" — a app
+# continuava 100% GO (erro optimista).
+#
+# Regras normais, não NO-GO automático: o fenómeno do AIRMET é lido pela
+# mesma máquina do GAMET (parse_gamet, com uma Secção I sintética só com o
+# valor) e avaliado pela mesma decision(). A área é a do AIRMET (WI polígono
+# ou círculo, qualificadores do GAMET, LAN/MAR/COT), SEM a margem de 10 NM do
+# SIGMET, estendida pelo MOV como no SIGMET. Na dúvida, em voz alta:
+#  · área ilegível, MOV ilegível, LINE → toda a FIR + aviso;
+#  · fenómeno ilegível → bloco "AIRMET" (MARGINAL) na área + aviso.
+# Os blocos levam a origem ("AIRMET 2"), que aparece nos motivos.
+
+# Fenómeno do AIRMET (Anexo 3, tabela A6-1) → campo do GAMET em que o texto é
+# lido. O grupo "kw" sai do conteúdo (fica o valor e os qualificadores). Cada
+# fenómeno vai do seu início ao início do seguinte ("SFC VIS 4000M BR AND BKN
+# CLD 002/010HFT AGL" → dois fenómenos). Campo None = TCU, que sozinho não
+# conta, como em SIG CLD (lido, sem efeito).
+_AIRMET_CAMPOS = [
+    (re.compile(r"\b(?P<kw>SFC\s+VIS)\b"), "SFC VIS"),
+    (re.compile(r"\b(?:BKN|OVC)\s+(?P<kw>CLD)\b"), "SIG CLD"),
+    # TS com precipitação ("OCNL TSRA", "ISOL TSGR") é TS, como no GAMET
+    (re.compile(r"\b(?:ISOL|OCNL|FRQ|EMBD|OBSC|SQL)\s+TS(?:[A-Z]{2})*\b"), "SIGWX"),
+    (re.compile(r"\b(?:ISOL|OCNL|FRQ|EMBD)\s+(?:TCU/)?CB\b"), "SIG CLD"),
+    (re.compile(r"\b(?:ISOL|OCNL|FRQ)\s+TCU\b"), None),
+    (re.compile(r"\b(?:(?:MOD|SEV|HVY)\s+)?(?P<kw>TURB)\b"), "TURB"),
+    (re.compile(r"\b(?:(?:MOD|SEV|HVY)\s+)?(?P<kw>ICE)\b"), "ICE"),
+    (re.compile(r"\b(?:(?:MOD|SEV|HVY)\s+)?(?P<kw>MTW)\b"), "MTW"),
+    (re.compile(r"\b(?P<kw>MT\s+OBSC)\b"), "MT OBSC"),
+    (re.compile(r"\b(?P<kw>SFC\s+(?:WIND|WSPD))\b"), "SFC WSPD"),
+]
+# Palavras do valor de um AIRMET que a app sabe o que são. Qualquer outra que
+# sobre (4.0, revisor do PR #26: "ISOL TCU … XYZ" dava GO em silêncio) →
+# "lido em parte" → MARGINAL + aviso. Cada palavra é partida em "/", "-", "()".
+_AIRMET_PALAVRAS = {"", "SFC", "VIS", "WIND", "WSPD", "BKN", "OVC", "CLD", "ISOL", "OCNL",
+                    "FRQ", "EMBD", "OBSC", "SQL", "CB", "TCU", "MOD", "SEV", "HVY", "TURB",
+                    "ICE", "MTW", "MT", "LCA", "AGL", "AMSL", "ABV", "BLW", "TOP", "XXX"}
+_AIRMET_PARTE_OK = re.compile(
+    r"[+-]?(?:FG|BR|HZ|FU|DU|SA|RA|DZ|SN|SHRA|SHSN|BCFG|MIFG|PRFG|FZFG|FZRA|FZDZ|PL|GS|GR"
+    r"|SG|DS|SS|SQ|FC|VA|PO|TS(?:[A-Z]{2})*)"
+    r"|(?:FL|ABV|BLW)?\d+(?:[.,]\d+)?(?:M|KM|HFT|HTF|FT|KT|MPS|Z)?"
+    r"|[NSEW]\d{2,5}")       # coordenada solta: a área já fica toda a FIR
+
+
+def _resto_ilegivel_airmet(valor):
+    """Palavras do valor de um AIRMET que a app não sabe ler."""
+    return [tok for tok in valor.split()
+            if not all(p in _AIRMET_PALAVRAS or _AIRMET_PARTE_OK.fullmatch(p)
+                       for p in re.split(r"[/()\-]", tok))]
+# O que não é valor: observação/previsão, área, movimento e tendência.
+_AIRMET_NAO_VALOR = [re.compile(p) for p in (
+    r"\b(?:OBS|FCST)\b(?:\s+AT\s+\d{4}Z)?",
+    r"\bWI\b", r"\b\d{1,3}\s*NM\s+OF\b",
+    _COORD_RE.pattern,
+    r"\b(?:[NS][EW]?|[EW])\s+OF\s+(?:LINE\b|[NSEW]\d{2,5}\b)",
+    r"(?:\b[NSEW]\s+)?\bBTN\s+[NSEW]\d{2,5}(?:\s*(?:AND|-)\s*[NSEW]\d{2,5})?",
+    r"\bENTIRE\s+FIR\b", r"\b(?:COT|LAN|MAR)\b", r"\bAND\b",
+    r"\bMOV\s+[NSEW]{1,3}(?:\s+\d{1,3}\s*KT)?", r"\bMOV\b", r"\bSTNR\b",
+    # Hífen solto (restos de "WI … - …"), mas não entre números: "004 - 008"
+    # é um intervalo de bases (4.0, revisor: apagá-lo dava a base 800).
+    r"\b(?:NC|INTSF|WKN)\b", r"(?<=\s)(?<!\d\s)-(?=\s)(?!\s\d)", r"=")]
+# Qualificadores geográficos do GAMET, para a descrição da área.
+_AIRMET_QUAL_RE = re.compile(
+    r"(?:\b[NSEW]\s+)?\bBTN\s+[NSEW]\d{2,5}(?:\s*(?:AND|-)\s*[NSEW]\d{2,5})?"
+    r"|\b[NSEW]\s+OF\s+[NSEW]\d{2,5}\b")
+_AIRMET_WX_RE = re.compile(r"\b(?:FG|BR|HZ|FU|DU|SA|RA|DZ|SN|SHRA|BCFG|MIFG|PRFG)"
+                           r"(?:/(?:FG|BR|HZ|FU|DU|SA|RA|DZ|SN|SHRA))*\b")
+
+
+def _rotulo_airmet(b, wx=""):
+    v, f = b.value, b.phenomenon
+    if f == "VIS":
+        return f"VIS {v} m" + (" LCA" if b.qualifier == "LCA" else "") + (f" ({wx})" if wx else "")
+    if f in ("BASE_AGL", "BASE_AMSL"):
+        return f"base {v} ft {'AGL' if f == 'BASE_AGL' else 'AMSL'}"
+    if f in ("TS", "CB"):
+        return f"{f} {_ts_label(v)}"
+    if f == "WSPD":
+        return f"SFC WSPD {v} KT"
+    if f == "WX":
+        return f"SIGWX {v}"
+    if f in ("MT_OBSC", "VA"):
+        return _PHENOM_LABEL.get(f, f)
+    return f"{_PHENOM_LABEL.get(f, f)} {v}"
+
+
+def ler_airmet(texto, ref=None):
+    """
+    Lê um AIRMET LPPC (4.0). Devolve um dict com: id, origem ("AIRMET 2"),
+    validade, blocos (MetBlocks para compute_dynamic_regions), descr (uma
+    linha para o aviso), lido (False = fenómeno ilegível → bloco "AIRMET",
+    MARGINAL), area_lida (False = toda a FIR por não se perceber a área),
+    area (descrição) e fora (área fora da área do GAMET).
+    """
+    t, corpo = _corpo_boletim(texto)
+    corpo = corpo.strip().rstrip("=").strip()
+    sid = sigmet_id(t) or "?"
+    origem = f"AIRMET {sid}"
+    mv = re.search(r"VALID\s+(\d{6}/\d{6})", t)
+    validade = mv.group(1) if mv else "validade ilegível"
+
+    # ---- Valor: o corpo sem a área, o movimento e a tendência ----
+    valor = corpo
+    for p in _AIRMET_NAO_VALOR:
+        valor = p.sub(" ", valor)
+    valor = " ".join(valor.split())
+
+    # ---- Área ----
+    entire = bool(re.search(r"\bENTIRE\s+FIR\b", corpo))
+    try:
+        geom, desc = _area_boletim(t, corpo, ref)
+    except Exception:  # noqa: BLE001 — um AIRMET mal escrito nunca tira o briefing
+        geom, desc = None, "toda a área (formato inesperado)"
+    # Restos de área que nenhum padrão leu ("N PART", "OF …"): não se confia
+    # numa área lida só em parte.
+    if geom is not None and re.search(r"\b(?:OF|BTN|LINE|PART|WI)\b|\b[NSEW]\d{2,5}\b", valor):
+        geom, desc = None, "toda a área (área ilegível)"
+    superficie = "/".join(s for s in ("COT", "LAN", "MAR") if re.search(rf"\b{s}\b", corpo))
+    fora = False
+    if geom is None:
+        area_lida = entire and desc == "toda a área"
+        geom = FIR_POLYGON
+        superficie = ""        # toda a FIR: não se recorta nada
+        if area_lida:
+            area = "toda a FIR (ENTIRE FIR)"
+        elif desc == "toda a área":
+            area = "toda a FIR (área não reconhecida)"
+        else:
+            area = desc.replace("toda a área", "toda a FIR")
+    else:
+        area_lida = True
+        geom = _clean_poly(FIR_POLYGON.intersection(geom))
+        if superficie and not geom.is_empty:
+            sp = surface_polygon(superficie)
+            if sp is not None:
+                geom = _clean_poly(geom.intersection(sp))
+        fora = geom.is_empty
+        if desc.startswith("área"):
+            quals = " AND ".join(_AIRMET_QUAL_RE.findall(corpo)) or "área"
+            area = quals + desc[len("área"):]
+        else:
+            wi = re.findall(r"\bWI\b.*?(?=\s+(?:SFC|TOP|ABV|BLW|FL\d{3}|STNR|MOV|INTSF"
+                            r"|WKN|NC|FCST)\b|$)", corpo)
+            area = f"{desc} ({' / '.join(wi)})" if wi else desc
+        if superficie:
+            area += f", só sobre {_SURFACE_LABEL.get(superficie, superficie)}"
+
+    # ---- Fenómeno(s), com a máquina do GAMET ----
+    # Um segmento por fenómeno, do seu início ao do seguinte (o 1.º desde o
+    # início do valor). Sobrepostos ("ISOL TCU/CB" é CB e TCU): fica o maior.
+    achados = sorted(((m.start(), -(m.end() - m.start()), i, m)
+                      for i, (rx, _) in enumerate(_AIRMET_CAMPOS)
+                      for m in rx.finditer(valor)), key=lambda x: x[:3])
+    segs, fim_ant = [], -1
+    for ini_m, _, i, m in achados:
+        if ini_m >= fim_ant:
+            segs.append((m, _AIRMET_CAMPOS[i][1]))
+            fim_ant = m.end()
+    lidos, falhou = [], False
+    casou = bool(segs)
+    for j, (m, campo) in enumerate(segs):
+        if campo is None:
+            continue                               # TCU: sem efeito
+        ini_s = 0 if j == 0 else m.start()
+        fim_s = segs[j + 1][0].start() if j + 1 < len(segs) else len(valor)
+        if "kw" in m.re.groupindex:
+            cont = valor[ini_s:m.start("kw")] + valor[m.end("kw"):fim_s]
+        else:
+            cont = valor[ini_s:fim_s]
+        if campo == "SFC WSPD":
+            # "SFC WIND 250/35KT" (Anexo 3): a direcção não é velocidade
+            cont = re.sub(r"\b\d{3}/(?=\d{2,3}\s*(?:KT|MPS)\b)", "", cont)
+        if campo == "SIG CLD":
+            # Anexo 3 em metros ("BKN CLD 120/900M"): base em pés, por defeito
+            cont = re.sub(r"\bSFC/(?:ABV\s*)?\d{2,5}M\b", "SFC/XXXFT", cont)
+            cont = re.sub(r"(?<![\d/])(\d{1,4})(?:\s*-\s*(\d{1,4}))?(?:\s*/\s*(?:ABV\s*)?\d{2,5})?M\b",
+                          lambda x: f"{int(min(int(g) for g in x.groups() if g) * 3.2808):03d}FT",
+                          cont)
+            # Base de 1–2 algarismos antes da barra (Anexo 3: "OVC CLD
+            # 0/1000FT"). Só no AIRMET — no GAMET podia ser uma janela "06/".
+            cont = re.sub(r"(?<![\d/])(\d{1,2})(?=\s*/)", lambda x: x.group(1).zfill(3), cont)
+        blocos_c, *_ = parse_gamet(f"SECN I {campo}: {' '.join(cont.split())}")
+        if blocos_c:
+            lidos.extend(blocos_c)
+        else:
+            falhou = True
+    maus = _resto_ilegivel_airmet(valor)
+    so_tcu = casou and all(c is None for _, c in segs) and not maus
+    lido = casou and not falhou and not maus
+
+    blocos = []
+    if not fora:
+        for b in lidos:
+            blocos.append(MetBlock(b.phenomenon, geom, b.value, b.qualifier, b.layer,
+                                   surface=superficie, origem=origem))
+        if not lido:
+            blocos.append(MetBlock("AIRMET", geom, sid, surface=superficie, origem=origem))
+
+    # ---- Descrição para o aviso ----
+    wx = "/".join(dict.fromkeys(_AIRMET_WX_RE.findall(valor)))
+    rotulos = list(dict.fromkeys(_rotulo_airmet(b, wx) for b in lidos))
+    cab = f"{origem} ({validade})"
+    if fora:
+        descr = f"{cab} — {', '.join(rotulos) or 'fenómeno'}: fora da área do GAMET ({area})"
+    elif so_tcu:
+        descr = f"{cab} — TCU: não conta para a decisão (como em SIG CLD) — {area}"
+    elif not lido:
+        descr = (f"{cab} — **não interpretado**"
+                 + (f" (lido em parte: {', '.join(rotulos)})" if rotulos else "")
+                 + (f" — texto não lido: «{' '.join(maus)}»" if maus else "")
+                 + f": **MARGINAL** por precaução — área: {area}")
+    else:
+        ev = [("BASE" if b.phenomenon == "BASE_AGL" else b.phenomenon,
+               b.value, b.qualifier, b.layer) for b in lidos if b.phenomenon != "BASE_AMSL"]
+        nivel = decision(ev)[0]
+        if any(b.phenomenon == "BASE_AMSL" for b in lidos):
+            efeito = "conforme o relevo (base AMSL contra o MEF)" + (
+                f", pelo menos **{nivel}**" if nivel != "GO" else "")
+        elif nivel == "GO":
+            efeito = "informativo — não altera a decisão"
+        else:
+            efeito = f"**{nivel}**"
+        descr = f"{cab} — {', '.join(rotulos)}: {efeito} — área: {area}"
+    return {"id": sid, "origem": origem, "texto": t, "validade": validade,
+            "blocos": blocos, "descr": descr, "lido": lido, "area_lida": area_lida,
+            "area": area, "fora": fora}
+
+
+def blocos_airmet(airmets, ref=None):
+    """MetBlocks dos AIRMETs em vigor (4.0) e a leitura de cada um (ler_airmet)."""
+    blocos, leituras = [], []
+    for a in airmets or []:
+        la = ler_airmet(a, ref)
+        blocos.extend(la["blocos"])
+        leituras.append(la)
+    return blocos, leituras
 
 
 def apply_sigmet_override(regions, sigmet_text):
@@ -3192,6 +3516,16 @@ def decision(events):
         decision_level = "NO-GO"
         for v in sig_vals:
             reasons.append(f"SIGMET {v}")
+
+    # ---- AIRMET em vigor cujo fenómeno a app não leu (4.0): MARGINAL na área
+    # do AIRMET, por precaução — nunca GO em silêncio. Os AIRMETs lidos entram
+    # como os fenómenos do GAMET (VIS, BASE, TS…), com os limiares de cima ----
+    air_vals = sorted({v for t, v, *_ in events if t == "AIRMET"})
+    if air_vals:
+        if decision_level == "GO":
+            decision_level = "MARGINAL"
+        for v in air_vals:
+            reasons.append(f"AIRMET {v} não interpretado (MARGINAL por precaução)")
 
     return decision_level, vis, base, ts_vals, turb_vals, turb_layers, ice_vals, ice_layers, mt_obsc, va_vals, reasons
 
@@ -3611,7 +3945,11 @@ def analisar_gamet(texto, fonte="manual", boletins=None, boletins_at=None,
         conhecidos = list(boletins) + list(boletins_arquivo or [])
     sblocos, sdescr = blocos_sigmet(sig, has_sigmet, sigmet_text, agora, conhecidos,
                                     (ini, fim))
-    regioes = compute_dynamic_regions(blocks + sblocos)
+    # AIRMETs (4.0, decisão do Duarte a 26-out-2026): entram na decisão com as
+    # regras do GAMET, na área do AIRMET (sem margem). Mesmas fontes dos
+    # SIGMETs; colado à mão não há AIRMETs.
+    ablocos, aleituras = blocos_airmet(air, agora)
+    regioes = compute_dynamic_regions(blocks + sblocos + ablocos)
 
     if sig:
         av.append(("erro",
@@ -3621,8 +3959,22 @@ def analisar_gamet(texto, fonte="manual", boletins=None, boletins_at=None,
                    + "\n".join(f"- {d}" for d in sdescr)
                    + "\n\nLê o SIGMET completo:\n\n" + "\n\n".join(f"`{b}`" for b in sig)))
     if air:
-        av.append(("aviso", f"⚠️ **{len(air)} AIRMET {onde}.** A app mostra-o mas "
-                            "não o interpreta — lê-o:\n\n" + "\n\n".join(f"`{b}`" for b in air)))
+        av.append(("aviso", f"⚠️ **{len(air)} AIRMET {onde}** — entra(m) na decisão com as "
+                            "regras do GAMET, na área de cada um (sem margem):\n\n"
+                            + "\n".join(f"- {la['descr']}" for la in aleituras)
+                            + "\n\nLê o AIRMET completo:\n\n"
+                            + "\n\n".join(f"`{b.replace('`', '')}`" for b in air)))
+    # Falhar em voz alta (4.0): AIRMET cujo fenómeno a app não leu (MARGINAL
+    # por precaução) ou cuja área não percebeu (toda a FIR).
+    for la in aleituras:
+        if not la["lido"] and not la["fora"]:
+            av.append(("aviso", f"⚠️ **AIRMET não interpretado** — «`{la['texto'].replace('`', '')}`»: "
+                                "a app não conseguiu ler o fenómeno e marcou **MARGINAL** por "
+                                f"precaução (área: {la['area']}). Lê o AIRMET."))
+        if not la["area_lida"]:
+            av.append(("aviso", f"⚠️ **Área do AIRMET não reconhecida** — «`{la['texto'].replace('`', '')}`»: "
+                                f"aplicado a **toda a FIR** ({la['area']}). Confirma no texto do "
+                                "AIRMET onde se aplica."))
     if not verificado:
         av.append(("info", "ℹ️ SIGMETs do IPMA **não verificados**: o GAMET em análise não "
                            "foi carregado do IPMA nem do arquivo nesta sessão. Só conta o "
@@ -3682,7 +4034,8 @@ def analisar_gamet(texto, fonte="manual", boletins=None, boletins_at=None,
     for g in regioes:
         por_dec[g["decision"]] = por_dec.get(g["decision"], 0) + g["polygon"].area
     r.update(regioes=regioes, por_dec=por_dec, area=area, fz=fz, qnh=qnh, wind=wind,
-             sigmets=sig, airmets=air, sigmet_gamet=has_sigmet, verificado=verificado)
+             sigmets=sig, airmets=air, airmet_leituras=aleituras,
+             sigmet_gamet=has_sigmet, verificado=verificado)
     return r
 
 
@@ -3753,7 +4106,7 @@ def _camadas(vals, layers, parcial):
 def _cb_ts(region):
     if region.get("ts"):
         return ", ".join(_ts_label(v) for v in region["ts"])
-    if any(str(r).startswith("CB") for r in region.get("reasons", [])):
+    if any(re.match(r"(?:AIRMET \S+ — )?CB\b", str(r)) for r in region.get("reasons", [])):
         return "CB"
     return "—"
 
@@ -4053,8 +4406,8 @@ if st.session_state.get("_active_gamet_text"):
 - 💨 SFC WSPD – Vento médio generalizado à superfície (o GAMET só o indica a partir de 30 kt). NO-GO: fora dos limites de qualquer ultraleve.
 - 🌊 MTW – Onda de montanha. SEV → NO-GO. MOD → MARGINAL: as descendentes junto ao relevo podem exceder a razão de subida de uma aeronave com pouca potência.
 - SQL – Linha de borrasca · FZRA / FZDZ – Chuva / chuvisco que gela · DS / SS – Tempestade de poeira / areia · GR – Granizo · FC – Nuvem funil. Todos NO-GO.
-- 🚨 SIGMET – Aviso de fenómeno perigoso. A app usa o campo "SIGMET APPLICABLE" do GAMET **e** os SIGMETs em vigor na página do IPMA (que podem ter saído depois do GAMET). Qualquer um deles põe NO-GO em toda a área — lê sempre o SIGMET completo.
-- AIRMET – Mostrado se existir, mas não interpretado pela app.
+- 🚨 SIGMET – Aviso de fenómeno perigoso. A app usa o campo "SIGMET APPLICABLE" do GAMET **e** os SIGMETs em vigor na página do IPMA (que podem ter saído depois do GAMET). Um SIGMET com área legível põe NO-GO nessa área + 10 NM (estendida na direcção do movimento, se o SIGMET se desloca); sem área legível, ou só com o identificador no GAMET, NO-GO em toda a área. Um SIGMET referido pelo GAMET que já expirou ou foi cancelado deixa de contar (com aviso) — lê sempre o SIGMET completo.
+- AIRMET – Desde a 4.0 entra na decisão com as mesmas regras do GAMET (VIS, base, TS/CB, MTW, MT OBSC, SFC WSPD; TURB/ICE MOD são informativos), só na área do AIRMET (sem margem). Os motivos dizem "AIRMET n — …". Um AIRMET que a app não consegue ler dá MARGINAL na sua área, com aviso.
 - BLW – Abaixo de (ex: VIS BLW 1500M → visibilidade inferior a 1500m).
 - ABV – Acima de (ex: VIS ABV 5000M → visibilidade superior a 5000m).
 - HVY – Intensidade elevada (equivale a SEV para decisão VFR).
