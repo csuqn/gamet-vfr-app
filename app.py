@@ -1486,13 +1486,18 @@ _SIGWX_SEVEROS = {
 
 # Base de nuvem em SIG CLD — ver comentário no estado "CLD" de parse_gamet.
 _CLD_BASE_RE = re.compile(
-    r"(?<![\dA-Z])(?P<base>SFC|\d{3,5})"
+    # Base com 1–2 algarismos só antes de uma barra (Anexo 3: "OVC CLD
+    # 0/1000FT", 4.0); sem barra continua a exigir 3–5.
+    r"(?<![\dA-Z])(?P<base>SFC|\d{3,5}|\d{1,2}(?=\s*/))"
     r"(?:-\d{3,5})?"                      # fim do intervalo de bases
     # Topo, simples ou em intervalo (3.8): "050-090/100-130HTF AMSL" (GAMET
     # real 201500/202100, Secção II). Com um só número no topo a expressão
     # não casava a partir da base e a base desaparecia em silêncio. O topo
     # é ignorado.
-    r"(?:/(?:\d{3,5}(?:-\d{3,5})?|XXX))?"
+    # Topo com "ABV" e espaços à volta da barra (4.0, revisor do PR #26):
+    # "002/ABV 030HFT", "002/ABV030HFT", "002 / 030HFT". Até à 4.0 a base
+    # não casava e o TOPO era lido como base (3000 ft → GO em silêncio).
+    r"(?:\s*/\s*(?:ABV\s*)?(?:\d{3,5}(?:-\d{3,5})?|XXX))?"
     # "HTF" (3.7) é gralha do IPMA para "HFT" (GAMET real 201500/202100:
     # "LCA BKN 008/010HTF AGL"). Sem ela a base desaparecia em silêncio.
     r"\s*(?P<unit>HFT|HTF|FT)\b"
@@ -1889,7 +1894,8 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
                 # Um número precedido de '-' ou '/' é topo ou fim de intervalo,
                 # não base ("TCU/CB 020HFT" mantém-se: o '/' é do TCU/CB e
                 # está separado do número por um espaço).
-                if m.start() > 0 and content[m.start() - 1] in "-/":
+                # Também "/ 030HFT" e "/ABV 030HFT" (4.0): o topo nunca é base.
+                if re.search(r"[-/]\s*(?:ABV\s*)?$", content[:m.start()]):
                     continue
                 base_txt, unidade, ref = m.group("base"), m.group("unit"), m.group("ref")
                 if base_txt == "SFC":
@@ -3069,20 +3075,41 @@ def blocos_sigmet(sigmets, has_sigmet, sigmet_text, ref=None, conhecidos=None,
 # Os blocos levam a origem ("AIRMET 2"), que aparece nos motivos.
 
 # Fenómeno do AIRMET (Anexo 3, tabela A6-1) → campo do GAMET em que o texto é
-# lido. O grupo "kw" sai do conteúdo (fica o valor e os qualificadores).
+# lido. O grupo "kw" sai do conteúdo (fica o valor e os qualificadores). Cada
+# fenómeno vai do seu início ao início do seguinte ("SFC VIS 4000M BR AND BKN
+# CLD 002/010HFT AGL" → dois fenómenos). Campo None = TCU, que sozinho não
+# conta, como em SIG CLD (lido, sem efeito).
 _AIRMET_CAMPOS = [
     (re.compile(r"\b(?P<kw>SFC\s+VIS)\b"), "SFC VIS"),
     (re.compile(r"\b(?:BKN|OVC)\s+(?P<kw>CLD)\b"), "SIG CLD"),
-    (re.compile(r"\b(?:ISOL|OCNL|FRQ|EMBD|OBSC|SQL)\s+TS(?:GR)?\b"), "SIGWX"),
+    # TS com precipitação ("OCNL TSRA", "ISOL TSGR") é TS, como no GAMET
+    (re.compile(r"\b(?:ISOL|OCNL|FRQ|EMBD|OBSC|SQL)\s+TS(?:[A-Z]{2})*\b"), "SIGWX"),
     (re.compile(r"\b(?:ISOL|OCNL|FRQ|EMBD)\s+(?:TCU/)?CB\b"), "SIG CLD"),
-    (re.compile(r"\b(?P<kw>TURB)\b"), "TURB"),
-    (re.compile(r"\b(?P<kw>ICE)\b"), "ICE"),
-    (re.compile(r"\b(?P<kw>MTW)\b"), "MTW"),
+    (re.compile(r"\b(?:ISOL|OCNL|FRQ)\s+TCU\b"), None),
+    (re.compile(r"\b(?:(?:MOD|SEV|HVY)\s+)?(?P<kw>TURB)\b"), "TURB"),
+    (re.compile(r"\b(?:(?:MOD|SEV|HVY)\s+)?(?P<kw>ICE)\b"), "ICE"),
+    (re.compile(r"\b(?:(?:MOD|SEV|HVY)\s+)?(?P<kw>MTW)\b"), "MTW"),
     (re.compile(r"\b(?P<kw>MT\s+OBSC)\b"), "MT OBSC"),
     (re.compile(r"\b(?P<kw>SFC\s+(?:WIND|WSPD))\b"), "SFC WSPD"),
 ]
-# TCU sozinho não conta, como em SIG CLD (lido, sem efeito).
-_AIRMET_TCU_RE = re.compile(r"\b(?:ISOL|OCNL|FRQ)\s+TCU\b")
+# Palavras do valor de um AIRMET que a app sabe o que são. Qualquer outra que
+# sobre (4.0, revisor do PR #26: "ISOL TCU … XYZ" dava GO em silêncio) →
+# "lido em parte" → MARGINAL + aviso. Cada palavra é partida em "/", "-", "()".
+_AIRMET_PALAVRAS = {"", "SFC", "VIS", "WIND", "WSPD", "BKN", "OVC", "CLD", "ISOL", "OCNL",
+                    "FRQ", "EMBD", "OBSC", "SQL", "CB", "TCU", "MOD", "SEV", "HVY", "TURB",
+                    "ICE", "MTW", "MT", "LCA", "AGL", "AMSL", "ABV", "BLW", "TOP", "XXX"}
+_AIRMET_PARTE_OK = re.compile(
+    r"[+-]?(?:FG|BR|HZ|FU|DU|SA|RA|DZ|SN|SHRA|SHSN|BCFG|MIFG|PRFG|FZFG|FZRA|FZDZ|PL|GS|GR"
+    r"|SG|DS|SS|SQ|FC|VA|PO|TS(?:[A-Z]{2})*)"
+    r"|(?:FL|ABV|BLW)?\d+(?:[.,]\d+)?(?:M|KM|HFT|HTF|FT|KT|MPS|Z)?"
+    r"|[NSEW]\d{2,5}")       # coordenada solta: a área já fica toda a FIR
+
+
+def _resto_ilegivel_airmet(valor):
+    """Palavras do valor de um AIRMET que a app não sabe ler."""
+    return [tok for tok in valor.split()
+            if not all(p in _AIRMET_PALAVRAS or _AIRMET_PARTE_OK.fullmatch(p)
+                       for p in re.split(r"[/()\-]", tok))]
 # O que não é valor: observação/previsão, área, movimento e tendência.
 _AIRMET_NAO_VALOR = [re.compile(p) for p in (
     r"\b(?:OBS|FCST)\b(?:\s+AT\s+\d{4}Z)?",
@@ -3147,7 +3174,7 @@ def ler_airmet(texto, ref=None):
         geom, desc = None, "toda a área (formato inesperado)"
     # Restos de área que nenhum padrão leu ("N PART", "OF …"): não se confia
     # numa área lida só em parte.
-    if geom is not None and re.search(r"\b(?:OF|BTN|LINE|PART|WI)\b", valor):
+    if geom is not None and re.search(r"\b(?:OF|BTN|LINE|PART|WI)\b|\b[NSEW]\d{2,5}\b", valor):
         geom, desc = None, "toda a área (área ilegível)"
     superficie = "/".join(s for s in ("COT", "LAN", "MAR") if re.search(rf"\b{s}\b", corpo))
     fora = False
@@ -3180,28 +3207,43 @@ def ler_airmet(texto, ref=None):
             area += f", só sobre {_SURFACE_LABEL.get(superficie, superficie)}"
 
     # ---- Fenómeno(s), com a máquina do GAMET ----
-    lidos, falhou, casou = [], False, False
-    for rx, campo in _AIRMET_CAMPOS:
-        m = rx.search(valor)
-        if not m:
-            continue
-        casou = True
-        cont = (valor[:m.start("kw")] + valor[m.end("kw"):]) if "kw" in rx.groupindex else valor
+    # Um segmento por fenómeno, do seu início ao do seguinte (o 1.º desde o
+    # início do valor). Sobrepostos ("ISOL TCU/CB" é CB e TCU): fica o maior.
+    achados = sorted(((m.start(), -(m.end() - m.start()), i, m)
+                      for i, (rx, _) in enumerate(_AIRMET_CAMPOS)
+                      for m in rx.finditer(valor)), key=lambda x: x[:3])
+    segs, fim_ant = [], -1
+    for ini_m, _, i, m in achados:
+        if ini_m >= fim_ant:
+            segs.append((m, _AIRMET_CAMPOS[i][1]))
+            fim_ant = m.end()
+    lidos, falhou = [], False
+    casou = bool(segs)
+    for j, (m, campo) in enumerate(segs):
+        if campo is None:
+            continue                               # TCU: sem efeito
+        ini_s = 0 if j == 0 else m.start()
+        fim_s = segs[j + 1][0].start() if j + 1 < len(segs) else len(valor)
+        if "kw" in m.re.groupindex:
+            cont = valor[ini_s:m.start("kw")] + valor[m.end("kw"):fim_s]
+        else:
+            cont = valor[ini_s:fim_s]
         if campo == "SFC WSPD":
             # "SFC WIND 250/35KT" (Anexo 3): a direcção não é velocidade
             cont = re.sub(r"\b\d{3}/(?=\d{2,3}\s*(?:KT|MPS)\b)", "", cont)
         if campo == "SIG CLD":
             # Anexo 3 em metros ("BKN CLD 120/900M"): base em pés, por defeito
             cont = re.sub(r"\bSFC/(?:ABV\s*)?\d{2,5}M\b", "SFC/XXXFT", cont)
-            cont = re.sub(r"(?<![\d/])(\d{2,4})(?:-\d{2,4})?(?:/(?:ABV\s*)?\d{2,5})?M\b",
+            cont = re.sub(r"(?<![\d/])(\d{1,4})(?:-\d{1,4})?(?:\s*/\s*(?:ABV\s*)?\d{2,5})?M\b",
                           lambda x: f"{int(int(x.group(1)) * 3.2808):03d}FT", cont)
         blocos_c, *_ = parse_gamet(f"SECN I {campo}: {' '.join(cont.split())}")
         if blocos_c:
             lidos.extend(blocos_c)
         else:
             falhou = True
-    so_tcu = not casou and bool(_AIRMET_TCU_RE.search(valor))
-    lido = so_tcu or (casou and not falhou)
+    maus = _resto_ilegivel_airmet(valor)
+    so_tcu = casou and all(c is None for _, c in segs) and not maus
+    lido = casou and not falhou and not maus
 
     blocos = []
     if not fora:
@@ -3222,6 +3264,7 @@ def ler_airmet(texto, ref=None):
     elif not lido:
         descr = (f"{cab} — **não interpretado**"
                  + (f" (lido em parte: {', '.join(rotulos)})" if rotulos else "")
+                 + (f" — texto não lido: «{' '.join(maus)}»" if maus else "")
                  + f": **MARGINAL** por precaução — área: {area}")
     else:
         ev = [("BASE" if b.phenomenon == "BASE_AGL" else b.phenomenon,
@@ -4342,7 +4385,7 @@ if st.session_state.get("_active_gamet_text"):
 - 💨 SFC WSPD – Vento médio generalizado à superfície (o GAMET só o indica a partir de 30 kt). NO-GO: fora dos limites de qualquer ultraleve.
 - 🌊 MTW – Onda de montanha. SEV → NO-GO. MOD → MARGINAL: as descendentes junto ao relevo podem exceder a razão de subida de uma aeronave com pouca potência.
 - SQL – Linha de borrasca · FZRA / FZDZ – Chuva / chuvisco que gela · DS / SS – Tempestade de poeira / areia · GR – Granizo · FC – Nuvem funil. Todos NO-GO.
-- 🚨 SIGMET – Aviso de fenómeno perigoso. A app usa o campo "SIGMET APPLICABLE" do GAMET **e** os SIGMETs em vigor na página do IPMA (que podem ter saído depois do GAMET). Qualquer um deles põe NO-GO em toda a área — lê sempre o SIGMET completo.
+- 🚨 SIGMET – Aviso de fenómeno perigoso. A app usa o campo "SIGMET APPLICABLE" do GAMET **e** os SIGMETs em vigor na página do IPMA (que podem ter saído depois do GAMET). Um SIGMET com área legível põe NO-GO nessa área + 10 NM (estendida na direcção do movimento, se o SIGMET se desloca); sem área legível, ou só com o identificador no GAMET, NO-GO em toda a área. Um SIGMET referido pelo GAMET que já expirou ou foi cancelado deixa de contar (com aviso) — lê sempre o SIGMET completo.
 - AIRMET – Desde a 4.0 entra na decisão com as mesmas regras do GAMET (VIS, base, TS/CB, MTW, MT OBSC, SFC WSPD; TURB/ICE MOD são informativos), só na área do AIRMET (sem margem). Os motivos dizem "AIRMET n — …". Um AIRMET que a app não consegue ler dá MARGINAL na sua área, com aviso.
 - BLW – Abaixo de (ex: VIS BLW 1500M → visibilidade inferior a 1500m).
 - ABV – Acima de (ex: VIS ABV 5000M → visibilidade superior a 5000m).

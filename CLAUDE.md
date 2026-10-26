@@ -61,6 +61,14 @@ Três pormenores que já causaram erros reais:
   ser o primeiro número e o topo é ignorado. Até à 3.7 a base desaparecia em
   silêncio. Na Secção II, AS/AC a 5000–6000 ft AMSL contra o MEF passa a dar a
   nota "Nuvens baixas" em muitos GAMETs (18/28 do arquivo a 21-out-2026).
+- **Topo com `ABV` ou com espaços à volta da barra** (`BKN 002/ABV 030HFT AGL`,
+  `002/ABV030HFT`, `002 / 030HFT`; 4.0, revisor do PR #26): até à 4.0 a base
+  não casava em `_CLD_BASE_RE` e o **topo era lido como base** (3000 ft → GO em
+  silêncio), no GAMET e no AIRMET. A base é sempre o primeiro número; o topo
+  aceita `/ABV n`, `/ABVn` e ` / `; um número precedido de `-`/`/` (com ou sem
+  espaços e `ABV`) nunca é base. Base de 1–2 algarismos só antes de uma barra
+  (`OVC CLD 0/1000FT`, Anexo 3). Nenhum GAMET do arquivo tinha estes formatos
+  (comparação a 26-out-2026: nada muda).
 - **MT OBSC e VA: um bloco por subentrada** (3.10). Até à 3.9 só a linha que
   abre o campo gerava bloco: em `MT OBSC:N OF N4100 LAN S OF N3800 LAN` o S de
   N3800 ficava fora da decisão. Cada subentrada gera agora o seu, com a sua
@@ -198,7 +206,12 @@ regras normais, não NO-GO automático**: o valor (o corpo sem área, movimento 
 tendência — `_AIRMET_NAO_VALOR`) vai para uma Secção I sintética com o campo
 do GAMET correspondente (`_AIRMET_CAMPOS`: SFC VIS, BKN/OVC CLD → SIG CLD,
 ISOL/OCNL TS/TSGR → SIGWX, ISOL/OCNL/FRQ CB → SIG CLD, TURB, ICE, MTW, MT OBSC,
-SFC WIND/WSPD) e é lido por `parse_gamet`; os blocos entram em
+SFC WIND/WSPD) e é lido por `parse_gamet`. Cada fenómeno vai do seu início ao
+do seguinte, por isso dois fenómenos ligados por AND (`SFC VIS 4000M BR AND BKN
+CLD 002/010HFT AGL`) são lidos os dois, com a mesma área. TS com precipitação
+(`OCNL TSRA`, `ISOL TSGR`) é TS. Palavras que sobram sem significado
+(`_resto_ilegivel_airmet`, ex.: `ISOL TCU … XYZ`) → "lido em parte" → MARGINAL
++ aviso; os blocos entram em
 `compute_dynamic_regions` com a área do AIRMET e são avaliados pela mesma
 `decision()` — **os limiares não mudaram**. LCA no texto → LCA; base sem
 AGL/AMSL → AGL; `BKN CLD 120/900M` (metros, Anexo 3) → pés por defeito; TCU
@@ -284,7 +297,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-1335 testes. Devem passar a 100%.
+1379 testes (com a NiceGUI instalada; sem ela, os do `test_nicegui.py` saltam). Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -345,7 +358,10 @@ python3 -m pytest
   mudança; cada fenómeno, LCA, AMSL, metros, WI polígono/círculo sem margem,
   MOV/STNR, área ilegível → toda a FIR + aviso, fenómeno ilegível → MARGINAL
   + aviso, CNL, arquivo_hist/recurso, colado à mão; nunca mais permissivo nos
-  aeródromos e numa grelha; oráculo; Streamlit e NiceGUI)
+  aeródromos e numa grelha; oráculo; Streamlit e NiceGUI). Revisão do PR #26:
+  topo `/ABV`/` / ` nunca é base (GAMET e AIRMET; formas antigas
+  inalteradas), formatos do Anexo 3 (`200/ABV3000FT`, `0/1000FT`, `0/300M`,
+  `TSRA`), dois fenómenos com AND, resto ilegível → MARGINAL + aviso
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva

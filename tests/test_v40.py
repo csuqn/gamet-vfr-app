@@ -486,3 +486,115 @@ def test_nicegui_mostra_o_aviso_novo():
         if any(m.startswith("AIRMET 2 —") for m in g["reasons"]):
             porto = g
     assert porto is not None and porto["decision"] == "NO-GO"
+
+
+# --- Revisão do PR #26 (DÚVIDA do revisor) --------------------------------
+
+def _bases(eng, corpo):
+    blocos, *_ = eng.parse_gamet(build_gamet(corpo))
+    return sorted(b.value for b in blocos if b.phenomenon in ("BASE_AGL", "BASE_AMSL"))
+
+
+@pytest.mark.parametrize("nuvem", [
+    "BKN 002/ABV 030HFT AGL",
+    "BKN 002/ABV030HFT",
+    "BKN 002 / 030HFT AGL",
+    "BKN 002 /030HFT AGL",
+    "BKN 002/ 030HFT AGL",
+])
+def test_gamet_topo_com_abv_ou_espacos_nunca_e_base(eng, analyse, nuvem):
+    """Até à 4.0 (pré-existente) o topo destes formatos era lido como base
+    (3000 ft → GO em silêncio). A base é sempre o primeiro número."""
+    assert _bases(eng, f"SECN I SIG CLD: N OF N4000 {nuvem}") == [200]
+    a = analyse(build_gamet(f"SECN I SIG CLD: N OF N4000 {nuvem}"))
+    reg = eng.find_region_for_point(a["regions"], *NORTE)
+    assert reg["decision"] == "NO-GO"
+
+
+@pytest.mark.parametrize("nuvem, base", [
+    ("BKN 002/010HFT AGL", 200),           # formas já lidas: inalteradas
+    ("BKN 002-004/010HFT AGL", 200),
+    ("BKN 050-090/100-130HTF AMSL", 5000),
+    ("ISOL TCU/CB 020HFT AGL", 2000),
+    ("BKN 004/XXXHFT AGL", 400),
+    ("BKN SFC/010HFT AGL", 0),
+    ("BKN 800/1100FT AGL", 800),
+])
+def test_gamet_formas_antigas_inalteradas(eng, nuvem, base):
+    assert _bases(eng, f"SECN I SIG CLD: {nuvem}") == [base]
+
+
+def test_janela_nao_e_base(eng):
+    assert _bases(eng, "SECN I SIG CLD: 09/11 N OF N4000 BKN 004/010HFT AGL") == [400]
+
+
+@pytest.mark.parametrize("fen, esperado", [
+    ("BKN CLD 200/ABV 3000FT", "NO-GO"),
+    ("BKN CLD 200 / 3000FT", "NO-GO"),
+    ("BKN CLD 200/ABV3000FT", "NO-GO"),
+    ("BKN CLD 100/ABV10000FT", "NO-GO"),
+    ("OVC CLD 0/1000FT", "NO-GO"),
+    ("OVC CLD 0/300M", "NO-GO"),
+    ("OCNL TSRA", "NO-GO"),
+    ("ISOL TSRA", "MARGINAL"),
+    ("FRQ TSRAGR", "NO-GO"),
+])
+def test_formatos_do_anexo_3_lidos(eng, fen, esperado):
+    r = _r(eng, CALMO, [_a(f"{fen} OBS N OF N4000 STNR NC")], AGORA)
+    assert _dec(eng, r, *NORTE) == esperado, _motivos(r)
+    assert _dec(eng, r, *SUL) == "GO"
+    assert not _avisos(r, "AIRMET não interpretado")
+    assert "informativo" not in _avisos(r, "1 AIRMET")[0]
+
+
+@pytest.mark.parametrize("fen, esperado, motivo", [
+    ("SFC VIS 4000M BR AND BKN CLD 002/010HFT AGL", "NO-GO", "BASE 200ft"),
+    ("MOD TURB AND SFC WIND 250/35KT", "NO-GO", "SFC WSPD 35KT"),
+    ("SFC VIS 2000M BR AND ISOL TS", "MARGINAL", "TS ISOL"),
+    ("BKN CLD 004HFT AGL AND SFC VIS 0800M FG", "NO-GO", "VIS 800m"),
+])
+def test_dois_fenomenos_ligados_por_and(eng, fen, esperado, motivo):
+    r = _r(eng, CALMO, [_a(f"{fen} OBS N OF N4000 STNR NC")], AGORA)
+    assert _dec(eng, r, *NORTE) == esperado, _motivos(r)
+    assert _dec(eng, r, *SUL) == "GO"
+    assert f"AIRMET 5 — {motivo}" in _motivos(r)
+    assert not _avisos(r, "AIRMET não interpretado")
+
+
+def test_dois_fenomenos_um_ilegivel_marginal_e_aviso(eng):
+    r = _r(eng, CALMO, [_a("MOD TURB AND BKN CLD OBS N OF N4000 STNR NC")], AGORA)
+    assert _dec(eng, r, *NORTE) == "MARGINAL"
+    (aviso,) = _avisos(r, "AIRMET não interpretado")
+    assert "MARGINAL" in aviso
+    assert "lido em parte" in _avisos(r, "1 AIRMET")[0]
+
+
+@pytest.mark.parametrize("corpo, esperado", [
+    ("ISOL TCU OBS N OF N4000 XYZ STNR NC", "MARGINAL"),
+    ("MOD TURB XYZ OBS N OF N4000 STNR NC", "MARGINAL"),
+    ("SFC VIS 0800M BR XYZ OBS N OF N4000 STNR NC", "NO-GO"),
+    ("XYZ SFC VIS 4000M BR OBS N OF N4000 STNR NC", "MARGINAL"),
+])
+def test_resto_ilegivel_nunca_em_silencio(eng, corpo, esperado):
+    r = _r(eng, CALMO, [_a(corpo)], AGORA)
+    assert _dec(eng, r, *NORTE) == esperado, _motivos(r)
+    assert _dec(eng, r, *SUL) == "GO"
+    (aviso,) = _avisos(r, "AIRMET não interpretado")
+    assert "XYZ" in aviso
+
+
+@pytest.mark.parametrize("corpo", [AIR1_17, AIR1_25, AIR2_25,
+                                   _a("MOD ICE OBS N OF N4000 FL050/FL100 STNR NC"),
+                                   _a("MOD TURB FCST AT 1900Z N OF N4000 SFC/FL050 MOV E 10KT INTSF"),
+                                   _a("SFC VIS 1,2KM BR OBS N OF N4000 STNR NC"),
+                                   _a("OCNL CB OBS WI 20NM OF N4100 W00800 TOP FL300 STNR NC")])
+def test_airmets_bem_formados_sem_resto(eng, corpo):
+    assert eng.ler_airmet(corpo, AGORA)["lido"], eng.ler_airmet(corpo, AGORA)["descr"]
+
+
+def test_ajuda_do_sigmet_ja_nao_diz_toda_a_area(app_path):
+    src = app_path.read_text(encoding="utf-8")
+    i = src.index("- 🚨 SIGMET –")
+    linha = src[i:src.index("\n", i)]
+    assert "Qualquer um deles põe NO-GO em toda a área" not in linha
+    assert "10 NM" in linha
