@@ -64,11 +64,21 @@ Três pormenores que já causaram erros reais:
 - **Topo com `ABV` ou com espaços à volta da barra** (`BKN 002/ABV 030HFT AGL`,
   `002/ABV030HFT`, `002 / 030HFT`; 4.0, revisor do PR #26): até à 4.0 a base
   não casava em `_CLD_BASE_RE` e o **topo era lido como base** (3000 ft → GO em
-  silêncio), no GAMET e no AIRMET. A base é sempre o primeiro número; o topo
-  aceita `/ABV n`, `/ABVn` e ` / `; um número precedido de `-`/`/` (com ou sem
-  espaços e `ABV`) nunca é base. Base de 1–2 algarismos só antes de uma barra
-  (`OVC CLD 0/1000FT`, Anexo 3). Nenhum GAMET do arquivo tinha estes formatos
-  (comparação a 26-out-2026: nada muda).
+  silêncio), no GAMET e no AIRMET. O topo aceita `/ABV n`, `/ABVn` e ` / `, e
+  o intervalo de bases aceita espaços (`002 - 004`). Nas formas coladas a base
+  continua a ser o primeiro número (o topo nunca é base, mesmo menor:
+  `020/002HFT` → 2000); os números depois de um separador **com espaços ou
+  ABV** — que a 3.10, sem conseguir ler o grupo, tomava como base — entram no
+  mínimo, para a base nunca ficar mais alta do que a leitura da 3.10. Um número **colado** a `-`/`/` nunca
+  começa uma base (a regra da 3.10, agora no lookbehind de `_CLD_BASE_RE`);
+  com espaços (`ISOL TCU/CB - 002HFT`, `06/ 090HFT`) conta, como na 3.10. Uma
+  primeira versão (2188c74, rejeitada pelo revisor) também descartava o número
+  depois de `- `/`/ ` com espaços e perdia bases que a 3.10 lia (NO-GO → GO).
+  Base de 1–2 algarismos (`OVC CLD 0/1000FT`, Anexo 3) **só no AIRMET** — no
+  GAMET podia ser uma janela `06/`. No AIRMET, o hífen entre números
+  (`004 - 008`) não é apagado. Verificado contra o motor da 3.10
+  (`tests/referencia/app_3_10.py`, `test_v40_contra_310.py`, gerador de SIG
+  CLD). Nenhum GAMET do arquivo tinha estes formatos (26-out-2026: nada muda).
 - **MT OBSC e VA: um bloco por subentrada** (3.10). Até à 3.9 só a linha que
   abre o campo gerava bloco: em `MT OBSC:N OF N4100 LAN S OF N3800 LAN` o S de
   N3800 ficava fora da decisão. Cada subentrada gera agora o seu, com a sua
@@ -297,7 +307,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-1379 testes (com a NiceGUI instalada; sem ela, os do `test_nicegui.py` saltam). Devem passar a 100%.
+1712 testes (com a NiceGUI instalada; sem ela, os do `test_nicegui.py` saltam). Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -362,6 +372,13 @@ python3 -m pytest
   topo `/ABV`/` / ` nunca é base (GAMET e AIRMET; formas antigas
   inalteradas), formatos do Anexo 3 (`200/ABV3000FT`, `0/1000FT`, `0/300M`,
   `TSRA`), dois fenómenos com AND, resto ilegível → MARGINAL + aviso
+- `tests/test_v40_contra_310.py` — bases de nuvem contra o motor da **3.10**
+  (`tests/referencia/app_3_10.py`, cópia fixa do `app.py` do main 5dfea47; não
+  editar): os casos do revisor do PR #26 (e topos menores do que a base) e 300 subentradas de SIG CLD geradas
+  (hífen colado/com espaços, `/ABV`, ` / `, intervalos, janelas `HH/HH` e
+  `HH/`, TCU/CB, LCA, AGL/AMSL, áreas). Nos 52 aeródromos nunca mais
+  permissivo, e nenhuma base da 3.10 perdida. Outras sementes:
+  `GAMET_SEMENTE=n GAMET_CASOS=400 python3 -m pytest tests/test_v40_contra_310.py`
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva

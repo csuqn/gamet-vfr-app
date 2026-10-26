@@ -1486,10 +1486,18 @@ _SIGWX_SEVEROS = {
 
 # Base de nuvem em SIG CLD — ver comentário no estado "CLD" de parse_gamet.
 _CLD_BASE_RE = re.compile(
-    # Base com 1–2 algarismos só antes de uma barra (Anexo 3: "OVC CLD
-    # 0/1000FT", 4.0); sem barra continua a exigir 3–5.
-    r"(?<![\dA-Z])(?P<base>SFC|\d{3,5}|\d{1,2}(?=\s*/))"
-    r"(?:-\d{3,5})?"                      # fim do intervalo de bases
+    # Um número COLADO a '-' ou '/' é topo ou fim de intervalo, nunca base
+    # (a regra da 3.10). Desde a 4.0 está no lookbehind e não num "continue"
+    # depois do match: com intervalos com espaços, um match que começasse num
+    # número colado ("-030 - 045HFT") levava consigo a base que vem a seguir.
+    r"(?<![\dA-Z/\-])(?P<base>SFC|\d{3,5})"
+    # Fim do intervalo de bases, colado ou com espaços ("002 - 004", 4.0).
+    # Nas formas coladas a base é o primeiro número, como até à 3.10 (o topo
+    # nunca é base, mesmo se for menor: "020/002HFT" → 2000). Nas formas com
+    # espaços ou ABV, que a 3.10 não lia de seguida, ela lia o número a
+    # seguir ao separador como base — entra no mínimo (ver o estado "CLD"),
+    # para nunca ficar mais alta do que a leitura da 3.10.
+    r"(?:(?P<sfim>\s*-\s*)(?P<fim>\d{3,5}))?"
     # Topo, simples ou em intervalo (3.8): "050-090/100-130HTF AMSL" (GAMET
     # real 201500/202100, Secção II). Com um só número no topo a expressão
     # não casava a partir da base e a base desaparecia em silêncio. O topo
@@ -1497,7 +1505,8 @@ _CLD_BASE_RE = re.compile(
     # Topo com "ABV" e espaços à volta da barra (4.0, revisor do PR #26):
     # "002/ABV 030HFT", "002/ABV030HFT", "002 / 030HFT". Até à 4.0 a base
     # não casava e o TOPO era lido como base (3000 ft → GO em silêncio).
-    r"(?:\s*/\s*(?:ABV\s*)?(?:\d{3,5}(?:-\d{3,5})?|XXX))?"
+    r"(?:(?P<stopo>\s*/\s*(?:ABV\s*)?)"
+    r"(?:(?P<topo>\d{3,5})(?:(?P<stf>\s*-\s*)(?P<topofim>\d{3,5}))?|XXX))?"
     # "HTF" (3.7) é gralha do IPMA para "HFT" (GAMET real 201500/202100:
     # "LCA BKN 008/010HTF AGL"). Sem ela a base desaparecia em silêncio.
     r"\s*(?P<unit>HFT|HTF|FT)\b"
@@ -1891,19 +1900,25 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
             # forma base/topo sem intervalo não era reconhecida e nuvens a
             # 200 ft passavam como GO.
             for m in _CLD_BASE_RE.finditer(content):
-                # Um número precedido de '-' ou '/' é topo ou fim de intervalo,
-                # não base ("TCU/CB 020HFT" mantém-se: o '/' é do TCU/CB e
-                # está separado do número por um espaço).
-                # Também "/ 030HFT" e "/ABV 030HFT" (4.0): o topo nunca é base.
-                if re.search(r"[-/]\s*(?:ABV\s*)?$", content[:m.start()]):
-                    continue
+                # Um número colado a '-' ou '/' nunca começa um match (ver o
+                # lookbehind de _CLD_BASE_RE; "TCU/CB 020HFT" mantém-se: o '/'
+                # é do TCU/CB e está separado do número por um espaço). Com
+                # espaços ("- 002HFT", "/ 030HFT") o número conta, como na
+                # 3.10. O topo a seguir a uma base ("002 / 030HFT",
+                # "002/ABV 030HFT", 4.0) é consumido pela expressão.
                 base_txt, unidade, ref = m.group("base"), m.group("unit"), m.group("ref")
+                # Números lidos depois de um separador com espaços ou ABV
+                # (que a 3.10 lia como base) entram no mínimo; os colados não.
+                nums = [int(base_txt)] if base_txt != "SFC" else []
+                for sep, num in (("sfim", "fim"), ("stopo", "topo"), ("stf", "topofim")):
+                    if m.group(num) and m.group(sep) not in ("-", "/"):
+                        nums.append(int(m.group(num)))
                 if base_txt == "SFC":
                     base_ft = 0
                 elif unidade in ("HFT", "HTF"):   # HTF: gralha de HFT (3.7)
-                    base_ft = int(base_txt) * 100
+                    base_ft = min(nums) * 100
                 else:
-                    base_ft = int(base_txt)
+                    base_ft = min(nums)
                 # Sem AGL/AMSL (3.3) → AGL (decisão do Duarte, 18-out-2026):
                 # em SIG CLD o IPMA dá as bases em AGL, e a falta da
                 # referência é quase certamente uma gralha. Só "AMSL"
@@ -3119,7 +3134,9 @@ _AIRMET_NAO_VALOR = [re.compile(p) for p in (
     r"(?:\b[NSEW]\s+)?\bBTN\s+[NSEW]\d{2,5}(?:\s*(?:AND|-)\s*[NSEW]\d{2,5})?",
     r"\bENTIRE\s+FIR\b", r"\b(?:COT|LAN|MAR)\b", r"\bAND\b",
     r"\bMOV\s+[NSEW]{1,3}(?:\s+\d{1,3}\s*KT)?", r"\bMOV\b", r"\bSTNR\b",
-    r"\b(?:NC|INTSF|WKN)\b", r"(?<=\s)-(?=\s)", r"=")]
+    # Hífen solto (restos de "WI … - …"), mas não entre números: "004 - 008"
+    # é um intervalo de bases (4.0, revisor: apagá-lo dava a base 800).
+    r"\b(?:NC|INTSF|WKN)\b", r"(?<=\s)(?<!\d\s)-(?=\s)(?!\s\d)", r"=")]
 # Qualificadores geográficos do GAMET, para a descrição da área.
 _AIRMET_QUAL_RE = re.compile(
     r"(?:\b[NSEW]\s+)?\bBTN\s+[NSEW]\d{2,5}(?:\s*(?:AND|-)\s*[NSEW]\d{2,5})?"
@@ -3234,8 +3251,12 @@ def ler_airmet(texto, ref=None):
         if campo == "SIG CLD":
             # Anexo 3 em metros ("BKN CLD 120/900M"): base em pés, por defeito
             cont = re.sub(r"\bSFC/(?:ABV\s*)?\d{2,5}M\b", "SFC/XXXFT", cont)
-            cont = re.sub(r"(?<![\d/])(\d{1,4})(?:-\d{1,4})?(?:\s*/\s*(?:ABV\s*)?\d{2,5})?M\b",
-                          lambda x: f"{int(int(x.group(1)) * 3.2808):03d}FT", cont)
+            cont = re.sub(r"(?<![\d/])(\d{1,4})(?:\s*-\s*(\d{1,4}))?(?:\s*/\s*(?:ABV\s*)?\d{2,5})?M\b",
+                          lambda x: f"{int(min(int(g) for g in x.groups() if g) * 3.2808):03d}FT",
+                          cont)
+            # Base de 1–2 algarismos antes da barra (Anexo 3: "OVC CLD
+            # 0/1000FT"). Só no AIRMET — no GAMET podia ser uma janela "06/".
+            cont = re.sub(r"(?<![\d/])(\d{1,2})(?=\s*/)", lambda x: x.group(1).zfill(3), cont)
         blocos_c, *_ = parse_gamet(f"SECN I {campo}: {' '.join(cont.split())}")
         if blocos_c:
             lidos.extend(blocos_c)
