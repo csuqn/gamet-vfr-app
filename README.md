@@ -116,7 +116,11 @@ não para planear um voo.
   ou se o GAMET só indicar o identificador do SIGMET sem o texto completo estar
   disponível, NO-GO em toda a área. Um SIGMET referido pelo GAMET que já
   expirou ou foi cancelado deixa de contar (com aviso). Lê sempre o SIGMET completo.
-- ⚠️ **AIRMET:** se existir, é mostrado, mas a app não o interpreta.
+- ⚠️ **AIRMET:** desde a 4.0 entra na decisão com as mesmas regras do GAMET
+  (visibilidade, base, trovoada/CB, onda de montanha, montanhas obscurecidas,
+  vento), só na área do AIRMET (sem margem). O aviso diz o que a app leu de
+  cada AIRMET e o efeito; os motivos das zonas dizem "AIRMET n — …". Um AIRMET
+  que a app não consiga ler dá MARGINAL na sua área, com aviso.
 - ⚠️ **Nenhum campo reconhecido:** a app não percebeu o texto. Isto **não**
   significa que o tempo está calmo; confirma o GAMET.
 - 💨 **Vento forte a 1000 ft AGL** (20 kt ou mais numa estação): aviso
@@ -191,6 +195,7 @@ Em cada zona, a app aplica estas regras. Fica a pior decisão que se aplicar.
 | Linha de borrasca, chuva ou chuvisco que gela, tempestade de poeira ou areia, granizo, nuvem funil (`SQL`, `FZRA`, `FZDZ`, `DS`, `SS`, `GR`, `FC`) | NO-GO | Fenómenos severos |
 | Montanhas obscurecidas (`MT OBSC`) | NO-GO | Risco de voo controlado contra o terreno |
 | Cinzas vulcânicas (`VA`) | NO-GO | — |
+| AIRMET em vigor | As regras acima, na área do AIRMET (sem margem, estendida pelo movimento) | Área ilegível → toda a FIR; fenómeno ilegível → MARGINAL, com aviso |
 | SIGMET em vigor | NO-GO na área do SIGMET + 10 NM (estendida pelo movimento) | O SIGMET completo do IPMA traz a área (polígono, círculo ou qualificadores). Sem área legível, ou só com o identificador no GAMET: NO-GO em toda a área |
 
 **Princípios por trás das regras**
@@ -234,7 +239,9 @@ Algarve não afecta Lisboa.
   que tenha estado publicado menos tempo do que isso pode faltar. No recurso
   entre GAMETs, um SIGMET emitido há menos de 15 minutos só aparece se a
   página do IPMA o mostrar.
-- **AIRMETs** são mostrados mas não interpretados.
+- **AIRMETs** (desde a 4.0) entram na decisão, como os SIGMETs só quando o
+  GAMET vem do IPMA ou do arquivo. Os níveis (`FL015`) não restringem a
+  decisão.
 - **Janelas horárias** (`11/15`) são anotadas, com indicação de se já
   começaram ou terminaram, mas não mudam a decisão: a previsão pode
   atrasar-se ou antecipar-se.
@@ -260,7 +267,7 @@ Algarve não afecta Lisboa.
 
 ## 10. Qualidade e testes
 
-- **1270 testes automáticos** cobrem a leitura do texto, a geometria, as
+- **1335 testes automáticos** cobrem a leitura do texto, a geometria, as
   decisões, os dados aeronáuticos e a app completa. Cada erro alguma vez
   encontrado tem um teste que impede que volte a aparecer.
 - **Verificação cruzada:** em centenas de GAMETs gerados, a decisão de cada
@@ -280,7 +287,7 @@ Algarve não afecta Lisboa.
 pip install -r requirements.txt -r requirements-dev.txt
 cd nicegui_app && python main.py   # a app principal (NiceGUI), http://localhost:8080
 streamlit run app.py               # a versão de reserva (Streamlit)
-python3 -m pytest                  # os testes (1270)
+python3 -m pytest                  # os testes (1335)
 ```
 
 | Ficheiro / pasta | Conteúdo |
