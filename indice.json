@@ -363,6 +363,13 @@
    "inicio": "2026-10-27T03:00Z",
    "fim": "2026-10-27T09:00Z",
    "tipo": "GAMET"
+  },
+  {
+   "ficheiro": "gamets/2026/10/20261027T0853Z_270900-271500_c8fefbd089.txt",
+   "recolhido": "2026-10-27T08:53Z",
+   "inicio": "2026-10-27T09:00Z",
+   "fim": "2026-10-27T15:00Z",
+   "tipo": "GAMET"
   }
  ],
  "sigmets": [
