@@ -368,6 +368,64 @@ def test_caso1b_linha_que_cede_a_superficie_conta_sempre_no_resto(eng, eng42):
         assert r["avisos"] == eng42.analisar_gamet(t, agora=agora)["avisos"]
 
 
+QUAL_DEPOIS_SUP = [
+    "WI N4000 W00900 - N4000 W00800 - N3900 W00800 - N3900 W00900 - N4000 W00900",
+    "N4000 W00900 - N4000 W00800 - N3900 W00800",
+    "WI 30NM OF N3850 W00900",
+    "ENTIRE FIR",
+    "N PART",
+    "ALONG COT",
+    "NE OF N4000",
+    "W OF W00800",          # cedido à linha seguinte (quebra antes de W OF)
+]
+
+
+def _sem_resto_menor(eng, eng42, corpo, valores):
+    """O resto (12:30 e 14:00) nunca ignora os blocos da subentrada anterior,
+    nunca é menos severo do que o da 4.2, a decisão principal não muda e não
+    há avisos novos."""
+    t = _g(corpo)
+    bl, *_ = eng.parse_gamet(t)
+    for v in valores:
+        b = _so(bl, "BASE_AGL", v)
+        assert b.window == "09–11Z" and b.janela_ambigua, (corpo, v)
+    _comparar(eng, eng42, t, grelha=True)
+    assert eng.campos_nao_interpretados(t) == eng42.campos_nao_interpretados(t)
+    # "Área não reconhecida": o mesmo aviso, agora só com o texto da parte
+    # (a diagonal "NE OF" já avisava na 4.2, com a linha inteira)
+    antigos = eng42.subentradas_sem_area(t)
+    novos = eng.subentradas_sem_area(t)
+    assert len(novos) == len(antigos)
+    assert all(any(n.split(": ", 1)[1] in a for a in antigos) for n in novos)
+    titulo = lambda av: [(k, re.findall(r"\*\*[^*]+\*\*", m)[:1]) for k, m in av]  # noqa: E731
+    principal = None
+    for agora in (_t(12, 30), _t(14, 0)):
+        _m, rn, rv = _resto_contra_42(eng, eng42, t, agora, corpo, estrito=True)
+        assert not any(b.phenomenon == "BASE_AGL" and b.value in valores
+                       for b in (rn["resto"] or {}).get("ignorados", []))
+        dec = [g["decision"] for g in rn["regioes"]]
+        principal = principal or dec
+        assert dec == principal
+        assert titulo(rn["avisos"]) == titulo(rv["avisos"])
+
+
+@pytest.mark.parametrize("qual", QUAL_DEPOIS_SUP)
+def test_janela_superficie_e_qualificador_parte_anterior_conta_sempre(eng, eng42, qual):
+    """Decisão do Duarte (leitura conservadora) e revisor: uma parte que abre
+    com "HH/HH SUP" + qualificador geográfico — na mesma linha ou cedida à
+    seguinte — deixa a subentrada anterior janela_ambigua."""
+    _sem_resto_menor(eng, eng42, "SIG CLD:09/11 N OF N4000 BKN 002/006HFT AGL 11/15 MAR "
+                     f"{qual} BKN 004/008HFT AGL", [200])
+
+
+@pytest.mark.parametrize("qual", ["W OF W00800", "WI 30NM OF N3850 W00900", "N PART"])
+def test_janela_superficie_e_qualificador_subentrada_inteira(eng, eng42, qual):
+    """Também a linha que abre a subentrada, quando a que cede o "HH/HH SUP"
+    é uma linha de continuação dela."""
+    _sem_resto_menor(eng, eng42, "SIG CLD:09/11 N OF N4000 BKN 002/006HFT AGL\nOVC "
+                     f"003/008HFT AGL 11/15 MAR {qual} BKN 004/008HFT AGL", [200, 300])
+
+
 def test_caso1_superficie_e_coordenadas(eng, eng42):
     corpo = ("SIG CLD:09/11 N OF N4000 BKN 002/006HFT AGL 11/15 MAR WI N4000 W00900 - "
              "N4000 W00800 - N3900 W00800 - N3900 W00900 - N4000 W00900 BKN 004/008HFT AGL")

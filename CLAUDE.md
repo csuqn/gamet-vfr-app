@@ -134,7 +134,12 @@ Três pormenores que já causaram erros reais:
   para o início da seguinte se ela abrir com qualificador (`… AGL 11/15 MAR` +
   `W OF W00800 BKN …`), como área e janela dela; os blocos da linha de onde
   saiu (o BKN 002 das 09–11Z) ficam `janela_ambigua` e contam sempre no resto
-  do período — leitura conservadora, decisão do Duarte a 28-out-2026.
+  do período — leitura conservadora, decisão do Duarte a 28-out-2026. O mesmo
+  vale sempre que uma parte abre com `HH/HH SUP` + qualificador geográfico
+  (`_AREA_INI_RE`: `WI …`, coordenadas, `WI 30NM OF …`, `ENTIRE FIR`, `N PART`,
+  `ALONG`, diagonais, `N/S/E/W OF`, `BTN`), na mesma linha ou cedida à
+  seguinte: os blocos de **toda a subentrada anterior** (também a linha que a
+  abre, se a que cede é de continuação) ficam `janela_ambigua` (revisor).
   **Parte sem fenómeno** (revisor da 4.3: `09/11 0800M FG 11/15 BR`, `11/15
   BKN`, `11/15 OCNL`, `HH/HH MAR` sozinho no fim): a linha não foi lida por
   inteiro — **todos os blocos dela ficam `janela_ambigua`** (contam sempre no
@@ -400,7 +405,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-1856 testes (com a NiceGUI instalada; sem ela, os do `test_nicegui.py` saltam). Devem passar a 100%.
+1867 testes (com a NiceGUI instalada; sem ela, os do `test_nicegui.py` saltam). Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -515,6 +520,8 @@ python3 -m pytest
   sem fenómeno: nunca menos severo. Um aviso novo só numa parte sem fenómeno
   Linha que cede o `HH/HH SUP` à seguinte (`… AGL 11/15 MAR` + `W OF W00800 …`,
   12:30/13:00/14:00): o BKN 002 nunca é ignorado no resto, sem avisos novos
+  — e as 7 variantes de qualificador depois de `11/15 MAR` na mesma linha, mais a
+  subentrada inteira (linha de continuação), a 12:30 e 14:00 contra a 4.2
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva

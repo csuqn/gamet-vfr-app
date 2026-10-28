@@ -2060,6 +2060,17 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
         if new_state or sub is None or new_poly is not None or janela_corte is not None or (
                 _AREA_INI_RE.match(content) or _DIAGONAL_RE.search(content)
                 or _CARDINAL_BTN_RE.search(content) or _JANELA_SUP_RE.match(content)):
+            # (4.3, decisão do Duarte a 28-out-2026; revisor) Parte que abre
+            # com "HH/HH SUP" + qualificador geográfico ("11/15 MAR WI …",
+            # "11/15 MAR N PART …", "11/15 MAR W OF …" cedido à linha
+            # seguinte): o "HH/HH SUP" pode ser a continuação da subentrada
+            # anterior — os blocos dela (toda a subentrada) contam sempre no
+            # resto do período.
+            msq = _JANELA_SUP_RE.match(content) if janela_corte is not None else None
+            if (msq and sub is not None and _AREA_INI_RE.match(
+                    re.sub(r"^\s*(?:AND\s+)?", "", content[msq.end():]))):
+                for b in blocks[sub["n0"]:]:
+                    b.janela_ambigua = True
             _fechar_sub()
             sub = {"campo": campo_txt, "linhas": [], "n0": len(blocks),
                    "descartada": False, "item": item_atual}
