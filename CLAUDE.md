@@ -131,7 +131,20 @@ Três pormenores que já causaram erros reais:
   2000M BR` → o 2000M fica no MAR, como na 4.2; a confirmar). LCA não passa de
   uma parte para a outra. Um `HH/HH MAR` que fica sozinho no fim da linha passa
   para o início da seguinte se ela abrir com qualificador (`… AGL 11/15 MAR` +
-  `W OF W00800 BKN …`); sozinho no fim do campo não tem fenómeno nem avisa.
+  `W OF W00800 BKN …`).
+  **Parte sem fenómeno** (revisor da 4.3: `09/11 0800M FG 11/15 BR`, `11/15
+  BKN`, `11/15 OCNL`, `HH/HH MAR` sozinho no fim): a linha não foi lida por
+  inteiro — **todos os blocos dela ficam `janela_ambigua`** (contam sempre no
+  resto do período; também as linhas de continuação) e a parte avisa "Campo não
+  interpretado" (regra da 3.9). Excepções: parte só `NIL`; e o texto **antes do
+  1.º corte** quando uma parte seguinte tem fenómenos (`EMBD 10/12 ISOL TS`,
+  `ISOL 10/12 EMBD TCU/CB …`: qualifica o que vem a seguir — não avisa, mas a
+  linha fica ambígua). A janela de cada parte usa o **mesmo critério** de
+  `_cortes_janela`: a 1.ª `HH/HH` válida (até 24, sem unidade) com só área,
+  superfície, LCA ou janelas antes; outra qualquer (`SEV 05/10 FL`, `0800M FG
+  13/15`) não é janela e o bloco fica `janela_ambigua`. Só no arquivo muda o
+  `TURB:21/24 …` do 232100/240300 (a 4.2 só lia até 23; TURB MOD, informativo).
+  `MetBlock.parte` guarda o texto da parte (diagnóstico e testes).
   Garantia contra a 4.2: `parse_gamet(_modo42=True)` corre a leitura da 4.2
   (só quando alguma linha é lida de outra forma) e regista a área de cada
   parte; cada parte nova é **unida com a área das partes da 4.2 de onde vêm
@@ -343,8 +356,11 @@ activos, os que ainda não começaram, SIGMET/AIRMET, e os de uma linha com
 2000M BR` o parser dava 09–11Z aos dois valores; ignorar o 2000M seria
 optimista). Desde a 4.3 essa linha é partida (ver "Janela a meio da linha") e
 `janela_ambigua` fica False; o campo continua a proteger o que ainda é ambíguo
-(janela no fim da linha, duas janelas seguidas, blocos da 4.2 repostos pela
-garantia).
+(janela no fim da linha, duas janelas seguidas, número que não é janela, linha
+com uma parte sem fenómeno, blocos da 4.2 repostos pela garantia). Desde a 4.3
+uma janela que **não cai dentro da validade** (`21/24` num GAMET 0900/1500;
+`janela_intervalo`) nunca é ignorada — até à 4.2 o dia mais próximo podia
+ser a véspera e o bloco saía do resto.
 `analisar_gamet` devolve `r["resto"]` (None fora da validade ou se nenhuma
 janela terminou; senão `janela`, `decisao`, `regioes`, `por_regiao`,
 `ignorados`); `resto_par()` dá (janela, decisão) global, por região (a pior das
@@ -381,7 +397,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-1829 testes (com a NiceGUI instalada; sem ela, os do `test_nicegui.py` saltam). Devem passar a 100%.
+1855 testes (com a NiceGUI instalada; sem ela, os do `test_nicegui.py` saltam). Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -485,7 +501,15 @@ python3 -m pytest
   subentradas geradas, nos 52 aeródromos e numa grelha de 0,3° nunca mais
   permissivo, nenhum bloco da 4.2 com menos área, nenhum aviso "Campo não
   interpretado" novo, resto nunca mais severo do que a principal. Outras
-  sementes: `GAMET_SEMENTE=n GAMET_CASOS=400`
+  sementes: `GAMET_SEMENTE=n GAMET_CASOS=400`. Revisão (casos do revisor,
+  `fuzz43.py`/`silencio.py`): parte sem fenómeno → aviso e blocos da linha
+  ambíguos (às 12:30 nunca "Resto: GO"), parte inicial que qualifica a
+  seguinte sem aviso, janela fora da validade nunca ignorada, janela da parte
+  com o critério dos cortes; **resto contra o da 4.2** em todo o arquivo
+  (estrito: nunca menos severo) e nos casos gerados a várias horas — só menos
+  severo quando todos os blocos ignorados vêm de uma parte com janela própria
+  (verificado no teste a partir de `MetBlock.parte`); linhas geradas com partes
+  sem fenómeno: nunca menos severo. Um aviso novo só numa parte sem fenómeno
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva

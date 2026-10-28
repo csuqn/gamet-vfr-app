@@ -300,6 +300,11 @@ def _iguais(novo, antigo):
         for k in a:
             if k == "polygon":
                 assert a[k].symmetric_difference(b[k]).area < 1e-12
+            elif k == "notas":
+                # Desde a 4.3 a janela "21/24" (até 24, o critério dos cortes)
+                # é lida: GAMET real 232100/240300 ganha "TURB: apenas
+                # 21–24Z" (TURB MOD, informativo). Mais nada pode mudar.
+                assert [n for n in a[k] if not re.search(r"apenas \d{2}–24Z", n)] == b[k], k
             else:
                 assert a[k] == b[k], k
 

@@ -149,9 +149,89 @@ def _comparar(eng, eng42, texto, grelha=False):
     bn, *_ = eng.parse_gamet(texto)
     bv, *_ = eng42.parse_gamet(texto)
     _blocos_cobertos(eng, bn, bv, texto[90:300])
-    if not eng42.campos_nao_interpretados(texto):
-        assert eng.campos_nao_interpretados(texto) == [], texto[90:300]
+    _avisos_novos_so_sem_fenomeno(eng, eng42, texto, bn)
     return novo, antigo
+
+
+_CAMPO_T = re.compile(r"(?:SFC\s+VIS|SIG\s+VIS|VIS|SIG\s+CLD|CLD|SIGWX|TURB|ICE|MT\s+OBSC"
+                      r"|SFC\s+WSPD|MTW|VA)\b\s*:?\s*")
+
+
+def _sem_campo(txt):
+    m = _CAMPO_T.match(txt)
+    return txt[m.end():] if m else txt
+
+
+def _avisos_novos_so_sem_fenomeno(eng, eng42, texto, bn=None):
+    """Um aviso "Campo não interpretado" que a 4.2 não dava só pode vir de uma
+    parte que não gerou nenhum fenómeno (pedido do revisor)."""
+    bn = bn if bn is not None else eng.parse_gamet(texto)[0]
+    antigos = set(eng42.campos_nao_interpretados(texto))
+    partes = {_sem_campo(b.parte).strip() for b in bn}
+    for a in eng.campos_nao_interpretados(texto):
+        if a in antigos:
+            continue
+        txt = a.split(": ", 1)[1]
+        assert not any(txt == p or txt.startswith(p + " ") for p in partes if p), \
+            (texto[90:300], "aviso novo numa parte com fenómenos", a)
+
+
+def _resto_ponto(eng, r, la, lo):
+    """Decisão que conta para o resto no ponto: a do resto, ou a principal se
+    não há resto (nenhum bloco ignorado)."""
+    reg = eng.find_region_for_point(r["regioes"], la, lo)
+    principal = reg["decision"] if reg else None
+    return eng.resto_do_ponto(r["resto"], la, lo) if r.get("resto") else principal
+
+
+_JAN_T = re.compile(r"(?:^|\s)(\d{2})/(\d{2})(?=\s|$)")
+_AREA_T = re.compile(
+    r"AND|OF|PART|BTN|WI|ALONG|ENTIRE|FIR|LINE|MAR|LAN|COT|LCA|[NS][EW]?|[EW]|-+"
+    r"|[NS]\d{2,4}|[WE]\d{3,5}|(?:[NSWE]\d{2,5}-)+[NSWE]\d{2,5}|\d{2}/\d{2}|\d{1,3}NM")
+
+
+def _janela_propria(eng, b, ini, fim):
+    """O bloco ignorado no resto vem de uma parte com janela própria: a 1.ª
+    "HH/HH" da parte, só com área antes, válida e sem unidade a seguir, é a
+    janela do bloco; a parte não tem outra janela; a janela cai dentro da
+    validade; e não é ambígua. (Reimplementado aqui, de propósito.)"""
+    if b.janela_ambigua or not b.window:
+        return False
+    txt = _sem_campo(b.parte)
+    js = list(_JAN_T.finditer(txt))
+    if len(js) != 1:
+        return False
+    m = js[0]
+    h1, h2 = int(m.group(1)), int(m.group(2))
+    if h1 > 24 or h2 > 24 or f"{h1:02d}–{h2:02d}Z" != b.window:
+        return False
+    if re.match(r"\s*(?:HFT|HTF|FT|KT|KMH|MPS|KM|M|HPA|AGL|AMSL|NM|FL)\b", txt[m.end():]):
+        return False
+    if not all(_AREA_T.fullmatch(t) for t in re.findall(r"[^\s:,;.=]+", txt[:m.start()])):
+        return False
+    iv = eng.janela_intervalo(b.window, ini)
+    return iv is not None and ini <= iv[0] and iv[1] <= fim
+
+
+def _resto_contra_42(eng, eng42, texto, agora, ctx="", estrito=False, **kw):
+    """O resto da 4.3 só é menos severo do que o da 4.2 (em algum aeródromo ou
+    no global) se todos os blocos que a 4.3 ignora vierem de uma parte com
+    janela própria que gerou fenómenos. `estrito`: nunca menos severo."""
+    rn = eng.analisar_gamet(texto, agora=agora, **kw)
+    rv = eng42.analisar_gamet(texto, agora=agora, **kw)
+    _verifica_resto(eng, rn)
+    menos = [n for n, (la, lo) in eng.AERODROMES.items()
+             if GRAV.get(_resto_ponto(eng, rn, la, lo), -1) < GRAV.get(_resto_ponto(eng42, rv, la, lo), -1)]
+    gn = rn["resto"]["decisao"] if rn["resto"] else max(rn["por_dec"], key=GRAV.get)
+    gv = rv["resto"]["decisao"] if rv["resto"] else max(rv["por_dec"], key=GRAV.get)
+    if GRAV[gn] < GRAV[gv]:
+        menos.append("global")
+    if menos:
+        assert not estrito, (ctx, f"{agora:%H:%M}", menos[:4])
+        maus = [(b.phenomenon, b.value, b.window, b.parte) for b in rn["resto"]["ignorados"]
+                if not _janela_propria(eng, b, rn["ini"], rn["fim"])]
+        assert not maus, (ctx, f"{agora:%H:%M}", menos[:4], maus[:3])
+    return bool(menos), rn, rv
 
 
 def _dec_ponto(eng, r, nome):
@@ -191,7 +271,10 @@ def test_caso1_primeira_parte_sem_recorte(eng, eng42):
     b = _so(_blocos(eng, CASO1), "BASE_AGL", 200)
     n4000 = eng.extract_polygon("N OF N4000")
     assert b.polygon.symmetric_difference(n4000).area < 1e-6
-    assert b.surface == "" and b.window == "09–11Z" and not b.janela_ambigua
+    assert b.surface == "" and b.window == "09–11Z"
+    # "11/15 MAR" sozinho não gerou fenómeno: a linha não foi lida por
+    # inteiro, o bloco conta sempre no resto do período (revisor da 4.3)
+    assert b.janela_ambigua
     # Na 4.2 só no mar
     v = _so(_blocos(eng42, CASO1), "BASE_AGL", 200)
     assert v.surface == "MAR"
@@ -217,10 +300,12 @@ def test_caso1_a_sul_continua_go(eng, eng42):
         assert novo[_nome(eng, icao)] == "GO"
 
 
-def test_caso1_sem_avisos(eng):
+def test_caso1_avisa_a_parte_sem_fenomeno(eng):
     t = _g(CASO1)
-    assert eng.campos_nao_interpretados(t) == []
+    assert eng.campos_nao_interpretados(t) == ["SIG CLD: 11/15 MAR"]
     assert eng.subentradas_sem_area(t) == []
+    r = eng.analisar_gamet(t, agora=_t(12, 30))
+    assert r["resto"] is None                       # o bloco 09–11Z conta sempre
 
 
 @pytest.mark.parametrize("sup", ["MAR", "COT", "LAN", "MAR AND COT", "COT AND LAN", "LAN MAR"])
@@ -229,7 +314,8 @@ def test_caso1_superficies(eng, eng42, sup):
     _comparar(eng, eng42, _g(corpo))
     b = _so(_blocos(eng, corpo), "BASE_AGL", 200)
     assert b.polygon.symmetric_difference(eng.extract_polygon("N OF N4000")).area < 1e-6
-    assert eng.campos_nao_interpretados(_g(corpo)) == []
+    assert b.janela_ambigua
+    assert eng.campos_nao_interpretados(_g(corpo)) == [f"SIG CLD: 11/15 {sup}"]
 
 
 def test_caso1_com_and_antes_da_janela(eng, eng42):
@@ -357,6 +443,148 @@ def test_resto_com_janelas_partidas_nunca_mais_severo(eng):
                   "SIGWX:09/11 OCNL TS 11/13 ISOL TS"):
         for agora in (_t(9, 30), _t(12, 0), _t(12, 30), _t(13, 30), _t(14, 50)):
             _verifica_resto(eng, eng.analisar_gamet(_g(corpo), agora=agora))
+
+
+# --- Revisão da 4.3: o resto do período nunca optimista em silêncio -----------------
+
+SEM_FENOMENO = [
+    ("SFC VIS:09/11 0800M FG 11/15 FG", "SFC VIS: 11/15 FG"),
+    ("SFC VIS:09/11 0800M FG 11/15 BR", "SFC VIS: 11/15 BR"),
+    ("SFC VIS:09/11 0800M FG 11/15 BR LAN", "SFC VIS: 11/15 BR LAN"),
+    ("SFC VIS:09/11 0800M FG 11/15 IMPR", "SFC VIS: 11/15 IMPR"),
+    ("SIG CLD:09/11 N OF N4000 BKN 002/006HFT AGL 11/15 BKN ST", "SIG CLD: 11/15 BKN ST"),
+    ("SIG CLD:09/11 N OF N4000 BKN 002/006HFT AGL 11/15 BKN", "SIG CLD: 11/15 BKN"),
+    ("SIG CLD:09/11 N OF N4000 BKN 002/006HFT AGL 11/15 XYZ", "SIG CLD: 11/15 XYZ"),
+    ("SIG CLD:09/11 N OF N4000 BKN 002/006HFT AGL 11/15 BKN 00X/006HFT",
+     "SIG CLD: 11/15 BKN 00X/006HFT"),
+    ("SIGWX:09/11 OCNL TS 11/15 OCNL", "SIGWX: 11/15 OCNL"),
+    ("SIG CLD:09/11 MAR AND COT BKN 002/006HFT AGL 11/15 LAN", "SIG CLD: 11/15 LAN"),
+    ("SFC VIS:09/11 0800M FG 11/13 BR 13/15 2000M BR", "SFC VIS: 11/13 BR"),
+]
+
+
+@pytest.mark.parametrize("corpo,aviso", SEM_FENOMENO)
+def test_parte_sem_fenomeno_avisa_e_conta_sempre(eng, eng42, corpo, aviso):
+    """A parte cortada não gera fenómeno: avisa (regra da 3.9) e os blocos da
+    linha ficam janela_ambigua — às 12:30 o resto não diz GO em silêncio."""
+    t = _g(corpo)
+    _comparar(eng, eng42, t)
+    assert aviso in eng.campos_nao_interpretados(t)
+    bl, *_ = eng.parse_gamet(t)
+    assert bl and all(b.janela_ambigua for b in bl)
+    r = eng.analisar_gamet(t, agora=_t(12, 30))
+    assert r["resto"] is None
+    for agora in (_t(10, 30), _t(12, 0), _t(12, 30), _t(14, 0), _t(14, 50)):
+        _resto_contra_42(eng, eng42, t, agora, corpo, estrito=True)
+
+
+def test_parte_nil_nao_torna_a_linha_ambigua(eng):
+    t = _g("SFC VIS:09/11 0800M FG 13/15 NIL")
+    assert eng.campos_nao_interpretados(t) == []
+    (b,) = eng.parse_gamet(t)[0]
+    assert (b.window, b.janela_ambigua) == ("09–11Z", False)
+
+
+def test_continuacao_de_linha_com_parte_vazia_fica_ambigua(eng):
+    t = _g("SFC VIS:09/11 N OF N3700 0800M FG 11/15 BR\nLCA 1000M FG")
+    bl, *_ = eng.parse_gamet(t)
+    assert {b.value for b in bl} == {800, 1000}
+    assert all(b.janela_ambigua for b in bl)
+
+
+@pytest.mark.parametrize("corpo", [
+    "SIGWX:EMBD 10/12 ISOL TS",
+    "SIG CLD:ISOL 10/12 EMBD TCU/CB 008/ABV100HFT AGL",
+    "SIGWX:W OF W00800 OCNL 11/15 OCNL TSRA LAN FZRA",
+    "ICE:06/ 11/15 SEV FL060/FL120",
+    "SIG CLD:09/11 BKN 010/15 HFT 13/15 BKN 002-004/010-015HFT AGL",
+])
+def test_parte_inicial_que_qualifica_a_seguinte_nao_avisa(eng, eng42, corpo):
+    """O texto antes do 1.º corte sem fenómeno, seguido de uma parte com
+    fenómenos, não avisa (a 4.2 leu fenómenos nessa linha). Os blocos da
+    linha contam sempre no resto."""
+    t = _g(corpo)
+    _comparar(eng, eng42, t)
+    assert eng.campos_nao_interpretados(t) == eng42.campos_nao_interpretados(t) == []
+    bl, *_ = eng.parse_gamet(t)
+    assert bl and all(b.janela_ambigua for b in bl)
+
+
+def test_janela_fora_da_validade_nunca_e_ignorada(eng, eng42):
+    """"21/24" num GAMET 0900/1500 (o dia da janela é incerto): nunca é
+    ignorada no resto do período. A 4.2 lia-a como já terminada."""
+    corpo = "SFC VIS:09/11 2000M BR 21/24 0800M FG"
+    t = _g(corpo)
+    bl, *_ = eng.parse_gamet(t)
+    assert {b.value: b.window for b in bl} == {2000: "09–11Z", 800: "21–24Z"}
+    for agora in (_t(9, 30), _t(12, 30), _t(14, 50)):
+        r = eng.analisar_gamet(t, agora=agora)
+        assert all(b.value != 800 for b in (r["resto"] or {}).get("ignorados", []))
+        assert r["resto"] is None or r["resto"]["decisao"] == "NO-GO"
+        _resto_contra_42(eng, eng42, t, agora, corpo, estrito=True)
+    # Dentro da validade conta como qualquer outra
+    t = build_gamet("SECN I SFC VIS:18/21 0800M FG 21/24 2000M BR", validity="281800/290000")
+    r = eng.analisar_gamet(t, agora=datetime(2026, 10, 28, 22, 30, tzinfo=timezone.utc))
+    assert [b.value for b in r["resto"]["ignorados"]] == [800]
+    assert eng.janela_intervalo("21–24Z", _t(9)) is not None
+    assert eng.janela_intervalo("", _t(9)) is None
+
+
+@pytest.mark.parametrize("corpo", [
+    "TURB:SEV 05/10 FL 10/12 MOD",
+    "ICE:SEV 05/08 FL080 10/12 MOD",
+    "SFC VIS:0800M FG 13/15",
+    "SFC VIS:09/11 0800M FG 13/15",
+    "SFC WSPD:N OF N4000 20/24 KT",
+])
+def test_janela_dentro_da_parte_com_o_criterio_dos_cortes(eng, eng42, corpo):
+    """"05/10 FL" não é janela para os cortes, logo também não é a janela do
+    bloco: o bloco fica janela_ambigua e conta sempre no resto."""
+    t = _g(corpo)
+    _comparar(eng, eng42, t)
+    bl, *_ = eng.parse_gamet(t)
+    primeiro = bl[0]
+    assert primeiro.janela_ambigua, [(b.value, b.window, b.janela_ambigua) for b in bl]
+    for agora in (_t(11, 15), _t(12, 30), _t(14, 0)):
+        _resto_contra_42(eng, eng42, t, agora, corpo)
+        r = eng.analisar_gamet(t, agora=agora)
+        assert all(b is not primeiro for b in (r["resto"] or {}).get("ignorados", []))
+
+
+def test_revisor_casos_manuais_resto_contra_4_2(eng, eng42):
+    """Casos-limite do revisor da 4.3 (fuzz43.py): o resto só é menos severo
+    do que o da 4.2 com blocos de partes com janela própria."""
+    casos = [
+        "SFC VIS:09/10 0800M FG 10/11 1200M BR 11/12 2000M BR 12/15 4000M BR",
+        "SFC VIS:09/10 0800M FG 10/11 NE OF N4000 1000M BR",
+        "SFC VIS:N OF N3840 AND W OF W00815 AND S OF N4130 09/10 0800M FG",
+        "SFC VIS:09/11 0800M FG 11/15 BECMG 3000M",
+        "SIGWX:09/11 OCNL TS 13/15 ISOL TS",
+        "SIGWX:09/11 FZDZ 13/15 ISOL TS",
+        "SFC WSPD:N OF N4000 20/24 KT 10/12 32KT",
+        "SFC VIS:NE OF N4000 MAR AND COT 09/10 2000M BR 4000M RA 2000M BR W OF W00800 13/15 "
+        "MAR AND COT",
+        "ICE:MAR 14/15 MAR AND COT MOD FL050/FL100 09/10 ENTIRE FIR LCA MAR SEV FL060/FL120",
+        "MTW:MOD FL050/100 24/03 MOD FL050/100 11/15 MOD FL050/100 10/12 ENTIRE FIR SEV "
+        "FL050/100 AND 10/12 E OF W00800 MOD FL050/100",
+        "SIG CLD:BTN N3840 AND N4100 10/12 LCA OVC 004/010HFT AGL AND 21/24 LCA BKN "
+        "012/020HFT AMSL",
+    ]
+    for corpo in casos:
+        t = _g(corpo)
+        _comparar(eng, eng42, t)
+        for h in (9.75, 10.5, 11.25, 12.0, 12.5, 13.5, 14.75):
+            _resto_contra_42(eng, eng42, t, _t(9) + timedelta(hours=h), corpo)
+    noite = [("SFC VIS:21/23 0800M FG 23/03 2000M BR", True),
+             ("ICE:09/11 ENTIRE FIR SEV FL060/FL120 13/15 SEV FL060/FL120 11/15 LAN MOD "
+              "FL050/FL100", False),
+             ("TURB:25/30 BTN N3840 AND N4100 MOD FL020/FL050 11/15 SW OF W00800 11/15 SEV "
+              "ABV FL070", False)]
+    for corpo, pode in noite:
+        t = build_gamet(f"SECN I {corpo}", validity="282100/290300")
+        for h in (1.5, 2.25, 3.0, 4.5, 5.5):
+            agora = datetime(2026, 10, 28, 21, tzinfo=timezone.utc) + timedelta(hours=h)
+            _resto_contra_42(eng, eng42, t, agora, corpo, estrito=not pode)
 
 
 # --- Garantia: um bloco que a partição tornaria menos severo ----------------------
@@ -534,17 +762,25 @@ def _arquivo():
 
 def test_arquivo_igual_a_4_2(eng, eng42):
     """Nenhum GAMET do arquivo tem janelas a meio da linha que mudem: os
-    blocos, as decisões e os avisos são iguais aos da 4.2."""
+    blocos, as decisões e os avisos são iguais aos da 4.2. Única diferença: a
+    janela "21/24" (GAMET real 232100/240300, TURB MOD), que a 4.2 não lia
+    (só até 23) e a 4.3 lê com o critério de _cortes_janela (até 24)."""
     fich = _arquivo()
     if not fich:
         pytest.skip("arquivo (ramo dados) não disponível")
-    sig = lambda bl: [(b.phenomenon, b.value, b.qualifier, b.window, b.surface,  # noqa: E731
-                       b.janela_ambigua, round(b.polygon.area, 9)) for b in bl]
+    sig = lambda bl: [(b.phenomenon, b.value, b.qualifier, b.surface,  # noqa: E731
+                       round(b.polygon.area, 9)) for b in bl]
+    lidas_24 = 0
     for p in fich:
         t = p.read_text(encoding="utf-8").strip()
         novo, antigo = _comparar(eng, eng42, t)
         assert novo == antigo, p.name
-        assert sig(eng.parse_gamet(t)[0]) == sig(eng42.parse_gamet(t)[0]), p.name
+        bn, bv = eng.parse_gamet(t)[0], eng42.parse_gamet(t)[0]
+        assert sig(bn) == sig(bv), p.name
+        for n, v in zip(bn, bv):
+            if (n.window, n.janela_ambigua) != (v.window, v.janela_ambigua):
+                assert v.window == "" and v.janela_ambigua and n.window.endswith("–24Z"), p.name
+                lidas_24 += 1
         assert eng.campos_nao_interpretados(t) == eng42.campos_nao_interpretados(t)
         assert eng.subentradas_sem_area(t) == eng42.subentradas_sem_area(t)
         assert eng.nuvens_baixas_secn2(t) == eng42.nuvens_baixas_secn2(t)
@@ -572,16 +808,14 @@ def test_arquivo_analise_completa_e_resto(eng, eng42):
                              (("arquivo_hist",), {"indice": indice, "entrada": entrada})):
                 if args[0] == "arquivo_hist" and not entrada:
                     continue
-                novo = eng.analisar_gamet(texto, *args, agora=agora, **kw)
-                antigo = eng42.analisar_gamet(texto, *args, agora=agora, **kw)
+                # Sem janelas a meio da linha no arquivo: o resto nunca é
+                # menos severo do que o da 4.2 (estrito)
+                _m, novo, antigo = _resto_contra_42(eng, eng42, texto, agora, f.name,
+                                                    estrito=True, fonte=args[0], **kw)
                 assert novo["por_dec"] == antigo["por_dec"], f.name
                 assert novo["avisos"] == antigo["avisos"], f.name
                 assert [g["decision"] for g in novo["regioes"]] == \
                        [g["decision"] for g in antigo["regioes"]]
-                assert (novo["resto"] is None) == (antigo["resto"] is None)
-                if novo["resto"]:
-                    assert novo["resto"]["decisao"] == antigo["resto"]["decisao"]
-                _verifica_resto(eng, novo)
 
 
 # --- Contra o motor da 4.2: subentradas geradas -------------------------------------
@@ -644,7 +878,7 @@ def _subentrada(rng):
 def test_geradas_contra_4_2(eng, eng42):
     rng = random.Random(int(os.environ.get("GAMET_SEMENTE", "43")))
     n = int(os.environ.get("GAMET_CASOS", "300"))
-    mudaram = partidos = com_resto = 0
+    mudaram = partidos = com_resto = menos = 0
     for k in range(n):
         corpo = " ".join(_subentrada(rng) for _ in range(rng.choice([1, 1, 2])))
         t = _g(corpo)
@@ -652,8 +886,62 @@ def test_geradas_contra_4_2(eng, eng42):
         mudaram += novo != antigo
         partidos += any(eng._cortes_janela(l) for l in eng.normalize(corpo).splitlines())
         if k % 2 == 0:
-            com_resto += _verifica_resto(eng, eng.analisar_gamet(t, agora=_t(12, 30)))
+            for agora in (_t(11, 15), _t(12, 30), _t(14, 0)):
+                m, rn, _rv = _resto_contra_42(eng, eng42, t, agora, corpo)
+                com_resto += rn["resto"] is not None
+                menos += m
     # O gerador exercita de facto a mudança
     assert partidos > n // 2
     assert mudaram > 0
     assert com_resto > 0
+    assert menos > 0          # o defeito 2 corrigido (janela própria) aparece
+
+
+# Partes sem fenómeno (revisor da 4.3): a linha não é lida por inteiro, os
+# blocos dela contam sempre no resto e a parte avisa.
+VAZIAS = {
+    "SFC VIS": ["FG", "BR", "BR LAN", "IMPR", "XYZ"],
+    "SIG CLD": ["BKN ST", "BKN", "XYZ", "BKN 00X/006HFT"],
+    "SIGWX": ["OCNL", "XYZ"],
+    "TURB": ["FL050/100", "XYZ"],
+    "SFC WSPD": ["XYZ", "KTS"],
+}
+# Só superfície: só no fim (seguida de uma janela seria a janela dela)
+VAZIAS_FIM = ["MAR", "LAN", "COT AND LAN", "MAR AND COT"]
+
+
+def test_geradas_parte_sem_fenomeno_nunca_menos_severo(eng, eng42):
+    """Linha só com janelas e valores, com pelo menos uma parte sem fenómeno:
+    em nenhuma hora o resto da 4.3 é menos severo do que o da 4.2, todos os
+    blocos da linha ficam janela_ambigua e há um aviso para a parte vazia."""
+    rng = random.Random(int(os.environ.get("GAMET_SEMENTE", "43")) + 1)
+    n = int(os.environ.get("GAMET_CASOS", "300")) // 3
+    for _ in range(n):
+        campo = rng.choice(list(VAZIAS))
+        h = rng.choice([9, 10])
+        partes = [f"{h:02d}/{h + 1:02d} {rng.choice(VALORES[campo])}"]
+        vazias = []
+        for _ in range(rng.choice([1, 2, 3])):
+            h += 1
+            if rng.random() < 0.5 or (not vazias and h >= 12):
+                v = f"{h:02d}/{min(h + 2, 15):02d} {rng.choice(VAZIAS[campo])}"
+                vazias.append(v)
+            else:
+                v = f"{h:02d}/{min(h + 2, 15):02d} {rng.choice(VALORES[campo])}"
+            partes.append(rng.choice(["", "AND "]) + v)
+        if rng.random() < 0.3:
+            h += 1
+            v = f"{h:02d}/{min(h + 2, 15):02d} {rng.choice(VAZIAS_FIM)}"
+            vazias.append(v)
+            partes.append(v)
+        if not vazias:
+            continue
+        corpo = f"{campo}:" + " ".join(partes)
+        t = _g(corpo)
+        _comparar(eng, eng42, t)
+        bl, *_ = eng.parse_gamet(t)
+        assert bl and all(b.janela_ambigua for b in bl), corpo
+        avisos = eng.campos_nao_interpretados(t)
+        assert any(f": {vazias[-1]}" in a for a in avisos), (corpo, avisos)
+        for agora in (_t(10, 30), _t(12, 0), _t(13, 30), _t(14, 50)):
+            _resto_contra_42(eng, eng42, t, agora, corpo, estrito=True)
