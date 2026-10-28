@@ -204,8 +204,9 @@ def test_secn2_janela_superficie(eng):
 # --- Casos que ficam como na 4.0 ----------------------------------------------
 
 @pytest.mark.parametrize("corpo", [
-    # janela + superfície no fim, sem nada a seguir
-    "SIG CLD:W OF W00715 BKN 002/006HFT AGL 11/15 MAR",
+    # (Até à 4.2 também "janela + superfície no fim, sem nada a seguir"
+    # — "SIG CLD:W OF W00715 BKN 002/006HFT AGL 11/15 MAR". Desde a 4.3 a 1.ª
+    # subentrada deixa de ser recortada pelo MAR: ver test_v43.py.)
     # janela + superfície a abrir o campo
     "SIG CLD:11/15 MAR AND COT BKN 002/006HFT AGL",
     "SIG CLD 11/15 MAR BKN 002/006HFT AGL",

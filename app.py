@@ -29,7 +29,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "4.2"
+APP_VERSION = "4.3"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -918,6 +918,8 @@ class MetBlock:
     # "09/11 0800M FG 13/15 2000M BR": os dois valores ficam com 09–11Z).
     # Não se sabe a que horas vale o valor → conta sempre no resto do período.
     janela_ambigua: bool = False
+    # (4.3) Texto da parte da linha que gerou o bloco (diagnóstico e testes)
+    parte: str = ""
 
 # -------------------------------------------------
 # NORMALIZE
@@ -1445,13 +1447,27 @@ def window_status(window, start_dt, now=None):
     dados). `start_dt` é o início da validade do GAMET, que fixa o dia a
     que as horas da janela se referem.
     """
-    m = _WINDOW_RE.search(window or "")
-    if not m or start_dt is None:
+    iv = janela_intervalo(window, start_dt)
+    if iv is None:
         return ""
     now = now or datetime.now(timezone.utc)
+    ini, fim = iv
+    if now < ini:
+        return "ainda não começou"
+    if now >= fim:
+        return "já terminou"
+    return "activo agora"
+
+
+def janela_intervalo(window, start_dt):
+    """(início, fim) da janela "HH–HHZ", com o dia mais próximo do início da
+    validade `start_dt`; None se não houver janela legível."""
+    m = _WINDOW_RE.search(window or "")
+    if not m or start_dt is None:
+        return None
     h1, h2 = int(m.group(1)), int(m.group(2))
     if h1 > 24 or h2 > 24:
-        return ""
+        return None
     # O GAMET só dá horas: o dia é o do candidato (véspera, mesmo dia,
     # dia seguinte) mais próximo do início da validade. Ex.: válido desde
     # as 21Z, "00/03" é na madrugada seguinte; válido desde as 12Z, "10/12"
@@ -1463,11 +1479,7 @@ def window_status(window, start_dt, now=None):
           ini.replace(hour=0) + timedelta(days=1)
     if fim <= ini:                          # cruza a meia-noite
         fim += timedelta(days=1)
-    if now < ini:
-        return "ainda não começou"
-    if now >= fim:
-        return "já terminou"
-    return "activo agora"
+    return ini, fim
 
 def annotate_window_notes(notas, start_dt, now=None):
     """Acrescenta o estado actual às notas de janela horária."""
@@ -1594,8 +1606,14 @@ def _partir_janela_superficie(linha):
     Parte a linha antes de cada "HH/HH MAR|LAN|COT [[AND] …]" que não a abre
     (4.1). Não parte se o que vem antes é só o nome do campo, nem se depois da
     superfície vem um qualificador geográfico, outra janela ou o fim da linha.
-    Devolve a lista de partes (uma só se não partiu).
+    Devolve a lista de partes (uma só se não partiu). Desde a 4.3 só serve a
+    leitura da 4.2 (`_spans_41`), que é a garantia da leitura nova.
     """
+    return [linha[a:b].strip() for a, b in _spans_41(linha)]
+
+
+def _spans_41(linha):
+    """Posições (início, fim) das partes de `_partir_janela_superficie`."""
     cortes = []
     for m in _JANELA_SUP_MEIO_RE.finditer(linha):
         h1, h2 = int(m.group(1)), int(m.group(2))
@@ -1608,16 +1626,91 @@ def _partir_janela_superficie(linha):
             continue
         cortes.append((m.start(), m.end()))
     if not cortes:
-        return [linha]
-    partes, ini = [], 0
+        return [(0, len(linha))]
+    spans, ini = [], 0
     for a, b in cortes:
-        partes.append(linha[ini:a].strip())
+        spans.append((ini, a))
         ini = b
-    partes.append(linha[ini:].strip())
-    return [p for p in partes if p]
+    spans.append((ini, len(linha)))
+    return [(a, b) for a, b in spans if linha[a:b].strip()]
 
 
-def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
+# Janela a meio da linha (4.3, pedido do Duarte a 28-out-2026): uma janela
+# "HH/HH" válida depois de conteúdo do campo abre SEMPRE uma subentrada nova,
+# com a sua janela. Até à 4.2 só "HH/HH MAR|LAN|COT" seguido de valores o fazia:
+# em "09/11 N OF N4000 BKN 002/006HFT AGL 11/15 MAR" a 1.ª subentrada era
+# recortada pela superfície da seguinte (a base de 200 ft deixava de contar em
+# terra) e em "09/11 0800M FG 13/15 2000M BR" os dois valores ficavam 09–11Z.
+# Só conta "HH/HH" com 00 ≤ HH ≤ 24, entre espaços (ou no fim) e sem unidade a
+# seguir: "002/006HFT", "06/ 090HFT", "260/009KT", "SFC/FL050" ou "20/24 KT"
+# não são janelas.
+_JANELA_MEIO_RE = re.compile(r"(?<=\s)(\d{2})/(\d{2})(?=\s|$)")
+_NAO_JANELA_RE = re.compile(r"\s*(?:HFT|HTF|FT|KT|KMH|MPS|KM|M|HPA|AGL|AMSL|NM|FL)\b")
+_CAMPO_LINHA_RE = re.compile(
+    r"(?:SFC\s+VIS|SIG\s+VIS|VIS|SIG\s+CLD|CLD|SIGWX|TURB|ICE|MT\s+OBSC|SFC\s+WSPD|MTW|VA)\b\s*:?")
+# Palavras que não são conteúdo do campo: área, superfície, LCA, janela. Uma
+# janela que só tem isto antes ("N OF N4000 11/15 BKN …", "LCA 09/11 …") é a
+# da própria subentrada e não a parte.
+_SO_AREA_TOK_RE = re.compile(
+    r"AND|OF|PART|BTN|WI|ALONG|ENTIRE|FIR|LINE|MAR|LAN|COT|LCA|[NS][EW]?|[EW]|-+"
+    r"|[NS]\d{2,4}|[WE]\d{3,5}|(?:[NSWE]\d{2,5}-)+[NSWE]\d{2,5}|\d{2}/\d{2}|\d{1,3}NM")
+
+
+def _cortes_janela(linha):
+    """
+    Janelas a meio da linha que abrem uma subentrada nova (4.3): lista de
+    (posição, h1, h2). Não parte se antes (desde o início da linha ou o corte
+    anterior) só há o nome do campo, área, superfície, LCA ou janelas, nem se
+    a janela está no fim da linha.
+    """
+    cortes, ini = [], 0
+    for m in _JANELA_MEIO_RE.finditer(linha):
+        h1, h2 = int(m.group(1)), int(m.group(2))
+        if h1 > 24 or h2 > 24:
+            continue
+        depois = linha[m.end():]
+        if not depois.strip() or _NAO_JANELA_RE.match(depois):
+            continue
+        antes = linha[ini:m.start()]
+        if ini == 0:
+            mc = _CAMPO_LINHA_RE.match(antes)
+            if mc:
+                antes = antes[mc.end():]
+        if all(_SO_AREA_TOK_RE.fullmatch(t) for t in re.findall(r"[^\s:,;.=]+", antes)):
+            continue
+        cortes.append((m.start(), h1, h2))
+        ini = m.start()
+    return cortes
+
+
+def _domina(n, v):
+    """O bloco `n` (4.3) é pelo menos tão severo como o `v` (4.2): mesmo
+    fenómeno, valor igual ou pior, LCA só se `v` também o era, área que
+    contém a de `v`."""
+    if n.phenomenon != v.phenomenon or not n.polygon.buffer(1e-9).contains(v.polygon):
+        return False
+    if v.phenomenon == "VIS" and n.qualifier == "LCA" and v.qualifier != "LCA":
+        return False
+    f = v.phenomenon
+    if f in ("VIS", "BASE_AGL", "BASE_AMSL"):
+        return n.value <= v.value
+    if f == "WSPD":
+        return n.value >= v.value
+    if f in ("TS", "CB"):
+        d = 1 if f == "TS" else 2
+        return TS_RISK.get(n.value, d) >= TS_RISK.get(v.value, d)
+    if f in ("TURB", "ICE", "MTW"):
+        return n.value == v.value or n.value == "SEV"
+    if f == "WX":
+        return set(v.value.split("/")) <= set(n.value.split("/"))
+    return n.value == v.value
+
+
+def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=False,
+                _areas42=None):
+    # _modo42 / _areas42 (4.3, uso interno): leitura da 4.2 (só a partição da
+    # 4.1), que regista a área de cada parte em _areas42 — a garantia de que
+    # a leitura nova nunca é mais permissiva (ver "Janela a meio da linha").
 
     text = normalize(text)
 
@@ -1699,16 +1792,53 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
             lines[i] = lines[i][:mj.start()].rstrip()
             lines[i + 1] = f"{mj.group(1)} {lines[i + 1]}"
 
-    # "HH/HH MAR|LAN|COT" no meio da linha abre uma subentrada nova (4.1).
-    # Cada parte leva a linha inteira (a leitura da 4.0), para que a sua área
-    # nunca fique menor do que a que a 4.0 dava à linha toda.
-    itens = []
-    for l in lines:
-        partes = _partir_janela_superficie(l)
-        if len(partes) == 1:
-            itens.append((l, None, 0))
+    # Leitura da 4.2: "HH/HH MAR|LAN|COT" no meio da linha abre uma subentrada
+    # nova (4.1). Cada parte leva a linha inteira (a leitura da 4.0), para que
+    # a sua área nunca fique menor do que a que a 4.0 dava à linha toda.
+    # Cada item: (texto, linha inteira se partida, nº da parte, nº da linha,
+    # posição na linha, janela do corte, prefixo trazido da linha anterior).
+    itens42 = []
+    for i, l in enumerate(lines):
+        spans = _spans_41(l)
+        comb = None if len(spans) == 1 else l
+        itens42.extend((l[a:b].strip(), comb, k, i, (a, b), None, "")
+                       for k, (a, b) in enumerate(spans))
+
+    # Leitura da 4.3: qualquer janela "HH/HH" a meio da linha abre uma
+    # subentrada nova (_cortes_janela). Um "HH/HH MAR|LAN|COT" que fica sozinho
+    # no fim da linha passa para o início da seguinte, se ela abrir com um
+    # qualificador ("… AGL 11/15 MAR" + "W OF W00800 BKN …"), como a janela
+    # sozinha acima.
+    blocos42, areas42 = [], {}
+    # (4.3, decisão do Duarte a 28-out-2026) Linhas que cederam um "HH/HH SUP"
+    # à seguinte: os blocos delas ficam janela_ambigua (leitura conservadora).
+    linhas_cedidas = set()
+    if _modo42:
+        itens = itens42
+    else:
+        itens = []
+        for i, l in enumerate(lines):
+            cortes = _cortes_janela(l)
+            lim = [0] + [c[0] for c in cortes] + [len(l)]
+            for k in range(len(lim) - 1):
+                a, b = lim[k], lim[k + 1]
+                if l[a:b].strip():
+                    itens.append([l[a:b].strip(), None, k, i, (a, b),
+                                  cortes[k - 1][1:] if k else None, ""])
+        for j in range(len(itens) - 1):
+            it, nx = itens[j], itens[j + 1]
+            if (it[2] >= 1 and _JANELA_SUP_RE.fullmatch(it[0]) and nx[2] == 0
+                    and nx[3] == it[3] + 1 and _qual_ini.match(nx[0])):
+                nx[0], nx[5], nx[6] = f"{it[0]} {nx[0]}", it[5], it[0]
+                it[0] = ""
+                linhas_cedidas.add(it[3])
+        itens = [tuple(it) for it in itens if it[0]]
+        if [(it[3], it[4], it[6]) for it in itens] != [(it[3], it[4], "") for it in itens42] \
+                or any(it[1] for it in itens42):
+            # Há linhas lidas de outra forma: a leitura da 4.2, para a garantia
+            blocos42 = parse_gamet(text, _modo42=True, _areas42=areas42)[0]
         else:
-            itens.extend((p, l, k) for k, p in enumerate(partes))
+            itens = itens42         # igual à 4.2, sem custo
 
     state = "IDLE"
     blocks = []
@@ -1721,12 +1851,33 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
     # campo, textos das linhas, nº de blocos ao abrir, área descartada.
     sub = None
 
+    def _area_42(i, span):
+        """Área, superfície e nº de blocos que a 4.2 dava às partes da linha
+        `i` que se sobrepõem a `span`; área None se nenhuma tinha área (4.3)."""
+        def _nu(a, b):
+            t = lines[i][a:b]
+            return a + len(t) - len(t.lstrip()), b - len(t) + len(t.rstrip())
+        a0, b0 = _nu(*span)
+        polys, sups, n = [], set(), 0
+        for (i2, a, b), (p, s, nb) in areas42.items():
+            a2, b2 = _nu(a, b)
+            # Só as partes com blocos: as outras não têm nada a garantir
+            if i2 == i and nb and max(a0, a2) < min(b0, b2):
+                polys.append(p)
+                sups.add(s)
+                n += nb
+        if not polys:
+            return None, "", 0
+        sup = "" if "" in sups else "/".join(
+            x for x in ("COT", "LAN", "MAR") if any(x in s.split("/") for s in sups))
+        return (polys[0] if len(polys) == 1 else _clean_poly(unary_union(polys))), sup, n
+
     def _fechar_sub():
         if (sub is not None and sem_fenomeno is not None and not sub["descartada"]
                 and len(blocks) == sub["n0"]):
             txt = " ".join(t for t in sub["linhas"] if t)
             if not _SEM_CONTEUDO_RE.fullmatch(txt):
-                sem_fenomeno.append(f"{sub['campo']}: {txt}")
+                avisos_pend.append((f"{sub['campo']}: {txt}", sub.get("item")))
 
     def _area_40(comb, conteudo_c, antes):
         """Área que a 4.0 dava à linha inteira (antes da partição por
@@ -1746,8 +1897,54 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
         return p, sup_c
 
     area_40, sup_40 = None, ""
+    sup_ant = (None, "")            # (4.3) (nº da linha, superfície) da parte anterior
 
-    for raw_line, combinada, k_parte in itens:
+    # (4.3) Partes de cada linha: nº de blocos, descartada, texto. Uma linha
+    # partida com uma parte sem fenómeno ("09/11 0800M FG 11/15 BR") não é
+    # lida por inteiro: os blocos dela ficam janela_ambigua (contam sempre no
+    # resto do período) e a parte avisa "Campo não interpretado" — excepto a
+    # parte antes do 1.º corte quando uma parte seguinte tem fenómenos
+    # ("EMBD 10/12 ISOL TS": o EMBD qualifica o que vem a seguir).
+    avisos_pend = []
+    partes_por_linha = defaultdict(list)
+    item_atual = None
+
+    def _fim_item():
+        if item_atual is None:
+            return
+        item_atual["nb"] = len(blocks) - item_atual["n0"]
+        for b in blocks[item_atual["n0"]:]:
+            b.parte = item_atual["txt"]
+
+    def _fim_linha(i):
+        nonlocal current_ambigua
+        partes = partes_por_linha.get(i, [])
+        if _modo42 or not partes:
+            return
+        if i in linhas_cedidas:
+            # "… AGL 11/15 MAR" + "W OF W00800 …": o "11/15 MAR" passou para a
+            # linha seguinte, mas pode ser a continuação desta — o BKN 002 das
+            # 09–11Z conta sempre no resto do período (decisão do Duarte).
+            for b in blocks[partes[0]["n0"]:]:
+                b.janela_ambigua = True
+            current_ambigua = True
+            return
+        if len(partes) < 2:
+            return
+        if any(p["nb"] == 0 and not p["desc"] and not _SEM_CONTEUDO_RE.fullmatch(p["txt"])
+               for p in partes):
+            for b in blocks[partes[0]["n0"]:]:
+                b.janela_ambigua = True
+            current_ambigua = True
+
+    for raw_line, combinada, k_parte, n_linha, span, janela_corte, prefixo in itens:
+
+        _fim_item()
+        if item_atual is not None and item_atual["i"] != n_linha:
+            _fim_linha(item_atual["i"])
+        item_atual = {"i": n_linha, "k": k_parte, "n0": len(blocks), "desc": False,
+                      "txt": raw_line.strip(), "nb": 0}
+        partes_por_linha[n_linha].append(item_atual)
 
         line = raw_line.strip()
         if not line:
@@ -1806,7 +2003,12 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
 
         # Linha partida por "HH/HH MAR|LAN|COT" (4.1): a área da 4.0 para a
         # linha inteira, calculada antes de a 1.ª parte mexer na área.
-        if combinada is None:
+        # Na leitura da 4.3 a garantia é a área que a 4.2 dava às partes da
+        # linha de onde vêm os valores (o prefixo trazido não conta).
+        n42 = 0
+        if not _modo42:
+            area_40, sup_40, n42 = _area_42(n_linha, span) if blocos42 else (None, "", 0)
+        elif combinada is None:
             area_40, sup_40 = None, ""
         elif k_parte == 0:
             conteudo_c = combinada[len(line) - len(content):].strip() if new_state else combinada
@@ -1844,20 +2046,40 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
             # superfície, em TODA a FIR — leitura conservadora, que contém a
             # alternativa "área da subentrada anterior ∩ superfície".
             current_polygon = FIR_POLYGON
+        # (4.3) Parte de uma linha cortada por uma janela só com valores
+        # ("09/11 MAR 0800M FG 13/15 2000M BR"): fica na área da subentrada que
+        # a linha já tinha, com a superfície da parte anterior.
+        so_valores = (janela_corte is not None and not prefixo and new_poly is None
+                      and not (_AREA_INI_RE.match(content) or _DIAGONAL_RE.search(content)
+                               or _CARDINAL_BTN_RE.search(content)
+                               or _JANELA_SUP_RE.match(content)))
 
         # Subentrada nova (3.9): a linha abre o campo ou traz qualificador
-        # geográfico; senão continua a subentrada anterior.
-        if new_state or sub is None or new_poly is not None or (
+        # geográfico; senão continua a subentrada anterior. Desde a 4.3 também
+        # cada parte cortada por uma janela a meio da linha.
+        if new_state or sub is None or new_poly is not None or janela_corte is not None or (
                 _AREA_INI_RE.match(content) or _DIAGONAL_RE.search(content)
                 or _CARDINAL_BTN_RE.search(content) or _JANELA_SUP_RE.match(content)):
+            # (4.3, decisão do Duarte a 28-out-2026; revisor) Parte que abre
+            # com "HH/HH SUP" + qualificador geográfico ("11/15 MAR WI …",
+            # "11/15 MAR N PART …", "11/15 MAR W OF …" cedido à linha
+            # seguinte): o "HH/HH SUP" pode ser a continuação da subentrada
+            # anterior — os blocos dela (toda a subentrada) contam sempre no
+            # resto do período.
+            msq = _JANELA_SUP_RE.match(content) if janela_corte is not None else None
+            if (msq and sub is not None and _AREA_INI_RE.match(
+                    re.sub(r"^\s*(?:AND\s+)?", "", content[msq.end():]))):
+                for b in blocks[sub["n0"]:]:
+                    b.janela_ambigua = True
             _fechar_sub()
             sub = {"campo": campo_txt, "linhas": [], "n0": len(blocks),
-                   "descartada": False}
+                   "descartada": False, "item": item_atual}
         sub["linhas"].append(content)
 
         poly = current_polygon
         if poly is not None and poly.is_empty and area_40 is None:
             sub["descartada"] = True
+            item_atual["desc"] = True
             continue  # fenómeno sem área aplicável dentro da FIR
 
         # ---- Qualificador local ----
@@ -1875,6 +2097,9 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
         superficies = [s for s in ("COT", "LAN", "MAR")
                        if re.search(rf"\b{s}\b", content)]
         surface = "/".join(superficies)
+        if so_valores and not surface and sup_ant[0] == n_linha:
+            surface = sup_ant[1]
+        sup_ant = (n_linha, surface)
 
         # Recortar a área pelo qualificador de superfície. Antes isto era
         # apenas anotado no briefing, por falta de linha de costa; com a
@@ -1894,15 +2119,38 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
         if poly.is_empty:
             # O fenómeno não tem área aplicável dentro da FIR
             sub["descartada"] = True
+            item_atual["desc"] = True
             continue
+        if _areas42 is not None:
+            _areas42[(n_linha,) + tuple(span)] = [poly, surface, len(blocks)]
 
         # ---- Janela temporal (HH/HH) ----
         # Um fenómeno pode aplicar-se só a parte do período do GAMET
         # (ex.: "TURB:11/15 ..." num GAMET válido 0900/1500).
         wm = re.search(r"(?:^|\s)(\d{2})/(\d{2})(?=\s|$)", content[:24])
-        if wm:
+        if not _modo42:
+            # (4.3) O mesmo critério de _cortes_janela: a janela da parte é a
+            # 1.ª "HH/HH" válida (até 24, sem unidade a seguir) que só tem
+            # área, superfície, LCA ou janelas antes — também depois de uma
+            # área comprida ("N OF N4000 AND W OF W00800 11/15 MAR BKN …").
+            # Outra qualquer ("SEV 05/10 FL", "0800M FG 13/15") não é janela
+            # e deixa o bloco janela_ambigua (ver abaixo).
+            wm = None
+            for m1 in re.finditer(r"(?:^|\s)(\d{2})/(\d{2})(?=\s|$)", content):
+                if not all(_SO_AREA_TOK_RE.fullmatch(t)
+                           for t in re.findall(r"[^\s:,;.=]+", content[:m1.start()])):
+                    break
+                if (int(m1.group(1)) <= 24 and int(m1.group(2)) <= 24
+                        and not _NAO_JANELA_RE.match(content, m1.end())):
+                    wm = m1
+                break
+        if janela_corte is not None:
+            # (4.3) Parte que começa pela janela que a cortou (até 24)
+            current_window = f"{janela_corte[0]:02d}–{janela_corte[1]:02d}Z"
+            current_ambigua = False
+        elif wm:
             h1, h2 = int(wm.group(1)), int(wm.group(2))
-            if h1 <= 23 and h2 <= 23:
+            if h1 <= 23 and h2 <= 23 or not _modo42:
                 current_window = f"{h1:02d}–{h2:02d}Z"
                 current_ambigua = False
         elif _qual_ini.match(content):
@@ -2174,6 +2422,29 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
                 blocks.append(MetBlock(state, poly, valor, qualifier, surface=surface, window=window, janela_ambigua=ambigua))
 
     _fechar_sub()
+    _fim_item()
+    if item_atual is not None:
+        _fim_linha(item_atual["i"])
+    for txt, it in avisos_pend:
+        if (not _modo42 and it is not None and it["k"] == 0
+                and any(p["nb"] for p in partes_por_linha[it["i"]][1:])):
+            continue    # "EMBD 10/12 ISOL TS": qualifica a parte seguinte
+        sem_fenomeno.append(txt)
+    if _areas42 is not None:            # nº de blocos de cada parte (4.3)
+        chaves = list(_areas42)
+        for j, ch in enumerate(chaves):
+            fim_j = _areas42[chaves[j + 1]][2] if j + 1 < len(chaves) else len(blocks)
+            _areas42[ch][2] = fim_j - _areas42[ch][2]
+
+    # (4.3) Garantia: cada bloco da leitura da 4.2 tem um bloco novo tão severo,
+    # com área que o contém (a união com _area_42 trata quase todos). Um que
+    # não tenha (ex.: "ISOL TS 13/15 EMBD …", em que o EMBD da linha inteira
+    # mudava o TS) entra tal como a 4.2 o lia, e conta sempre no resto do
+    # período (janela_ambigua).
+    for v in blocos42:
+        if not any(_domina(n, v) for n in blocks):
+            v.janela_ambigua = True
+            blocks.append(v)
 
     # ---- Extração Secção II: FZLVL, QNH e vento ----
     fzlvl_values = [int(m) for m in re.findall(r"(\d{4,5})FT\s+AMSL", secn2)]
@@ -3989,8 +4260,13 @@ def resto_do_periodo(blocos_gamet, outros_blocos, ini, fim, agora):
     """
     if ini is None or fim is None or agora is None or not (ini <= agora < fim):
         return None
+    def _dentro(b):
+        # (4.3) Uma janela que não cai dentro da validade ("21/24" num GAMET
+        # 0900/1500) nunca é ignorada: o dia a que se refere é incerto.
+        iv = janela_intervalo(b.window, ini)
+        return iv is not None and ini <= iv[0] and iv[1] <= fim
     ignorados = [b for b in blocos_gamet
-                 if b.window and not b.janela_ambigua
+                 if b.window and not b.janela_ambigua and _dentro(b)
                  and window_status(b.window, ini, agora - _RESTO_MARGEM) == "já terminou"]
     if not ignorados:
         return None

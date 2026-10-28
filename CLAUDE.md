@@ -110,7 +110,59 @@ Três pormenores que já causaram erros reais:
   leitura literal; a confirmar com o Duarte se aparecer). No GAMET real a união
   não acrescenta nada. Testado contra o motor da 4.0
   (`tests/referencia/app_4_0.py`, `test_v41.py`): arquivo a 28-out-2026, 0 mais
-  permissivas, 37 mais severas (todas no 270900).
+  permissivas, 37 mais severas (todas no 270900). Desde a 4.3 é um caso
+  particular da regra seguinte (a partição da 4.1 só serve a leitura da 4.2,
+  que é a garantia).
+- **Janela a meio da linha abre sempre subentrada** (4.3, pedido do Duarte a
+  28-out-2026). Até à 4.2 ficavam dois defeitos (iguais à 4.0, sem casos no
+  arquivo): `09/11 N OF N4000 BKN 002/006HFT AGL 11/15 MAR` (no fim da linha ou
+  seguido de qualificador) recortava a 1.ª subentrada pelo MAR — a base de
+  200 ft deixava de contar em terra (**optimista**); e em `09/11 0800M FG 13/15
+  2000M BR` o 2000M ficava 09–11Z. `_cortes_janela` parte a linha antes de
+  cada `HH/HH` (00–24) entre espaços, sem unidade a seguir (`002/006HFT`,
+  `06/ 090HFT`, `260/009KT`, `20/24 KT`, `SFC/FL050` não são janelas), que não
+  está no fim da linha e que vem depois de conteúdo do campo — não parte se
+  antes só há nome do campo, área, superfície, LCA ou janelas (`N OF N4000
+  11/15 BKN …` e `LCA 09/11 …` ficam; a janela depois de uma área comprida é
+  lida mesmo para lá dos 24 caracteres). A parte nova tem a sua janela e a
+  área do que vem a seguir: superfície → a superfície em toda a FIR (leitura
+  A); qualificador → essa área; só valores → a área da subentrada que a linha
+  já tinha, **com a superfície da parte anterior** (`09/11 MAR 0800M FG 13/15
+  2000M BR` → o 2000M fica no MAR, como na 4.2; confirmado pelo Duarte a
+  28-out-2026). LCA não passa de
+  uma parte para a outra. Um `HH/HH MAR` que fica sozinho no fim da linha passa
+  para o início da seguinte se ela abrir com qualificador (`… AGL 11/15 MAR` +
+  `W OF W00800 BKN …`), como área e janela dela; os blocos da linha de onde
+  saiu (o BKN 002 das 09–11Z) ficam `janela_ambigua` e contam sempre no resto
+  do período — leitura conservadora, decisão do Duarte a 28-out-2026. O mesmo
+  vale sempre que uma parte abre com `HH/HH SUP` + qualificador geográfico
+  (`_AREA_INI_RE`: `WI …`, coordenadas, `WI 30NM OF …`, `ENTIRE FIR`, `N PART`,
+  `ALONG`, diagonais, `N/S/E/W OF`, `BTN`), na mesma linha ou cedida à
+  seguinte: os blocos de **toda a subentrada anterior** (também a linha que a
+  abre, se a que cede é de continuação) ficam `janela_ambigua` (revisor).
+  **Parte sem fenómeno** (revisor da 4.3: `09/11 0800M FG 11/15 BR`, `11/15
+  BKN`, `11/15 OCNL`, `HH/HH MAR` sozinho no fim): a linha não foi lida por
+  inteiro — **todos os blocos dela ficam `janela_ambigua`** (contam sempre no
+  resto do período; também as linhas de continuação) e a parte avisa "Campo não
+  interpretado" (regra da 3.9). Excepções: parte só `NIL`; e o texto **antes do
+  1.º corte** quando uma parte seguinte tem fenómenos (`EMBD 10/12 ISOL TS`,
+  `ISOL 10/12 EMBD TCU/CB …`: qualifica o que vem a seguir — não avisa, mas a
+  linha fica ambígua). A janela de cada parte usa o **mesmo critério** de
+  `_cortes_janela`: a 1.ª `HH/HH` válida (até 24, sem unidade) com só área,
+  superfície, LCA ou janelas antes; outra qualquer (`SEV 05/10 FL`, `0800M FG
+  13/15`) não é janela e o bloco fica `janela_ambigua`. Só no arquivo muda o
+  `TURB:21/24 …` do 232100/240300 (a 4.2 só lia até 23; TURB MOD, informativo).
+  `MetBlock.parte` guarda o texto da parte (diagnóstico e testes).
+  Garantia contra a 4.2: `parse_gamet(_modo42=True)` corre a leitura da 4.2
+  (só quando alguma linha é lida de outra forma) e regista a área de cada
+  parte; cada parte nova é **unida com a área das partes da 4.2 de onde vêm
+  os seus valores** (`_area_42`), e um bloco da 4.2 sem bloco novo tão severo
+  que o contenha (`_domina`; ex.: `ISOL TCU/CB … 13/15 EMBD …`, em que o EMBD
+  da linha inteira fazia ISOL_EMBD) entra tal como a 4.2 o lia, com
+  `janela_ambigua`. Uma parte cortada de uma linha em que a 4.2 leu fenómenos
+  não avisa "Campo não interpretado" (como na 4.2: basta um fenómeno na
+  subentrada). Testado contra o motor da 4.2 (`tests/referencia/app_4_2.py`,
+  `test_v43.py`): arquivo a 28-out-2026 (57 GAMETs) igual, 0 mais permissivas.
 - Uma fatia pequena (< 1,5%) só se funde numa vizinha da mesma decisão se os
   motivos dela já estiverem na vizinha (3.2); senão fica cartão próprio. Antes,
   os motivos da fatia passavam para a região inteira.
@@ -308,8 +360,15 @@ segunda decisão, só informativa, de agora até ao fim da validade: as mesmas
 terminou há mais de **1 h** (`_RESTO_MARGEM`, decisão do Duarte a 28-out-2026:
 `09/11` só deixa de contar às 12:00, para nevoeiro que levante tarde). Contam sempre: os sem janela, os
 activos, os que ainda não começaram, SIGMET/AIRMET, e os de uma linha com
-**outra janela** (`MetBlock.janela_ambigua`: em `09/11 0800M FG 13/15 2000M BR`
-o parser dá 09–11Z aos dois valores; ignorar o 2000M seria optimista).
+**outra janela** (`MetBlock.janela_ambigua`: até à 4.2, em `09/11 0800M FG 13/15
+2000M BR` o parser dava 09–11Z aos dois valores; ignorar o 2000M seria
+optimista). Desde a 4.3 essa linha é partida (ver "Janela a meio da linha") e
+`janela_ambigua` fica False; o campo continua a proteger o que ainda é ambíguo
+(janela no fim da linha, duas janelas seguidas, número que não é janela, linha
+com uma parte sem fenómeno, blocos da 4.2 repostos pela garantia). Desde a 4.3
+uma janela que **não cai dentro da validade** (`21/24` num GAMET 0900/1500;
+`janela_intervalo`) nunca é ignorada — até à 4.2 o dia mais próximo podia
+ser a véspera e o bloco saía do resto.
 `analisar_gamet` devolve `r["resto"]` (None fora da validade ou se nenhuma
 janela terminou; senão `janela`, `decisao`, `regioes`, `por_regiao`,
 `ignorados`); `resto_par()` dá (janela, decisão) global, por região (a pior das
@@ -346,7 +405,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-1758 testes (com a NiceGUI instalada; sem ela, os do `test_nicegui.py` saltam). Devem passar a 100%.
+1867 testes (com a NiceGUI instalada; sem ela, os do `test_nicegui.py` saltam). Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -428,13 +487,41 @@ python3 -m pytest
   aviso "Campo não interpretado" novo. Outras sementes: `GAMET_SEMENTE=n`
 - `tests/test_v42.py` — resto do período (GAMET real 280900: 10:00Z sem linha,
   12:30Z resto GO a N de N3730 com o principal MARGINAL, 16:00Z/08:30Z sem
-  linha; margem de 1 h: nada antes das 12:00, 270900 LPPT nunca GO às 11:05/11:55); bloco sem janela, que ainda não começou ou activo conta; duas janelas
-  na mesma linha contam sempre; SIGMET (GAMET e IPMA) e AIRMET contam; linha
+  linha; margem de 1 h: nada antes das 12:00, 270900 LPPT nunca GO às 11:05/11:55); bloco sem janela, que ainda não começou ou activo conta; janela
+  ambígua (no fim da linha, duas seguidas) conta sempre; SIGMET (GAMET e IPMA) e AIRMET contam; linha
   escapada e nunca mais severa; contra o motor da **4.1**
   (`tests/referencia/app_4_1.py`, cópia fixa do `app.py` do main eb52a15; não
   editar): todo o arquivo a 6 horas (manual e `arquivo_hist`), regiões, avisos e
   faixa idênticos, resto nunca mais severo (global, região, 52 aeródromos);
   Streamlit e NiceGUI mostram a linha
+- `tests/test_v43.py` — janela a meio da linha abre subentrada: `… AGL 11/15
+  MAR` no fim (LPBG/LPVR/LPCH/LPVZ/LPMU/LPPR → NO-GO, na 4.2 GO em terra),
+  seguido de qualificador ou coordenadas, todas as superfícies, AND; valores com
+  janelas diferentes (`09/11 0800M FG 13/15 2000M BR`: janelas próprias,
+  `janela_ambigua` False, às 12:30 o resto ignora o 0800M e conta o 2000M →
+  MARGINAL), herança de área/superfície, LCA, `21/24`, continuação, todos os
+  campos; garantia (`ISOL TCU/CB … 13/15 EMBD …`, `ISOL TS 13/15 OCNL`); casos
+  iguais à 4.2; falsos positivos de janela (bases, `06/ 090HFT`, vento, `SFC/FL`,
+  `ABV FL`, horas > 24); Secção II; AIRMET sintético igual; MT OBSC/VA; contra o
+  motor da **4.2** (`tests/referencia/app_4_2.py`, cópia fixa do `app.py` do
+  main 597a70d; não editar): todo o arquivo (blocos, decisões, avisos, Secção
+  II, análise completa e resto a 3 horas, manual e `arquivo_hist`) e 300
+  subentradas geradas, nos 52 aeródromos e numa grelha de 0,3° nunca mais
+  permissivo, nenhum bloco da 4.2 com menos área, nenhum aviso "Campo não
+  interpretado" novo, resto nunca mais severo do que a principal. Outras
+  sementes: `GAMET_SEMENTE=n GAMET_CASOS=400`. Revisão (casos do revisor,
+  `fuzz43.py`/`silencio.py`): parte sem fenómeno → aviso e blocos da linha
+  ambíguos (às 12:30 nunca "Resto: GO"), parte inicial que qualifica a
+  seguinte sem aviso, janela fora da validade nunca ignorada, janela da parte
+  com o critério dos cortes; **resto contra o da 4.2** em todo o arquivo
+  (estrito: nunca menos severo) e nos casos gerados a várias horas — só menos
+  severo quando todos os blocos ignorados vêm de uma parte com janela própria
+  (verificado no teste a partir de `MetBlock.parte`); linhas geradas com partes
+  sem fenómeno: nunca menos severo. Um aviso novo só numa parte sem fenómeno
+  Linha que cede o `HH/HH SUP` à seguinte (`… AGL 11/15 MAR` + `W OF W00800 …`,
+  12:30/13:00/14:00): o BKN 002 nunca é ignorado no resto, sem avisos novos
+  — e as 7 variantes de qualificador depois de `11/15 MAR` na mesma linha, mais a
+  subentrada inteira (linha de continuação), a 12:30 e 14:00 contra a 4.2
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva
