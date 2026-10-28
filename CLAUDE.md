@@ -128,10 +128,13 @@ Três pormenores que já causaram erros reais:
   área do que vem a seguir: superfície → a superfície em toda a FIR (leitura
   A); qualificador → essa área; só valores → a área da subentrada que a linha
   já tinha, **com a superfície da parte anterior** (`09/11 MAR 0800M FG 13/15
-  2000M BR` → o 2000M fica no MAR, como na 4.2; a confirmar). LCA não passa de
+  2000M BR` → o 2000M fica no MAR, como na 4.2; confirmado pelo Duarte a
+  28-out-2026). LCA não passa de
   uma parte para a outra. Um `HH/HH MAR` que fica sozinho no fim da linha passa
   para o início da seguinte se ela abrir com qualificador (`… AGL 11/15 MAR` +
-  `W OF W00800 BKN …`).
+  `W OF W00800 BKN …`), como área e janela dela; os blocos da linha de onde
+  saiu (o BKN 002 das 09–11Z) ficam `janela_ambigua` e contam sempre no resto
+  do período — leitura conservadora, decisão do Duarte a 28-out-2026.
   **Parte sem fenómeno** (revisor da 4.3: `09/11 0800M FG 11/15 BR`, `11/15
   BKN`, `11/15 OCNL`, `HH/HH MAR` sozinho no fim): a linha não foi lida por
   inteiro — **todos os blocos dela ficam `janela_ambigua`** (contam sempre no
@@ -397,7 +400,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-1855 testes (com a NiceGUI instalada; sem ela, os do `test_nicegui.py` saltam). Devem passar a 100%.
+1856 testes (com a NiceGUI instalada; sem ela, os do `test_nicegui.py` saltam). Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -510,6 +513,8 @@ python3 -m pytest
   severo quando todos os blocos ignorados vêm de uma parte com janela própria
   (verificado no teste a partir de `MetBlock.parte`); linhas geradas com partes
   sem fenómeno: nunca menos severo. Um aviso novo só numa parte sem fenómeno
+  Linha que cede o `HH/HH SUP` à seguinte (`… AGL 11/15 MAR` + `W OF W00800 …`,
+  12:30/13:00/14:00): o BKN 002 nunca é ignorado no resto, sem avisos novos
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva

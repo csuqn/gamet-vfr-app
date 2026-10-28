@@ -340,6 +340,34 @@ def test_caso1b_superficie_e_qualificador(eng, eng42):
     assert eng.subentradas_sem_area(_g(CASO1B)) == []
 
 
+def test_caso1b_linha_que_cede_a_superficie_conta_sempre_no_resto(eng, eng42):
+    """Decisão do Duarte (28-out-2026), leitura conservadora: o "11/15 MAR"
+    passa para a linha seguinte (área e janela dela), mas o BKN 002 das 09–11Z
+    da linha de onde saiu fica janela_ambigua — o resto nunca o ignora."""
+    t = _g(CASO1B)
+    bl, *_ = eng.parse_gamet(t)
+    b200, b400 = _so(bl, "BASE_AGL", 200), _so(bl, "BASE_AGL", 400)
+    assert b200.window == "09–11Z" and b200.janela_ambigua
+    assert b400.window == "11–15Z" and not b400.janela_ambigua
+    novo, antigo = _comparar(eng, eng42, t, grelha=True)
+    assert eng.campos_nao_interpretados(t) == eng42.campos_nao_interpretados(t) == []
+    assert eng.subentradas_sem_area(t) == eng42.subentradas_sem_area(t) == []
+    principal = None
+    for agora in (_t(12, 30), _t(13, 0), _t(14, 0)):
+        r = eng.analisar_gamet(t, agora=agora)
+        ignorados = (r["resto"] or {}).get("ignorados", [])
+        assert all(not (b.phenomenon == "BASE_AGL" and b.value == 200) for b in ignorados)
+        # A decisão principal não muda com a hora e é igual à da 4.2 ou pior
+        dec = [g["decision"] for g in r["regioes"]]
+        principal = principal or dec
+        assert dec == principal
+        for nome, (la, lo) in eng.AERODROMES.items():
+            if b200.polygon.contains(Point(lo, la)):
+                assert _resto_ponto(eng, r, la, lo) == "NO-GO", (nome, f"{agora:%H:%M}")
+        _resto_contra_42(eng, eng42, t, agora, CASO1B, estrito=True)
+        assert r["avisos"] == eng42.analisar_gamet(t, agora=agora)["avisos"]
+
+
 def test_caso1_superficie_e_coordenadas(eng, eng42):
     corpo = ("SIG CLD:09/11 N OF N4000 BKN 002/006HFT AGL 11/15 MAR WI N4000 W00900 - "
              "N4000 W00800 - N3900 W00800 - N3900 W00900 - N4000 W00900 BKN 004/008HFT AGL")

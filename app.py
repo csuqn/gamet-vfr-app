@@ -1810,6 +1810,9 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
     # qualificador ("… AGL 11/15 MAR" + "W OF W00800 BKN …"), como a janela
     # sozinha acima.
     blocos42, areas42 = [], {}
+    # (4.3, decisão do Duarte a 28-out-2026) Linhas que cederam um "HH/HH SUP"
+    # à seguinte: os blocos delas ficam janela_ambigua (leitura conservadora).
+    linhas_cedidas = set()
     if _modo42:
         itens = itens42
     else:
@@ -1828,6 +1831,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
                     and nx[3] == it[3] + 1 and _qual_ini.match(nx[0])):
                 nx[0], nx[5], nx[6] = f"{it[0]} {nx[0]}", it[5], it[0]
                 it[0] = ""
+                linhas_cedidas.add(it[3])
         itens = [tuple(it) for it in itens if it[0]]
         if [(it[3], it[4], it[6]) for it in itens] != [(it[3], it[4], "") for it in itens42] \
                 or any(it[1] for it in itens42):
@@ -1915,7 +1919,17 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
     def _fim_linha(i):
         nonlocal current_ambigua
         partes = partes_por_linha.get(i, [])
-        if _modo42 or len(partes) < 2:
+        if _modo42 or not partes:
+            return
+        if i in linhas_cedidas:
+            # "… AGL 11/15 MAR" + "W OF W00800 …": o "11/15 MAR" passou para a
+            # linha seguinte, mas pode ser a continuação desta — o BKN 002 das
+            # 09–11Z conta sempre no resto do período (decisão do Duarte).
+            for b in blocks[partes[0]["n0"]:]:
+                b.janela_ambigua = True
+            current_ambigua = True
+            return
+        if len(partes) < 2:
             return
         if any(p["nb"] == 0 and not p["desc"] and not _SEM_CONTEUDO_RE.fullmatch(p["txt"])
                for p in partes):
