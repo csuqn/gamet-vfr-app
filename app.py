@@ -29,7 +29,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "4.0"
+APP_VERSION = "4.1"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -1568,6 +1568,48 @@ def campos_nao_interpretados(text):
 # Conteúdo que não pede fenómeno: vazio, só pontuação, só a janela ou NIL.
 _SEM_CONTEUDO_RE = re.compile(r"[\W_]*(?:\d{2}/\d{2}[\W_]*)?(?:NIL[\W_]*)?")
 
+# Janela seguida de superfície (4.1): "11/15 MAR AND COT …" abre uma subentrada
+# nova (GAMET real 270900/271500). Até à 4.0 ficava na linha da subentrada
+# anterior: a linha inteira era recortada por MAR∪COT e a janela perdia-se.
+_SUP_SEQ = r"(?:MAR|LAN|COT)\b(?:\s+(?:AND\s+)?(?:MAR|LAN|COT)\b)*+"
+_JANELA_SUP_RE = re.compile(r"(\d{2})/(\d{2})\s+" + _SUP_SEQ)
+_JANELA_SUP_MEIO_RE = re.compile(r"(?<=\w)\s+(?=(\d{2})/(\d{2})\s+" + _SUP_SEQ + r")")
+_CAMPO_INI_RE = re.compile(
+    r"(?:SFC\s+VIS|SIG\s+VIS|VIS|SIG\s+CLD|CLD|SIGWX|TURB|ICE|MT\s+OBSC|SFC\s+WSPD|MTW|VA)\s*:?\s*")
+# Depois da superfície vem um qualificador geográfico ou outra janela: não se
+# parte (fica como na 4.0).
+_DEPOIS_SUP_QUAL_RE = re.compile(
+    r"\s*(?:(?:AND\s*)?$|\d{2}/\d{2}\b|(?:[NS][EW]?|[EW])\s+(?:OF|PART)\b|(?:[NSEW]\s+)?BTN\b|WI\b"
+    r"|ALONG\b|ENTIRE\b|[NS]\d{4}\b|[WE]\d{5}\b)")
+
+
+def _partir_janela_superficie(linha):
+    """
+    Parte a linha antes de cada "HH/HH MAR|LAN|COT [[AND] …]" que não a abre
+    (4.1). Não parte se o que vem antes é só o nome do campo, nem se depois da
+    superfície vem um qualificador geográfico, outra janela ou o fim da linha.
+    Devolve a lista de partes (uma só se não partiu).
+    """
+    cortes = []
+    for m in _JANELA_SUP_MEIO_RE.finditer(linha):
+        h1, h2 = int(m.group(1)), int(m.group(2))
+        if h1 > 23 or h2 > 23:
+            continue
+        if _CAMPO_INI_RE.fullmatch(linha[:m.start()]):
+            continue
+        fim_sup = _JANELA_SUP_RE.match(linha, m.end()).end()
+        if _DEPOIS_SUP_QUAL_RE.match(linha, fim_sup):
+            continue
+        cortes.append((m.start(), m.end()))
+    if not cortes:
+        return [linha]
+    partes, ini = [], 0
+    for a, b in cortes:
+        partes.append(linha[ini:a].strip())
+        ini = b
+    partes.append(linha[ini:].strip())
+    return [p for p in partes if p]
+
 
 def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
 
@@ -1651,6 +1693,17 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
             lines[i] = lines[i][:mj.start()].rstrip()
             lines[i + 1] = f"{mj.group(1)} {lines[i + 1]}"
 
+    # "HH/HH MAR|LAN|COT" no meio da linha abre uma subentrada nova (4.1).
+    # Cada parte leva a linha inteira (a leitura da 4.0), para que a sua área
+    # nunca fique menor do que a que a 4.0 dava à linha toda.
+    itens = []
+    for l in lines:
+        partes = _partir_janela_superficie(l)
+        if len(partes) == 1:
+            itens.append((l, None, 0))
+        else:
+            itens.extend((p, l, k) for k, p in enumerate(partes))
+
     state = "IDLE"
     blocks = []
     current_polygon = FIR_POLYGON
@@ -1668,7 +1721,26 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
             if not _SEM_CONTEUDO_RE.fullmatch(txt):
                 sem_fenomeno.append(f"{sub['campo']}: {txt}")
 
-    for raw_line in lines:
+    def _area_40(comb, conteudo_c, antes):
+        """Área que a 4.0 dava à linha inteira (antes da partição por
+        "HH/HH MAR|LAN|COT"), e a sua superfície; None se vazia."""
+        p = extract_polygon(comb)
+        if p is None:
+            p = (FIR_POLYGON if (_AREA_INI_RE.match(conteudo_c) or _DIAGONAL_RE.search(conteudo_c)
+                                 or _CARDINAL_BTN_RE.search(conteudo_c)) else antes)
+        if p is None or p.is_empty:
+            return None, ""
+        sup_c = "/".join(s for s in ("COT", "LAN", "MAR") if re.search(rf"\b{s}\b", conteudo_c))
+        sp_c = surface_polygon(sup_c)
+        if sp_c is not None:
+            p = _clean_poly(p.intersection(sp_c))
+            if p.is_empty:
+                return None, ""
+        return p, sup_c
+
+    area_40, sup_40 = None, ""
+
+    for raw_line, combinada, k_parte in itens:
 
         line = raw_line.strip()
         if not line:
@@ -1724,6 +1796,14 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
         if state == "IDLE":
             continue
 
+        # Linha partida por "HH/HH MAR|LAN|COT" (4.1): a área da 4.0 para a
+        # linha inteira, calculada antes de a 1.ª parte mexer na área.
+        if combinada is None:
+            area_40, sup_40 = None, ""
+        elif k_parte == 0:
+            conteudo_c = combinada[len(line) - len(content):].strip() if new_state else combinada
+            area_40, sup_40 = _area_40(combinada, conteudo_c, current_polygon)
+
         # ---- Contexto geográfico ----
         # Um qualificador geográfico que caia fora dos limites da FIR
         # (ex.: "N OF N4200", quando a FIR termina em N41°54') produz um
@@ -1751,19 +1831,24 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
             current_polygon = FIR_POLYGON
             if sem_area is not None and not _ENTIRE_FIR_RE.match(content):
                 sem_area.append(f"{campo_txt}: {content}")
+        elif not new_state and _JANELA_SUP_RE.match(content):
+            # "11/15 MAR AND COT …" (4.1): subentrada nova, só com a
+            # superfície, em TODA a FIR — leitura conservadora, que contém a
+            # alternativa "área da subentrada anterior ∩ superfície".
+            current_polygon = FIR_POLYGON
 
         # Subentrada nova (3.9): a linha abre o campo ou traz qualificador
         # geográfico; senão continua a subentrada anterior.
         if new_state or sub is None or new_poly is not None or (
                 _AREA_INI_RE.match(content) or _DIAGONAL_RE.search(content)
-                or _CARDINAL_BTN_RE.search(content)):
+                or _CARDINAL_BTN_RE.search(content) or _JANELA_SUP_RE.match(content)):
             _fechar_sub()
             sub = {"campo": campo_txt, "linhas": [], "n0": len(blocks),
                    "descartada": False}
         sub["linhas"].append(content)
 
         poly = current_polygon
-        if poly is not None and poly.is_empty:
+        if poly is not None and poly.is_empty and area_40 is None:
             sub["descartada"] = True
             continue  # fenómeno sem área aplicável dentro da FIR
 
@@ -1790,12 +1875,18 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
         if surface:
             sp = surface_polygon(surface)
             if sp is not None:
-                recortado = _clean_poly(poly.intersection(sp))
-                if recortado.is_empty:
-                    # O fenómeno não tem área aplicável dentro da FIR
-                    sub["descartada"] = True
-                    continue
-                poly = recortado
+                poly = _clean_poly(poly.intersection(sp))
+
+        # Parte de uma linha partida por "HH/HH MAR|LAN|COT" (4.1): nunca com
+        # menos área do que a 4.0 dava à linha inteira (ex.: "09/11 MAR …
+        # 11/15 LAN …" — a 4.0 punha as duas em MAR∪LAN).
+        if area_40 is not None and not poly.buffer(1e-9).contains(area_40):
+            poly = _clean_poly(unary_union([poly, area_40])) if not poly.is_empty else area_40
+            surface = sup_40
+        if poly.is_empty:
+            # O fenómeno não tem área aplicável dentro da FIR
+            sub["descartada"] = True
+            continue
 
         # ---- Janela temporal (HH/HH) ----
         # Um fenómeno pode aplicar-se só a parte do período do GAMET

@@ -91,6 +91,25 @@ Três pormenores que já causaram erros reais:
 - Qualificadores seguidos, com ou sem AND (`BTN N3840 AND N4100 E OF W00800`),
   são uma só área (2.3). A janela `HH/HH` pertence à subentrada que vem a
   seguir; uma subentrada sem janela vale para todo o período.
+- **Janela seguida de superfície abre subentrada** (`… FG/BR 11/15 MAR AND COT
+  LCA 0400-5000M`, GAMET real 270900/271500; 4.1). Até à 4.0 o `11/15 MAR AND
+  COT` ficava na linha da subentrada `09/11 W OF W00715`: a linha inteira era
+  recortada por MAR∪COT e a janela 11/15 perdia-se (VIS 200 m e base 100 ft só
+  no mar e na costa → 37 pontos do interior em GO, sem aviso).
+  `_partir_janela_superficie` parte a linha antes de cada `HH/HH MAR|LAN|COT`
+  (com ou sem AND entre superfícies), excepto se o que está antes é só o nome
+  do campo, ou se depois da superfície vem o fim da linha, outra janela ou um
+  qualificador geográfico (fica como na 4.0). A 1.ª parte fica com a sua área
+  inteira (sem recorte) e a sua janela; cada parte `HH/HH SUP` tem a sua janela
+  e a superfície em **toda a FIR** — escolha conservadora: contém a alternativa
+  "área da subentrada anterior ∩ superfície". Cada parte é ainda **unida com a
+  área que a 4.0 dava à linha inteira** (`_area_40`), para nunca ser mais
+  permissiva: com superfície também na 1.ª parte (`09/11 MAR … 11/15 LAN …`)
+  as duas ficam em MAR∪LAN dessa área, como na 4.0 (mais severo do que a
+  leitura literal; a confirmar com o Duarte se aparecer). No GAMET real a união
+  não acrescenta nada. Testado contra o motor da 4.0
+  (`tests/referencia/app_4_0.py`, `test_v41.py`): arquivo a 28-out-2026, 0 mais
+  permissivas, 37 mais severas (todas no 270900).
 - Uma fatia pequena (< 1,5%) só se funde numa vizinha da mesma decisão se os
   motivos dela já estiverem na vizinha (3.2); senão fica cartão próprio. Antes,
   os motivos da fatia passavam para a região inteira.
@@ -307,7 +326,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-1712 testes (com a NiceGUI instalada; sem ela, os do `test_nicegui.py` saltam). Devem passar a 100%.
+1736 testes (com a NiceGUI instalada; sem ela, os do `test_nicegui.py` saltam). Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -379,6 +398,14 @@ python3 -m pytest
   `HH/`, TCU/CB, LCA, AGL/AMSL, áreas). Nos 52 aeródromos nunca mais
   permissivo, e nenhuma base da 3.10 perdida. Outras sementes:
   `GAMET_SEMENTE=n GAMET_CASOS=400 python3 -m pytest tests/test_v40_contra_310.py`
+- `tests/test_v41.py` — `HH/HH` + MAR/LAN/COT abre subentrada (GAMET real
+  270900: LPPT/LPCO/LPEV/LPCB/LPCH/LPBJ → NO-GO, LPBG/LPMI/LPMU/LP66 → GO,
+  blocos 11–15Z só em MAR∪COT de toda a FIR, janelas; Secção II; casos que
+  ficam como na 4.0; três partes) e contra o motor da **4.0**
+  (`tests/referencia/app_4_0.py`, cópia fixa do `app.py` do main c37fba3; não
+  editar): todo o arquivo (salta sem `dados/`) e 300 subentradas geradas, nos 52
+  aeródromos nunca mais permissivo, nenhum bloco da 4.0 com menos área, nenhum
+  aviso "Campo não interpretado" novo. Outras sementes: `GAMET_SEMENTE=n`
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva
