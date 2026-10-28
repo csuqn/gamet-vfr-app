@@ -300,6 +300,25 @@ mesma linha, uma ilegível). Caso real: GAMET 201500/202100 até à 3.6
 (`MT OBSC: N OF N4100 LAN S OF N3800 LAN`) só avisava; desde a 3.10 gera bloco
 (ver abaixo) e deixa de avisar.
 
+**Resto do período (4.2, pedido do Duarte a 28-out-2026).** A janela `HH/HH`
+continua a **não** mudar a decisão principal: veredicto, cores e regiões são o
+pior caso de todo o período (iguais à 4.1). `resto_do_periodo()` calcula uma
+segunda decisão, só informativa, de agora até ao fim da validade: as mesmas
+`compute_dynamic_regions`/`decision()` sem os blocos do GAMET cuja janela já
+terminou há mais de **1 h** (`_RESTO_MARGEM`, decisão do Duarte a 28-out-2026:
+`09/11` só deixa de contar às 12:00, para nevoeiro que levante tarde). Contam sempre: os sem janela, os
+activos, os que ainda não começaram, SIGMET/AIRMET, e os de uma linha com
+**outra janela** (`MetBlock.janela_ambigua`: em `09/11 0800M FG 13/15 2000M BR`
+o parser dá 09–11Z aos dois valores; ignorar o 2000M seria optimista).
+`analisar_gamet` devolve `r["resto"]` (None fora da validade ou se nenhuma
+janela terminou; senão `janela`, `decisao`, `regioes`, `por_regiao`,
+`ignorados`); `resto_par()` dá (janela, decisão) global, por região (a pior das
+regiões do resto que a tocam) ou por ponto. `html_resto` mostra "Resto do
+período (12–15Z): GO · pior do período: MARGINAL" no veredicto, nos cartões e
+no aeródromo, **só se for menos severa** do que a principal (Streamlit e
+NiceGUI — `nicegui_app/main.py`: `html_veredicto`/`html_cartoes`/
+`html_aerodromo`). Caso real: GAMET 280900/281500 às 12:30Z.
+
 ## Princípios que orientam o código
 
 **O erro optimista é inaceitável.** Reportar pior do que a realidade é
@@ -327,7 +346,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-1736 testes (com a NiceGUI instalada; sem ela, os do `test_nicegui.py` saltam). Devem passar a 100%.
+1758 testes (com a NiceGUI instalada; sem ela, os do `test_nicegui.py` saltam). Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -407,6 +426,15 @@ python3 -m pytest
   editar): todo o arquivo (salta sem `dados/`) e 300 subentradas geradas, nos 52
   aeródromos nunca mais permissivo, nenhum bloco da 4.0 com menos área, nenhum
   aviso "Campo não interpretado" novo. Outras sementes: `GAMET_SEMENTE=n`
+- `tests/test_v42.py` — resto do período (GAMET real 280900: 10:00Z sem linha,
+  12:30Z resto GO a N de N3730 com o principal MARGINAL, 16:00Z/08:30Z sem
+  linha; margem de 1 h: nada antes das 12:00, 270900 LPPT nunca GO às 11:05/11:55); bloco sem janela, que ainda não começou ou activo conta; duas janelas
+  na mesma linha contam sempre; SIGMET (GAMET e IPMA) e AIRMET contam; linha
+  escapada e nunca mais severa; contra o motor da **4.1**
+  (`tests/referencia/app_4_1.py`, cópia fixa do `app.py` do main eb52a15; não
+  editar): todo o arquivo a 6 horas (manual e `arquivo_hist`), regiões, avisos e
+  faixa idênticos, resto nunca mais severo (global, região, 52 aeródromos);
+  Streamlit e NiceGUI mostram a linha
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva

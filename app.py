@@ -29,7 +29,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "4.1"
+APP_VERSION = "4.2"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -79,6 +79,7 @@ h3 { font-size: 0.8rem !important; letter-spacing: 0.1em; text-transform: upperc
 .gv-ad { display:flex; align-items:center; justify-content:space-between; gap:12px; padding: 2px 2px 8px; }
 .gv-tile { border-radius:12px; background:#15202A; border:1px solid #22303C; padding:12px 14px; }
 .gv-tile .gv-v { font-size:20px; }
+.gv-resto { font-family:'IBM Plex Mono',monospace; font-size:12px; color:#B7C4D0; line-height:1.4; }
 .gv-nota { font-size:12px; line-height:1.5; color:#8FA3B5; margin-top: 18px; }
 div[data-testid="stDownloadButton"] button, div[data-testid="stButton"] button { min-height: 44px; }
 </style>
@@ -913,6 +914,10 @@ class MetBlock:
     surface: str = ""     # MAR, LAN, COT — superfície afectada
     window: str = ""      # 11–15Z — janela temporal dentro do GAMET
     origem: str = ""      # "AIRMET 2" (4.0) — vazio = GAMET/SIGMET
+    # (4.2) A linha do bloco tem outra janela HH/HH além de `window` (ex.:
+    # "09/11 0800M FG 13/15 2000M BR": os dois valores ficam com 09–11Z).
+    # Não se sabe a que horas vale o valor → conta sempre no resto do período.
+    janela_ambigua: bool = False
 
 # -------------------------------------------------
 # NORMALIZE
@@ -1430,7 +1435,8 @@ def _trend_text(layer_str):
 # A janela "HH/HH" de um campo NÃO altera a decisão (continua a valer para
 # todo o período, por ser o conservador: a previsão pode atrasar-se ou
 # antecipar-se). Mas o piloto deve saber se, à hora a que consulta, o
-# fenómeno já passou ou ainda não começou.
+# fenómeno já passou ou ainda não começou. Desde a 4.2 há também uma decisão
+# informativa do resto do período (resto_do_periodo, ANÁLISE COMPLETA).
 _WINDOW_RE = re.compile(r"(\d{2})–(\d{2})Z")
 
 def window_status(window, start_dt, now=None):
@@ -1708,6 +1714,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
     blocks = []
     current_polygon = FIR_POLYGON
     current_window  = ""
+    current_ambigua = False        # (4.2) ver MetBlock.janela_ambigua
     campo_txt       = ""
 
     # Subentrada em curso, para o aviso de campo não interpretado (3.9):
@@ -1783,6 +1790,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
             state = new_state
             current_polygon = FIR_POLYGON  # reset geo ao mudar de campo
             current_window = ""            # reset janela temporal
+            current_ambigua = False
             # Remover a keyword da linha para processar só o conteúdo
             content = re.sub(
                 r"^(SFC\s+VIS\s*:?|SIG\s+VIS\s*:?|VIS\s*:|SIG\s+CLD\s*:?|CLD\s*:|SIGWX\s*:?|TURB\s*:?|ICE\s*:?|MT\s+OBSC\s*:?|SFC\s+WSPD\s*:?|MTW\s*:|VA\s*:?)\s*",
@@ -1896,12 +1904,21 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
             h1, h2 = int(wm.group(1)), int(wm.group(2))
             if h1 <= 23 and h2 <= 23:
                 current_window = f"{h1:02d}–{h2:02d}Z"
+                current_ambigua = False
         elif _qual_ini.match(content):
             # Subentrada nova sem janela própria vale para todo o período —
             # não herda a da anterior (senão um NO-GO em vigor podia
             # aparecer como "ainda não começou").
             current_window = ""
+            current_ambigua = False
         window = current_window
+        # (4.2) Outra janela na mesma linha, que não a do bloco: a hora a que
+        # cada valor se aplica fica ambígua (só conta para o resto do período;
+        # a decisão principal não usa janelas).
+        if any(f"{int(x):02d}–{int(y):02d}Z" != window
+               for x, y in re.findall(r"(?:^|\s)(\d{2})/(\d{2})(?=\s|$)", content)):
+            current_ambigua = True
+        ambigua = current_ambigua
 
         # ---- PARSE por estado ----
 
@@ -1921,14 +1938,14 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
                 val = int(m.group(1)) - 1
                 consumed_spans.append(m.span())
                 if 100 <= val <= 9999:
-                    blocks.append(MetBlock("VIS", poly, val, qualifier, surface=surface, window=window))
+                    blocks.append(MetBlock("VIS", poly, val, qualifier, surface=surface, window=window, janela_ambigua=ambigua))
 
             # ABV X → X+1
             for m in re.finditer(r"\bABV\s+(\d{3,4})M\b", vis_content):
                 val = int(m.group(1)) + 1
                 consumed_spans.append(m.span())
                 if 100 <= val <= 9999:
-                    blocks.append(MetBlock("VIS", poly, val, qualifier, surface=surface, window=window))
+                    blocks.append(MetBlock("VIS", poly, val, qualifier, surface=surface, window=window, janela_ambigua=ambigua))
 
             def _already_consumed(pos):
                 return any(s <= pos < e for s, e in consumed_spans)
@@ -1944,7 +1961,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
                     continue
                 km = f"{m.group(1)}.{m.group(2)}" if m.group(1) else m.group(3)
                 val = int(float(km) * 1000)
-                blocks.append(MetBlock("VIS", poly, val, qualifier, surface=surface, window=window))
+                blocks.append(MetBlock("VIS", poly, val, qualifier, surface=surface, window=window, janela_ambigua=ambigua))
 
             # Intervalo: 2000-5000M → mínimo
             for m in re.finditer(r"\b(\d{3,4})-(\d{3,4})M\b", vis_content):
@@ -1953,7 +1970,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
                 val = min(int(m.group(1)), int(m.group(2)))
                 consumed_spans.append(m.span())
                 if 100 <= val <= 9999:
-                    blocks.append(MetBlock("VIS", poly, val, qualifier, surface=surface, window=window))
+                    blocks.append(MetBlock("VIS", poly, val, qualifier, surface=surface, window=window, janela_ambigua=ambigua))
 
             # Valor simples
             for m in re.finditer(r"(?<!\d)(\d{3,4})M\b", vis_content):
@@ -1964,7 +1981,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
                     continue
                 val = int(m.group(1))
                 if 100 <= val <= 9999:
-                    blocks.append(MetBlock("VIS", poly, val, qualifier, surface=surface, window=window))
+                    blocks.append(MetBlock("VIS", poly, val, qualifier, surface=surface, window=window, janela_ambigua=ambigua))
 
             # Valor sem unidade, com 4 algarismos como no modelo OACI
             # ("LCA 5000 RA", GAMETs reais 160900 e 161500). Até à 2.4 era
@@ -1975,7 +1992,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
                     continue
                 val = min(int(g) for g in m.groups() if g)
                 if 100 <= val <= 9999:
-                    blocks.append(MetBlock("VIS", poly, val, qualifier, surface=surface, window=window))
+                    blocks.append(MetBlock("VIS", poly, val, qualifier, surface=surface, window=window, janela_ambigua=ambigua))
 
         elif state == "CLD":
             # Uma única expressão para todas as formas de base de nuvem:
@@ -2015,7 +2032,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
                 # referência é quase certamente uma gralha. Só "AMSL"
                 # explícito é convertido contra o relevo.
                 fen = "BASE_AMSL" if ref == "AMSL" else "BASE_AGL"
-                blocks.append(MetBlock(fen, poly, base_ft, qualifier, surface=surface, window=window))
+                blocks.append(MetBlock(fen, poly, base_ft, qualifier, surface=surface, window=window, janela_ambigua=ambigua))
 
             # Cumulonimbos na linha de nuvens (2.0). Até à 1.6 "TCU/CB" em
             # SIG CLD era lido só como tipo de nuvem: se o IPMA não pusesse
@@ -2036,7 +2053,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
                     cb_q = "EMBD"
                 else:
                     cb_q = "GEN"
-                blocks.append(MetBlock("CB", poly, cb_q, qualifier, surface=surface, window=window))
+                blocks.append(MetBlock("CB", poly, cb_q, qualifier, surface=surface, window=window, janela_ambigua=ambigua))
 
         elif state == "SIGWX":
             # FIX: EMBD tratado separadamente e eleva risco
@@ -2058,14 +2075,14 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
                     ts_qualifier = "EMBD"
                 elif not ts_qualifier:
                     ts_qualifier = "GEN"
-                blocks.append(MetBlock("TS", poly, ts_qualifier, qualifier, surface=surface, window=window))
+                blocks.append(MetBlock("TS", poly, ts_qualifier, qualifier, surface=surface, window=window, janela_ambigua=ambigua))
 
             # Outros fenómenos de SIGWX, todos NO-GO para VFR. Até à 1.3 só
             # a trovoada era lida e "SIGWX: SEV SQL" passava como GO.
             severos = [c for c in _SIGWX_SEVEROS if re.search(rf"\b{c}\b", content)]
             if severos:
                 blocks.append(MetBlock("WX", poly, "/".join(severos), qualifier,
-                                       surface=surface, window=window))
+                                       surface=surface, window=window, janela_ambigua=ambigua))
 
         elif state == "WSPD":
             # Vento médio generalizado à superfície (o GAMET só o inclui
@@ -2077,7 +2094,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
                 kts.append(round(max(vals) * fator))
             if kts:
                 blocks.append(MetBlock("WSPD", poly, max(kts), qualifier,
-                                       surface=surface, window=window))
+                                       surface=surface, window=window, janela_ambigua=ambigua))
 
         elif state == "MTW":
             layer_m = re.search(r"(SFC/FL\d+|FL\d+/FL\d+|ABV\s+FL\d+|BLW\s+FL\d+)", content)
@@ -2090,7 +2107,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
             if severity:
                 blocks.append(MetBlock("MTW", poly, severity, qualifier,
                                        layer_m.group(1) if layer_m else "",
-                                       surface=surface, window=window))
+                                       surface=surface, window=window, janela_ambigua=ambigua))
 
         elif state == "TURB":
             layer = ""
@@ -2121,7 +2138,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
             if severity:
                 extra = " ".join(filter(None, [mov, trend]))
                 blocks.append(MetBlock("TURB", poly, severity, qualifier,
-                                       layer + (f" {extra}" if extra else ""), surface=surface, window=window))
+                                       layer + (f" {extra}" if extra else ""), surface=surface, window=window, janela_ambigua=ambigua))
 
         elif state == "ICE":
             layer = ""
@@ -2142,7 +2159,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
             elif "WKN" in content:
                 trend = "WKN"
             if severity:
-                blocks.append(MetBlock("ICE", poly, severity, qualifier, layer + (f" {trend}" if trend else ""), surface=surface, window=window))
+                blocks.append(MetBlock("ICE", poly, severity, qualifier, layer + (f" {trend}" if trend else ""), surface=surface, window=window, janela_ambigua=ambigua))
 
         elif state in ("MT_OBSC", "VA"):
             # Montanhas obscurecidas / cinzas vulcânicas — sempre NO-GO.
@@ -2154,7 +2171,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None):
             # campo continua a gerar sempre o seu bloco (vazia → toda a FIR).
             if len(blocks) == sub["n0"]:
                 valor = "MT OBSC" if state == "MT_OBSC" else "VA"
-                blocks.append(MetBlock(state, poly, valor, qualifier, surface=surface, window=window))
+                blocks.append(MetBlock(state, poly, valor, qualifier, surface=surface, window=window, janela_ambigua=ambigua))
 
     _fechar_sub()
 
@@ -3947,6 +3964,86 @@ def _aviso_nuvens_baixas(texto):
             + f"\n\nTexto: `{conteudo.replace('`', '')}`")
 
 
+# Resto do período (4.2, pedido do Duarte a 28-out-2026). A decisão principal
+# continua a ser o pior caso de TODO o período (a janela HH/HH não a altera).
+# Isto é uma segunda decisão, só informativa: de agora até ao fim da validade,
+# sem os blocos do GAMET cuja janela já terminou. Os sem janela, os activos e
+# os que ainda não começaram contam; SIGMET/AIRMET contam sempre; um bloco
+# cuja linha tem outra janela (MetBlock.janela_ambigua) conta sempre. Mesmas
+# decision()/regiões, mesmos limiares. Nunca substitui o veredicto principal.
+_DEC_GRAV = {"GO": 0, "MARGINAL": 1, "NO-GO": 2}
+
+
+# Margem (decisão do Duarte, 28-out-2026): uma janela só deixa de contar no
+# resto do período 1 h depois do fim (09/11 → a partir das 12:00), para cobrir
+# nevoeiro ou nuvem baixa que levantem mais tarde do que o previsto.
+_RESTO_MARGEM = timedelta(hours=1)
+
+
+def resto_do_periodo(blocos_gamet, outros_blocos, ini, fim, agora):
+    """
+    Decisão "do resto do período" (de `agora` até `fim`). Devolve None fora
+    da validade, ou se nenhuma janela de um bloco do GAMET já terminou (seria
+    igual à principal). Senão: {"janela": "12–15Z", "regioes", "por_dec",
+    "decisao" (pior do resto), "ignorados" (blocos ignorados)}.
+    """
+    if ini is None or fim is None or agora is None or not (ini <= agora < fim):
+        return None
+    ignorados = [b for b in blocos_gamet
+                 if b.window and not b.janela_ambigua
+                 and window_status(b.window, ini, agora - _RESTO_MARGEM) == "já terminou"]
+    if not ignorados:
+        return None
+    ids = {id(b) for b in ignorados}
+    ficam = [b for b in blocos_gamet if id(b) not in ids] + list(outros_blocos)
+    regioes = compute_dynamic_regions(ficam)
+    por_dec = {}
+    for g in regioes:
+        por_dec[g["decision"]] = por_dec.get(g["decision"], 0) + g["polygon"].area
+    pior = max(por_dec, key=_DEC_GRAV.get) if por_dec else "GO"
+    return {"janela": f"{agora:%H}–{fim:%H}Z", "regioes": regioes, "por_dec": por_dec,
+            "decisao": pior, "ignorados": ignorados}
+
+
+def resto_da_regiao(resto, regiao, tol=1e-7):
+    """Decisão do resto do período numa região principal: a pior das regiões
+    do resto que a tocam (com área). None se não há resto."""
+    if not resto:
+        return None
+    decs = []
+    for g in resto["regioes"]:
+        try:
+            if g["polygon"].intersection(regiao["polygon"]).area > tol:
+                decs.append(g["decision"])
+        except Exception:
+            decs.append(g["decision"])
+    return max(decs, key=_DEC_GRAV.get) if decs else None
+
+
+def resto_do_ponto(resto, lat, lon):
+    """Decisão do resto do período num ponto (aeródromo). None se não há resto."""
+    if not resto:
+        return None
+    g = find_region_for_point(resto["regioes"], lat, lon)
+    return g["decision"] if g else None
+
+
+def resto_par(r, regiao=None, ponto=None):
+    """(janela, decisão do resto) para as interfaces, a partir do resultado de
+    analisar_gamet: global (sem argumentos), da região de índice `regiao`, ou
+    do `ponto` (lat, lon). None se não há resto do período."""
+    resto = r.get("resto")
+    if not resto:
+        return None
+    if regiao is not None:
+        dec = resto["por_regiao"][regiao]
+    elif ponto is not None:
+        dec = resto_do_ponto(resto, *ponto)
+    else:
+        dec = resto["decisao"]
+    return (resto["janela"], dec) if dec else None
+
+
 def analisar_gamet(texto, fonte="manual", boletins=None, boletins_at=None,
                    boletins_fonte="", indice=None, entrada=None, agora=None,
                    boletins_arquivo=None):
@@ -4127,6 +4224,12 @@ def analisar_gamet(texto, fonte="manual", boletins=None, boletins_at=None,
     r.update(regioes=regioes, por_dec=por_dec, area=area, fz=fz, qnh=qnh, wind=wind,
              sigmets=sig, airmets=air, airmet_leituras=aleituras,
              sigmet_gamet=has_sigmet, verificado=verificado)
+    # Resto do período (4.2): só informativo; o veredicto e as regiões acima
+    # continuam a ser o pior caso de todo o período.
+    resto = resto_do_periodo(blocks, sblocos + ablocos, ini, fim, agora) if activo else None
+    if resto:
+        resto["por_regiao"] = [resto_da_regiao(resto, g) for g in regioes]
+    r["resto"] = resto
     return r
 
 
@@ -4164,8 +4267,23 @@ def html_faixa(validade, expira, sigmet, sigmet_dec=None):
         '</div>')
 
 
-def html_veredicto(area_por_dec, area_total):
-    """Cartão do veredicto global: pior decisão, % da FIR e barra."""
+def html_resto(resto, pior):
+    """(4.2) Linha secundária "Resto do período (12–15Z): GO · pior do período:
+    MARGINAL". `resto` = (janela, decisão) ou None. Só aparece se a decisão do
+    resto for MENOS severa do que `pior` (o veredicto principal); senão "".
+    Nunca substitui o veredicto principal."""
+    if not resto or resto[1] not in _DEC_GRAV or pior not in _DEC_GRAV:
+        return ""
+    janela, dec = resto
+    if _DEC_GRAV[dec] >= _DEC_GRAV[pior]:
+        return ""
+    return (f'<div class="gv-resto">Resto do período ({_e(janela)}): '
+            f'<b>{_e(dec)}</b> · pior do período: {_e(pior)}</div>')
+
+
+def html_veredicto(area_por_dec, area_total, resto=None):
+    """Cartão do veredicto global: pior decisão, % da FIR e barra. `resto`
+    (4.2): (janela, decisão do resto do período) — linha secundária."""
     pct = {d: 100 * area_por_dec.get(d, 0) / area_total for d in _DEC_ORDEM}
     pior = next((d for d in _DEC_ORDEM if area_por_dec.get(d)), "GO")
     fundo, borda, cor = _DEC_FUNDO[pior]
@@ -4184,7 +4302,7 @@ def html_veredicto(area_por_dec, area_total):
         f'<div class="gv-veredicto" style="background:{fundo};border:1px solid {borda}">'
         f'<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">{titulo}</div>'
         f'<div class="gv-barra" role="img" aria-label="{_e(rotulo)}">{barra}</div>'
-        f'<div class="gv-leg">{leg}</div></div>')
+        f'<div class="gv-leg">{leg}</div>{html_resto(resto, pior)}</div>')
 
 
 def _camadas(vals, layers, parcial):
@@ -4202,8 +4320,9 @@ def _cb_ts(region):
     return "—"
 
 
-def html_regiao(region, pct, notas=()):
-    """Cartão de uma região: nome, % da FIR, decisão, VIS/BASE/CB-TS e o resto."""
+def html_regiao(region, pct, notas=(), resto=None):
+    """Cartão de uma região: nome, % da FIR, decisão, VIS/BASE/CB-TS e o resto.
+    `resto` (4.2): (janela, decisão do resto do período) — linha secundária."""
     vis = f"{region['vis']}M" if region.get("vis") is not None else "—"
     base = f"{region['base']}FT" if region.get("base") is not None else "—"
     det = []
@@ -4228,7 +4347,8 @@ def html_regiao(region, pct, notas=()):
         '<div class="gv-card">'
         '<div class="gv-rtop"><div style="display:flex;flex-direction:column;gap:2px;min-width:0">'
         f'<span class="gv-rnome">{_e(region["label"])}</span>'
-        f'<span class="gv-k">{pct:.0f}% DA FIR</span></div>{html_chip(region["decision"])}</div>'
+        f'<span class="gv-k">{pct:.0f}% DA FIR</span>{html_resto(resto, region["decision"])}'
+        f'</div>{html_chip(region["decision"])}</div>'
         '<div class="gv-metr">'
         f'<div><span class="gv-k">VIS</span><span class="gv-v">{_e(vis)}</span></div>'
         f'<div><span class="gv-k">BASE AGL</span><span class="gv-v">{_e(base)}</span></div>'
@@ -4236,8 +4356,9 @@ def html_regiao(region, pct, notas=()):
         f'</div>{det_html}</div>')
 
 
-def html_aerodromo(nome, region):
-    """Resultado da consulta rápida: zona e decisão do aeródromo escolhido."""
+def html_aerodromo(nome, region, resto=None):
+    """Resultado da consulta rápida: zona e decisão do aeródromo escolhido.
+    `resto` (4.2): (janela, decisão do resto do período) — linha secundária."""
     if region is None:
         return (f'<div class="gv-ad"><span class="gv-det" style="border:0;padding:0">'
                 f'{_e(nome)} está fora da área coberta por este GAMET.</span></div>')
@@ -4245,7 +4366,8 @@ def html_aerodromo(nome, region):
     return (
         '<div class="gv-ad"><div style="display:flex;flex-direction:column;gap:2px;min-width:0">'
         f'<span style="font-size:14px;color:#E6EDF3">{_e(nome)}: {_e(region["decision"])}</span>'
-        f'<span class="gv-mono" style="font-size:12px;color:#8FA3B5">{_e(motivos)}</span></div>'
+        f'<span class="gv-mono" style="font-size:12px;color:#8FA3B5">{_e(motivos)}</span>'
+        f'{html_resto(resto, region["decision"])}</div>'
         f'{html_chip(region["decision"])}</div>')
 
 # -------------------------------------------------
@@ -4316,7 +4438,7 @@ if st.session_state.get("_active_gamet_text"):
     # ---- Veredicto global ----
     # Responde de imediato à pergunta principal — "posso voar?" — sem
     # obrigar a interpretar N cartões de região primeiro.
-    st.markdown(html_veredicto(_r["por_dec"], _r["area"]), unsafe_allow_html=True)
+    st.markdown(html_veredicto(_r["por_dec"], _r["area"], resto_par(_r)), unsafe_allow_html=True)
 
     # ---- O meu aeródromo ----
     airport_options = ["— Seleccionar —"] + sorted(AERODROMES.keys())
@@ -4336,18 +4458,19 @@ if st.session_state.get("_active_gamet_text"):
     if selected_airport != "— Seleccionar —":
         lat, lon = AERODROMES[selected_airport]
         st.markdown(html_aerodromo(selected_airport,
-                                   find_region_for_point(dynamic_regions, lat, lon)),
+                                   find_region_for_point(dynamic_regions, lat, lon),
+                                   resto_par(_r, ponto=(lat, lon))),
                     unsafe_allow_html=True)
 
     # ---- Briefing por regiões (geometria real do GAMET) ----
     st.subheader(f"Briefing por regiões · {len(dynamic_regions)}")
     _cartoes = []
-    for region in dynamic_regions:
+    for _i, region in enumerate(dynamic_regions):
         _pct = 100 * region["polygon"].area / FIR_POLYGON.area
         # Anotações que restringem o alcance real do aviso — o fenómeno não
         # cobre necessariamente toda a área desenhada
         _notas = annotate_window_notes(region.get("notas"), start_dt)
-        _cartoes.append(html_regiao(region, _pct, _notas))
+        _cartoes.append(html_regiao(region, _pct, _notas, resto_par(_r, regiao=_i)))
     st.markdown('<div class="gv-regioes">' + "".join(_cartoes) + "</div>",
                 unsafe_allow_html=True)
 

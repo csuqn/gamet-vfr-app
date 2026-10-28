@@ -90,6 +90,29 @@ def obter_gamet_actual():
 
 
 # ---------------------------------------------------------------------
+# HTML do briefing (funções puras, testáveis sem servidor). Desde a 4.2 levam
+# a linha "Resto do período" (M.resto_par) quando difere do pior caso.
+# ---------------------------------------------------------------------
+def html_veredicto(r):
+    return M.html_veredicto(r["por_dec"], r["area"], M.resto_par(r))
+
+
+def html_aerodromo(r, nome):
+    la, lo = M.AERODROMES[nome]
+    return M.html_aerodromo(nome, M.find_region_for_point(r["regioes"], la, lo),
+                            M.resto_par(r, ponto=(la, lo)))
+
+
+def html_cartoes(r):
+    cartoes = "".join(
+        M.html_regiao(g, 100 * g["polygon"].area / r["area"],
+                      M.annotate_window_notes(g.get("notas"), r["ini"]),
+                      M.resto_par(r, regiao=i))
+        for i, g in enumerate(r["regioes"]))
+    return f'<div class="gv-regioes">{cartoes}</div>'
+
+
+# ---------------------------------------------------------------------
 # Página
 # ---------------------------------------------------------------------
 @ui.page("/")
@@ -121,7 +144,7 @@ async def pagina():
                     ui.html(f'<div class="gv-k" style="font-size:12px">{_md(txt)}</div>').classes("w-full")
                 else:
                     ui.html(f'<div class="gv-alerta gv-{tipo}">{_md(txt)}</div>').classes("w-full")
-            ui.html(M.html_veredicto(r["por_dec"], r["area"])).classes("w-full")
+            ui.html(html_veredicto(r)).classes("w-full")
 
             opcoes = sorted(M.AERODROMES.keys())
             res_ad = ui.html("").classes("w-full")
@@ -131,8 +154,7 @@ async def pagina():
                 if _STORAGE:
                     app.storage.user["aerodromo"] = nome
                 if nome:
-                    la, lo = M.AERODROMES[nome]
-                    res_ad.set_content(M.html_aerodromo(nome, M.find_region_for_point(r["regioes"], la, lo)))
+                    res_ad.set_content(html_aerodromo(r, nome))
                 else:
                     res_ad.set_content("")
 
@@ -143,11 +165,7 @@ async def pagina():
             mostrar_ad(estado["aerodromo"] if estado["aerodromo"] in opcoes else None)
 
             ui.label(f"BRIEFING POR REGIÕES · {len(r['regioes'])}").classes("gv-sec")
-            cartoes = "".join(
-                M.html_regiao(g, 100 * g["polygon"].area / r["area"],
-                              M.annotate_window_notes(g.get("notas"), r["ini"]))
-                for g in r["regioes"])
-            ui.html(f'<div class="gv-regioes">{cartoes}</div>').classes("w-full")
+            ui.html(html_cartoes(r)).classes("w-full")
 
             with ui.tabs().classes("w-full").props("dense align=left active-color=primary indicator-color=primary no-caps") as tabs:
                 t_mapa = ui.tab("Mapa")

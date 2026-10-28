@@ -244,7 +244,11 @@ Algarve não afecta Lisboa.
   decisão.
 - **Janelas horárias** (`11/15`) são anotadas, com indicação de se já
   começaram ou terminaram, mas não mudam a decisão: a previsão pode
-  atrasar-se ou antecipar-se.
+  atrasar-se ou antecipar-se. Desde a 4.2, quando uma janela já terminou e
+  isso muda a decisão, o veredicto, os cartões e o aeródromo mostram também,
+  numa linha secundária, a decisão do **resto do período** (ex.: "Resto do
+  período (12–15Z): GO · pior do período: MARGINAL"). A decisão principal
+  continua a ser a pior de todo o período.
 - **Os limiares de decisão** foram definidos pelo autor para ultraleves e
   aviação geral VFR; não são uma norma oficial.
 - **Estuários** (Tejo, Minho) contam como terra para efeitos de `MAR`/`LAN`.
@@ -267,7 +271,7 @@ Algarve não afecta Lisboa.
 
 ## 10. Qualidade e testes
 
-- **1736 testes automáticos** cobrem a leitura do texto, a geometria, as
+- **1758 testes automáticos** cobrem a leitura do texto, a geometria, as
   decisões, os dados aeronáuticos e a app completa. Cada erro alguma vez
   encontrado tem um teste que impede que volte a aparecer.
 - **Verificação cruzada:** em centenas de GAMETs gerados, a decisão de cada
@@ -287,7 +291,7 @@ Algarve não afecta Lisboa.
 pip install -r requirements.txt -r requirements-dev.txt
 cd nicegui_app && python main.py   # a app principal (NiceGUI), http://localhost:8080
 streamlit run app.py               # a versão de reserva (Streamlit)
-python3 -m pytest                  # os testes (1736)
+python3 -m pytest                  # os testes (1758)
 ```
 
 | Ficheiro / pasta | Conteúdo |
