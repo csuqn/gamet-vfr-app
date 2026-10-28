@@ -367,8 +367,16 @@ def test_arquivo_principal_igual_a_41_e_resto_nunca_mais_severo(eng, eng41):
 # --- As duas interfaces --------------------------------------------------------
 
 def _gamet_agora():
-    """GAMET em vigor agora (relógio real), com uma janela que já terminou."""
+    """GAMET em vigor agora (relógio real), com uma janela que já terminou.
+    O rótulo da janela usa a hora actual: perto da mudança de hora, espera pela
+    hora seguinte, para o teste não falhar se a hora mudar a meio (falhou uma
+    vez às 14:59:58Z)."""
+    import time
     agora = datetime.now(timezone.utc)
+    seguinte = (agora + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+    if (seguinte - agora) < timedelta(minutes=3):
+        time.sleep((seguinte - agora).total_seconds() + 2)
+        agora = datetime.now(timezone.utc)
     ini = (agora - timedelta(hours=3)).replace(minute=0, second=0, microsecond=0)
     fim = ini + timedelta(hours=6)
     j2 = ini + timedelta(hours=1)
