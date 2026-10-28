@@ -3974,6 +3974,12 @@ def _aviso_nuvens_baixas(texto):
 _DEC_GRAV = {"GO": 0, "MARGINAL": 1, "NO-GO": 2}
 
 
+# Margem (decisão do Duarte, 28-out-2026): uma janela só deixa de contar no
+# resto do período 1 h depois do fim (09/11 → a partir das 12:00), para cobrir
+# nevoeiro ou nuvem baixa que levantem mais tarde do que o previsto.
+_RESTO_MARGEM = timedelta(hours=1)
+
+
 def resto_do_periodo(blocos_gamet, outros_blocos, ini, fim, agora):
     """
     Decisão "do resto do período" (de `agora` até `fim`). Devolve None fora
@@ -3985,7 +3991,7 @@ def resto_do_periodo(blocos_gamet, outros_blocos, ini, fim, agora):
         return None
     ignorados = [b for b in blocos_gamet
                  if b.window and not b.janela_ambigua
-                 and window_status(b.window, ini, agora) == "já terminou"]
+                 and window_status(b.window, ini, agora - _RESTO_MARGEM) == "já terminou"]
     if not ignorados:
         return None
     ids = {id(b) for b in ignorados}

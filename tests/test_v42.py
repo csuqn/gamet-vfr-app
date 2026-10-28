@@ -173,6 +173,32 @@ def test_sem_janelas_nao_ha_resto(eng):
     assert r["resto"] is None
 
 
+def test_margem_de_uma_hora_depois_do_fim_da_janela(eng):
+    """Decisão do Duarte (28-out-2026): 09/11 só deixa de contar às 12:00."""
+    for h, m in ((11, 0), (11, 30), (11, 59)):
+        r = eng.analisar_gamet(G280900, agora=_t(h, m))
+        assert r["resto"] is None, f"{h}:{m:02d}"
+    r = eng.analisar_gamet(G280900, agora=_t(12, 0))
+    assert r["resto"] is not None
+    assert r["resto"]["decisao"] in ("GO", "MARGINAL")
+    assert eng.resto_par(r)[0] == "12–15Z"
+
+
+def test_margem_no_270900_lisboa_nunca_go_antes_das_12(eng):
+    """GAMET real 270900: base 100 ft 09–11Z a W de W00715. Às 11:05 e 11:55 a
+    linha secundária não pode dizer GO em Lisboa."""
+    g = (Path(__file__).resolve().parents[1] / "dados" / "gamets" / "2026" / "10"
+         / "20261027T0853Z_270900-271500_c8fefbd089.txt")
+    if not g.exists():
+        pytest.skip("arquivo (ramo dados) não disponível")
+    texto = g.read_text(encoding="utf-8")
+    lisboa = _nome(eng, "LPPT")
+    for h, m in ((11, 5), (11, 55)):
+        r = eng.analisar_gamet(texto, agora=_t(h, m, dia=27))
+        assert r["resto"] is None
+        assert _dec_ponto(eng, r, lisboa) == "NO-GO"
+
+
 def test_bloco_sem_janela_continua_a_contar(eng):
     r = eng.analisar_gamet(_g("SFC VIS:09/11 0800M FG SIG CLD: BKN 004/010HFT AGL"),
                            agora=_t(12, 30))
@@ -355,6 +381,9 @@ def test_app_streamlit_mostra_a_linha(app_path):
     streamlit.cache_data.clear()
     texto, janela = _gamet_agora()
     at = testing.AppTest.from_file(str(app_path), default_timeout=180)
+    # Sem isto a app vai buscar o GAMET do IPMA ao abrir e substitui o texto
+    # do teste (dependia da rede e da hora; como em test_v39).
+    at.session_state["gamet_loaded"] = "outro texto"
     at.session_state["_active_gamet_text"] = texto
     at.session_state["aerodromo_preferido"] = "Lisboa (LPPT)"
     at.run()
