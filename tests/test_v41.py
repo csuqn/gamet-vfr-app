@@ -124,7 +124,8 @@ def test_texto_real_igual_ao_arquivo():
 
 
 def test_versao(eng):
-    assert eng.APP_VERSION == "4.1"
+    # 4.1 ou posterior (a 4.2 só acrescenta o "resto do período")
+    assert tuple(int(x) for x in eng.APP_VERSION.split(".")) >= (4, 1)
 
 
 @pytest.mark.parametrize("icao", ["LPPT", "LPCO", "LPEV", "LPCB", "LPCH", "LPBJ"])
