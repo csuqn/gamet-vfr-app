@@ -102,7 +102,8 @@ Três pormenores que já causaram erros reais:
   qualificador geográfico (fica como na 4.0). A 1.ª parte fica com a sua área
   inteira (sem recorte) e a sua janela; cada parte `HH/HH SUP` tem a sua janela
   e a superfície em **toda a FIR** — escolha conservadora: contém a alternativa
-  "área da subentrada anterior ∩ superfície". Cada parte é ainda **unida com a
+  "área da subentrada anterior ∩ superfície" (leitura A, confirmada pelo Duarte
+  a 28-out-2026; a revisitar só se aparecer um caso real em que faça diferença). Cada parte é ainda **unida com a
   área que a 4.0 dava à linha inteira** (`_area_40`), para nunca ser mais
   permissiva: com superfície também na 1.ª parte (`09/11 MAR … 11/15 LAN …`)
   as duas ficam em MAR∪LAN dessa área, como na 4.0 (mais severo do que a
