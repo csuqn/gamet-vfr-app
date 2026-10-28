@@ -88,7 +88,8 @@ def test_referencia_e_a_4_1(eng41):
 
 
 def test_versao(eng):
-    assert eng.APP_VERSION == "4.2"
+    # 4.2 ou posterior (a 4.3 parte as linhas com janelas a meio)
+    assert tuple(int(x) for x in eng.APP_VERSION.split(".")) >= (4, 2)
 
 
 def test_texto_real_igual_ao_arquivo():
@@ -223,19 +224,20 @@ def test_bloco_que_ainda_nao_comecou_conta(eng):
 
 
 def test_duas_janelas_na_mesma_linha_contam_sempre(eng):
-    """O parser (desde antes da 4.2) dá a janela 09–11Z aos dois valores de
-    "09/11 0800M FG 13/15 2000M BR". A decisão principal não usa janelas;
-    no resto do período, ignorar o 2000M (que é das 13–15Z) seria optimista
-    — a linha tem outra janela, por isso nenhum dos dois é ignorado."""
-    corpo = "SFC VIS:09/11 0800M FG 13/15 2000M BR"
-    blocos, *_ = eng.parse_gamet(_g(corpo))
-    assert {(b.window, b.janela_ambigua) for b in blocos} == {("09–11Z", True)}
-    r = eng.analisar_gamet(_g(corpo), agora=_t(12, 30))
-    assert r["resto"] is None                           # nenhum bloco ignorado
+    """Até à 4.2 o parser dava a janela 09–11Z aos dois valores de
+    "09/11 0800M FG 13/15 2000M BR" e marcava-os janela_ambigua. Desde a 4.3 a
+    janela a meio da linha abre uma subentrada (test_v43.py). O que ainda é
+    ambíguo — uma janela no fim da linha, ou duas seguidas — continua a contar
+    sempre no resto do período."""
+    for corpo in ("SFC VIS:09/11 0800M FG 13/15", "SFC VIS:09/11 13/15 0800M FG"):
+        blocos, *_ = eng.parse_gamet(_g(corpo))
+        assert {(b.window, b.janela_ambigua) for b in blocos} == {("09–11Z", True)}, corpo
+        r = eng.analisar_gamet(_g(corpo), agora=_t(12, 30))
+        assert r["resto"] is None                       # nenhum bloco ignorado
     # Linha de continuação herda a ambiguidade da linha que abre a subentrada
-    corpo = "SFC VIS:09/11 N OF N3700 0800M FG 13/15 2000M BR\nLCA 1000M FG"
+    corpo = "SFC VIS:09/11 N OF N3700 0800M FG 13/15\nLCA 1000M FG"
     blocos, *_ = eng.parse_gamet(_g(corpo))
-    assert all(b.janela_ambigua for b in blocos)
+    assert blocos and all(b.janela_ambigua for b in blocos)
 
 
 def test_resto_igual_ao_principal_nao_mostra_linha(eng):
