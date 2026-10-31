@@ -332,7 +332,14 @@ máquina do SIG CLD (áreas, janelas, AGL/AMSL; sem referência = AGL) e, se
 alguma base ficar < 500 ft AGL (AMSL contra o MEF), `analisar_gamet` junta um
 aviso `info` "Nuvens baixas na Secção II" com a base, janela, superfície e os
 aeródromos abrangidos. Nunca vai a `compute_dynamic_regions`. Caso real:
-GAMET 192100/200300 (`SCT ST 004-008/012HFT` a N de N4000, 00–03Z).
+GAMET 192100/200300 (`SCT ST 004-008/012HFT` a N de N4000, 00–03Z). Desde a 4.4 (pedido
+do Duarte a 31-out-2026) a linha de uma base **AMSL** não diz "aeródromos
+abrangidos": diz que a base fica a menos de 500 ft do relevo mais alto (MEF) da
+quadrícula desses pontos, "junto às serras, não necessariamente na pista" — o
+MEF inclui relevo e obstáculos, não é a elevação do aeródromo (GAMET real
+301500: AS/AC 6000 ft AMSL → LPBG/LPSE/LP66). Só muda o texto; as bases AGL
+ficam iguais. Os testes contra a 4.1/4.2 repõem a redacção antiga antes de
+comparar avisos (`conftest.avisos_redaccao_43`).
 
 **Campo não interpretado (3.9, pedido do Duarte a 21-out-2026).**
 `campos_nao_interpretados()` devolve as subentradas da Secção I com conteúdo
@@ -405,7 +412,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-1867 testes (com a NiceGUI instalada; sem ela, os do `test_nicegui.py` saltam). Devem passar a 100%.
+1872 testes (com a NiceGUI instalada; sem ela, os do `test_nicegui.py` saltam). Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -522,6 +529,9 @@ python3 -m pytest
   12:30/13:00/14:00): o BKN 002 nunca é ignorado no resto, sem avisos novos
   — e as 7 variantes de qualificador depois de `11/15 MAR` na mesma linha, mais a
   subentrada inteira (linha de continuação), a 12:30 e 14:00 contra a 4.2
+- `tests/test_v44.py` — redacção da nota "Nuvens baixas na Secção II" para
+  bases AMSL (GAMET real 301500: relevo/MEF, não "aeródromos abrangidos"; mesmos
+  pontos; AGL do 300900 inalterada; decisão inalterada)
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva

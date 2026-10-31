@@ -29,7 +29,7 @@ from pathlib import Path
 import pytest
 
 import conftest
-from conftest import build_gamet
+from conftest import avisos_redaccao_43, build_gamet
 
 GRAV = {"GO": 0, "MARGINAL": 1, "NO-GO": 2}
 RAIZ = Path(__file__).resolve().parent.parent
@@ -292,7 +292,7 @@ def test_html_resto_escapado_e_nunca_mais_severo(eng):
 
 def _iguais(novo, antigo):
     assert novo["por_dec"] == antigo["por_dec"]
-    assert novo["avisos"] == antigo["avisos"]
+    assert avisos_redaccao_43(novo["avisos"]) == antigo["avisos"]
     assert novo["faixa_sig"] == antigo["faixa_sig"]
     assert len(novo["regioes"]) == len(antigo["regioes"])
     for a, b in zip(novo["regioes"], antigo["regioes"]):

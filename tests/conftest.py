@@ -188,3 +188,24 @@ def veredicto(at):
         if 'class="gv-veredicto"' in m.value:
             return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", m.value)).strip()
     return ""
+
+
+# 4.4 — só muda a redacção da nota "Nuvens baixas na Secção II" nas bases AMSL.
+# Os testes que comparam os avisos com os motores de referência (4.1, 4.2)
+# repõem a redacção antiga antes de comparar: o resto do aviso tem de ser igual.
+_RED44_CAB = ("Base abaixo de 500 ft acima do solo (bases AMSL: acima do relevo "
+              "mais alto da quadrícula):")
+_RED44_AMSL = re.compile(
+    r"fica a menos de 500 ft do \*\*relevo mais alto\*\* \(MEF\) da quadrícula de: "
+    r"(.*?) — junto às serras, não necessariamente na pista")
+
+
+def avisos_redaccao_43(avisos):
+    """Avisos da 4.4+ com a redacção da nota de nuvens baixas da 4.3."""
+    out = []
+    for tipo, md in avisos:
+        if "Nuvens baixas na Secção II" in md:
+            md = md.replace(_RED44_CAB, "Base abaixo de 500 ft:")
+            md = _RED44_AMSL.sub(r"aeródromos abrangidos: \1", md)
+        out.append((tipo, md))
+    return out

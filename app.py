@@ -29,7 +29,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "4.3"
+APP_VERSION = "4.4"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -4222,14 +4222,23 @@ def _aviso_nuvens_baixas(texto):
         onde = f" sobre {_SURFACE_LABEL.get(sup, sup)}" if sup else ""
         cod = [re.search(r"\(([A-Z0-9]{4})\)", p) for p in pontos]
         cod = [c.group(1) if c else p for c, p in zip(cod, pontos)]
-        alvo = (f"aeródromos abrangidos: {', '.join(cod)}" if cod
-                else "nenhum dos aeródromos da lista")
+        if ref == "AMSL":
+            # 4.4: a base AMSL é comparada com o MEF da quadrícula (relevo mais
+            # alto + obstáculos), não com a elevação do aeródromo — a nota não
+            # pode dar a ideia de nuvem baixa na própria pista.
+            alvo = (f"fica a menos de 500 ft do **relevo mais alto** (MEF) da "
+                    f"quadrícula de: {', '.join(cod)} — junto às serras, não "
+                    f"necessariamente na pista")
+        else:
+            alvo = (f"aeródromos abrangidos: {', '.join(cod)}" if cod
+                    else "nenhum dos aeródromos da lista")
         local = " (LCA — localmente)" if lca else ""
         linhas.append(f"- base **{base} ft {ref}**{local}{onde}{quando} — {alvo}")
     return ("info",
             "☁️ **Nuvens baixas na Secção II** (informativo — **não altera** a decisão "
             "GO/MARGINAL/NO-GO; o GAMET não as considera significativas, porque não "
-            "estão em SIG CLD). Base abaixo de 500 ft:\n\n" + "\n".join(linhas)
+            "estão em SIG CLD). Base abaixo de 500 ft acima do solo (bases AMSL: "
+            "acima do relevo mais alto da quadrícula):\n\n" + "\n".join(linhas)
             + ("\n\n⚠️ Uma linha deste campo tem **área não reconhecida** e foi lida "
                "como **toda a FIR** — confirma no texto onde se aplica." if por_ler else "")
             + f"\n\nTexto: `{conteudo.replace('`', '')}`")
