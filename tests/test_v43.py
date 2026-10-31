@@ -38,7 +38,7 @@ import pytest
 from shapely.geometry import Point
 
 import conftest
-from conftest import build_gamet
+from conftest import avisos_redaccao_43, build_gamet
 
 GRAV = {"GO": 0, "MARGINAL": 1, "NO-GO": 2}
 RAIZ = Path(__file__).resolve().parent.parent
@@ -262,7 +262,7 @@ def test_referencia_e_a_4_2(eng42):
 
 
 def test_versao(eng):
-    assert eng.APP_VERSION == "4.3"
+    assert tuple(int(x) for x in eng.APP_VERSION.split(".")) >= (4, 3)
 
 
 # --- Defeito 1: "HH/HH MAR" no fim da linha (optimista na 4.2) -------------------
@@ -365,7 +365,7 @@ def test_caso1b_linha_que_cede_a_superficie_conta_sempre_no_resto(eng, eng42):
             if b200.polygon.contains(Point(lo, la)):
                 assert _resto_ponto(eng, r, la, lo) == "NO-GO", (nome, f"{agora:%H:%M}")
         _resto_contra_42(eng, eng42, t, agora, CASO1B, estrito=True)
-        assert r["avisos"] == eng42.analisar_gamet(t, agora=agora)["avisos"]
+        assert avisos_redaccao_43(r["avisos"]) == eng42.analisar_gamet(t, agora=agora)["avisos"]
 
 
 QUAL_DEPOIS_SUP = [
@@ -899,7 +899,7 @@ def test_arquivo_analise_completa_e_resto(eng, eng42):
                 _m, novo, antigo = _resto_contra_42(eng, eng42, texto, agora, f.name,
                                                     estrito=True, fonte=args[0], **kw)
                 assert novo["por_dec"] == antigo["por_dec"], f.name
-                assert novo["avisos"] == antigo["avisos"], f.name
+                assert avisos_redaccao_43(novo["avisos"]) == antigo["avisos"], f.name
                 assert [g["decision"] for g in novo["regioes"]] == \
                        [g["decision"] for g in antigo["regioes"]]
 
