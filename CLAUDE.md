@@ -277,8 +277,12 @@ qualquer SIGMET (AIRMET: sem margem). Na dúvida, para o lado maior: linha
 degenerada (todos os pontos iguais — gralha real do T01 de 1-nov) ou direcção
 a menos de 20° de um troço → esse qualificador não restringe; nenhum que
 restrinja, intersecção vazia, `LINE` sem `D OF` ou com um só ponto, `LINE`
-junto com `WI`/`BTN`/`N OF N…`/coordenadas soltas, ou `MOV` de mais de 480 NM
-(`_LINHA_MOV_MAX_NM`, a folga da caixa) → toda a área. A faixa continua a
+junto com `WI`/`BTN`/`N OF N…`/coordenadas soltas, mais de uma posição
+(`OBS AT … FCST AT …`: intersectar as linhas das duas perdia a prevista —
+revisor do #32), ou `MOV` de mais de 360 NM (`_LINHA_MOV_MAX_NM`, a folga da
+caixa) → toda a área. O MOV desloca com o cos dos dois extremos de latitude da
+área do GAMET (±1°) e fica a envolvente — com o cos da caixa (52°), um MOV na
+diagonal encurtava a margem para 5–8 NM (revisor do #32). A faixa continua a
 dizer ACTIVO e o alerta "fora da área do GAMET".
 Os níveis (`TOP FL340`, `SFC/FL080`) ainda não restringem a decisão.
 Desde a 3.2 (decisão do Duarte), um SIGMET referido em `SIGMET APPLICABLE`
@@ -433,7 +437,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-1902 testes (com a NiceGUI instalada; sem ela, os do `test_nicegui.py` saltam). Devem passar a 100%.
+1911 testes (com a NiceGUI instalada; sem ela, os do `test_nicegui.py` saltam). Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -557,8 +561,9 @@ python3 -m pytest
   1-nov: decisões iguais às do GAMET sozinho, faixa ACTIVO, "fora da área";
   N/E/diagonal, prolongamento, 3 pontos, intersecção com e sem AND, MOV, margem;
   na dúvida toda a área — degenerada, paralela, um ponto, sem `D OF`, com WI/N OF,
-  sem área comum, MOV > 480 NM; AIRMET sem margem; aleatório com teste de lado
-  independente: nenhum ponto do lado D sem NO-GO) e contra o motor da **4.4**
+  sem área comum, MOV > 360 NM, duas posições `OBS AT`/`FCST AT`; MOV na
+  diagonal com a margem inteira (LPPM, LPFC); AIRMET sem margem; aleatório com teste de lado
+  independente, parado e com MOV: nenhum ponto do lado D sem NO-GO) e contra o motor da **4.4**
   (`tests/referencia/app_4_4.py`, cópia fixa do `app.py` do main 7e7fd12; não
   editar): área de todos os boletins do arquivo igual excepto os `OF LINE`;
   todo o arquivo em `arquivo_hist` a 3 horas igual fora dos períodos com

@@ -198,6 +198,12 @@ def test_mov_estende_o_semiplano(eng):
     "EMBD TS FCST N OF LINE N3800 W01000 - N3800 W00600 AND S OF LINE N3700 W01000 - N3700 "
     "W00600 TOP FL300 STNR NC",                                                 # sem área comum
     "EMBD TS FCST N OF LINE N3800 W01000 - N3800 W00600 TOP FL300 MOV N 150KT NC",  # 600 NM
+    "EMBD TS FCST N OF LINE N3800 W01000 - N3800 W00600 TOP FL300 MOV N 100KT NC",  # 400 NM
+    # Duas posições (revisor do #32): a intersecção perdia a prevista
+    "EMBD TS OBS AT 1400Z W OF LINE N4300 W01200 - N3600 W01200 FCST AT 1800Z W OF LINE "
+    "N4300 W00800 - N3600 W00800 TOP FL300 NC",
+    "EMBD TS OBS AT 1400Z E OF LINE N4300 W00700 - N3600 W00700 FCST AT 1800Z E OF LINE "
+    "N4300 W00900 - N3600 W00900 TOP FL300 NC",
     "EMBD TS FCST N OF LINE N3800 W01000 - N3800 W00600 TOP FL300 MOV N NC",   # MOV ilegível
     "EMBD TS FCST N OF LINE N3800 W01000 - N3800 W00600 ENTIRE FIR TOP FL300 STNR NC",
 ])
@@ -212,6 +218,27 @@ def test_linha_degenerada_com_outra_nao_restringe(eng):
                       "W01100 - N3900 W00600 TOP FL300 STNR NC")])
     so = _r(eng, [_s("EMBD TS FCST N OF LINE N3900 W01100 - N3900 W00600 TOP FL300 STNR NC")])
     assert _decisoes(eng, com) == _decisoes(eng, so)
+
+
+# Revisor do #32: com o k da caixa (cos 52°), um MOV na diagonal encurtava a
+# margem: LPPM e LPFC ficavam fora a ≤ 8 NM da área deslocada.
+@pytest.mark.parametrize("corpo,ad", [
+    ("EMBD TS FCST N OF LINE N4010 W01523 - N3850 W01132 TOP FL300 MOV SE 20KT NC",
+     "Portimão (LPPM)"),
+    ("EMBD TS FCST W OF LINE N4200 W00446 - N4003 W00656 TOP FL300 MOV SSW 20KT NC",
+     "Figueira dos Cavaleiros (LPFC)"),
+])
+def test_mov_na_diagonal_mantem_a_margem(eng, corpo, ad):
+    r = _r(eng, [_s(corpo)])
+    assert _ad(eng, r, ad) == "NO-GO"
+
+
+def test_airmet_duas_posicoes_toda_a_fir(eng):
+    a = _s("SFC VIS 0800M BR OBS AT 1400Z W OF LINE N4300 W01200 - N3600 W01200 FCST AT 1800Z "
+           "W OF LINE N4300 W00800 - N3600 W00800 NC", sid="1", tipo="AIRMET")
+    r = _r(eng, [a])
+    assert _tudo_nogo(r)
+    assert "Área do AIRMET não reconhecida" in " ".join(m for _, m in r["avisos"])
 
 
 # --- AIRMET -----------------------------------------------------------------
@@ -297,6 +324,45 @@ def test_aleatorio_nenhum_ponto_do_lado_d_fica_sem_nogo(eng, semente):
                 assert _dec(eng, r, lat, lon) == "NO-GO", (corpo, lat, lon)
     # O teste tem de verificar alguma coisa: áreas lidas e pontos do lado D
     assert lidos >= 4 and verificados >= 20, (lidos, verificados)
+
+
+@pytest.mark.parametrize("semente", range(3))
+def test_aleatorio_com_mov_nunca_optimista(eng, semente):
+    """
+    Um troço, MOV em qualquer rumo a 10–80 kt: um ponto da grelha que, recuado
+    ao longo do movimento (com o cos da SUA latitude), cai do lado D a mais de
+    1 NM da linha nalgum instante da validade, tem de ser NO-GO.
+    """
+    from shapely.geometry import Point
+    rnd = random.Random(100 + semente)
+    rumos = ["N", "NE", "E", "SE", "S", "SW", "W", "NW", "ENE", "SSW", "WNW", "SSE"]
+    grelha = [(lat / 10, lon / 10) for lat in range(365, 421, 5) for lon in range(-100, -62, 5)
+              if eng.FIR_POLYGON.contains(Point(lon / 10, lat / 10))]
+    verificados = 0
+    for _ in range(10):
+        a = (round(rnd.uniform(-14, -5) * 60) / 60, round(rnd.uniform(35, 43) * 60) / 60)
+        b = (round(rnd.uniform(-14, -5) * 60) / 60, round(rnd.uniform(35, 43) * 60) / 60)
+        if a == b:
+            continue
+        d, mv, kt = rnd.choice(list(_DIRS)), rnd.choice(rumos), rnd.choice((10, 20, 30, 50, 80))
+        corpo = (f"EMBD TS FCST {d} OF LINE {_fmt(*a)} - {_fmt(*b)} TOP FL300 "
+                 f"MOV {mv} {kt}KT NC")
+        r = _r(eng, [_s(corpo)])
+        dx, dy = _DIRS[d]
+        s_d = _lado(a, b, (a[0] + dx, a[1] + dy))
+        comp = math.hypot(b[0] - a[0], b[1] - a[1])
+        rumo = math.radians(eng._RUMO[mv])
+        for lat, lon in grelha:
+            k = math.cos(math.radians(lat))
+            for i in range(11):
+                nm = kt * 4 * i / 10                        # validade de 4 h
+                q = (lon - nm / 60 * math.sin(rumo) / k, lat - nm / 60 * math.cos(rumo))
+                s_q = _lado(a, b, q)
+                if s_d and s_q * s_d > 0 and abs(s_q) / comp >= 1 / 60:
+                    verificados += 1
+                    assert _dec(eng, r, lat, lon) == "NO-GO", (corpo, lat, lon)
+                    break
+    assert verificados >= 20
 
 
 # --- Contra o motor da 4.4: todo o arquivo ----------------------------------

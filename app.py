@@ -3271,7 +3271,9 @@ _LINHA_RE = re.compile(
     rf"\b(NE|NW|SE|SW|N|S|E|W)\s+OF\s+LINE\s+((?:{_COORD_TXT}\s*-\s*)+{_COORD_TXT})(?![\dA-Z])")
 _LINHA_PARALELA_GRAUS = 20
 _LINHA_CAIXA_GRAUS = 10
-_LINHA_MOV_MAX_NM = 480                 # 8° — cabe na folga da caixa com a margem
+# Deslocação máxima aceite: 360 NM = 6° de latitude, ≈ 8,3° de longitude a
+# 43°N — cabe nos 10° de folga da caixa com a margem de 10 NM.
+_LINHA_MOV_MAX_NM = 360
 
 
 def _caixa_linhas():
@@ -3325,6 +3327,11 @@ def _area_linhas(corpo):
     Área de um boletim descrita só por "D OF LINE …". Devolve
     (geometria, descrição), ou (None, motivo) → toda a área.
     """
+    # Mais de uma posição ("OBS AT 1400Z … FCST AT 1800Z …", Anexo 3): a
+    # intersecção das linhas das duas posições perdia a prevista (revisor do
+    # #32: 52 aeródromos em GO com a área prevista sobre o continente).
+    if len(re.findall(r"\b(?:OBS|FCST)\b", corpo)) > 1:
+        return None, "toda a área (mais de uma posição)"
     resto = _LINHA_RE.sub(" ", corpo)
     # Texto de área que sobra: não se sabe combiná-lo com as linhas.
     if re.search(r"\b(?:LINE|WI|BTN|OF|PART|ALONG)\b|\b[NS]\d{2,4}\b|\b[EW]\d{3,5}\b", resto):
@@ -3427,10 +3434,19 @@ def _area_boletim(t, corpo, ref=None):
             return None, "toda a área (deslocação grande demais)"
         dist = dist_nm * _NM_GRAUS
         rumo = math.radians(_RUMO[mv.group(1)])
-        k = math.cos(math.radians(max(abs(geom.bounds[1]), abs(geom.bounds[3]))))
-        movido = affinity.translate(geom, xoff=dist * math.sin(rumo) / k,
-                                    yoff=dist * math.cos(rumo))
-        geom = unary_union([geom, movido]).convex_hull
+        if por_linhas:
+            # O semiplano está recortado à caixa: os seus limites (até ~52°N)
+            # não dizem a latitude onde a deslocação importa. Desloca-se com o
+            # cos de cada extremo da área do GAMET (com folga) e fica a
+            # envolvente: cobre qualquer latitude intermédia (revisor do #32:
+            # com o k da caixa, um MOV na diagonal encurtava a margem).
+            _, fy0, _, fy1 = FIR_POLYGON.bounds
+            ks = [math.cos(math.radians(fy0 - 1)), math.cos(math.radians(fy1 + 1))]
+        else:
+            ks = [math.cos(math.radians(max(abs(geom.bounds[1]), abs(geom.bounds[3]))))]
+        movidos = [affinity.translate(geom, xoff=dist * math.sin(rumo) / k,
+                                      yoff=dist * math.cos(rumo)) for k in ks]
+        geom = unary_union([geom] + movidos).convex_hull
         desc += f", deslocação {mv.group(1)} {mv.group(2)} kt"
     return geom, desc
 
