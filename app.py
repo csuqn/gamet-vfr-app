@@ -3332,6 +3332,16 @@ def _area_linhas(corpo):
     # #32: 52 aeródromos em GO com a área prevista sobre o continente).
     if len(re.findall(r"\b(?:OBS|FCST)\b", corpo)) > 1:
         return None, "toda a área (mais de uma posição)"
+    # 2.ª ronda do revisor: a 2.ª posição pode vir sem OBS/FCST na 1.ª ("W OF
+    # LINE … STNR NC FCST AT 1800Z W OF LINE …", "AT 1400Z … AT 1800Z …").
+    # As linhas têm de estar seguidas (só AND entre elas) e nenhuma marca de
+    # posição (OBS, FCST, AT hhmmZ) pode aparecer depois da 1.ª.
+    linhas = list(_LINHA_RE.finditer(corpo))
+    for a, b in zip(linhas, linhas[1:]):
+        if corpo[a.end():b.start()].strip() not in ("", "AND"):
+            return None, "toda a área (mais de uma posição)"
+    if linhas and re.search(r"\b(?:OBS|FCST)\b|\bAT\s+\d{4}Z\b", corpo[linhas[0].start():]):
+        return None, "toda a área (mais de uma posição)"
     resto = _LINHA_RE.sub(" ", corpo)
     # Texto de área que sobra: não se sabe combiná-lo com as linhas.
     if re.search(r"\b(?:LINE|WI|BTN|OF|PART|ALONG)\b|\b[NS]\d{2,4}\b|\b[EW]\d{3,5}\b", resto):

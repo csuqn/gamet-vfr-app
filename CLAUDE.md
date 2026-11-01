@@ -279,7 +279,8 @@ a menos de 20° de um troço → esse qualificador não restringe; nenhum que
 restrinja, intersecção vazia, `LINE` sem `D OF` ou com um só ponto, `LINE`
 junto com `WI`/`BTN`/`N OF N…`/coordenadas soltas, mais de uma posição
 (`OBS AT … FCST AT …`: intersectar as linhas das duas perdia a prevista —
-revisor do #32), ou `MOV` de mais de 360 NM (`_LINHA_MOV_MAX_NM`, a folga da
+revisor do #32; também linhas não seguidas — só `AND` entre elas — ou
+`OBS`/`FCST`/`AT hhmmZ` depois da 1.ª linha), ou `MOV` de mais de 360 NM (`_LINHA_MOV_MAX_NM`, a folga da
 caixa) → toda a área. O MOV desloca com o cos dos dois extremos de latitude da
 área do GAMET (±1°) e fica a envolvente — com o cos da caixa (52°), um MOV na
 diagonal encurtava a margem para 5–8 NM (revisor do #32). A faixa continua a
@@ -437,7 +438,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-1911 testes (com a NiceGUI instalada; sem ela, os do `test_nicegui.py` saltam). Devem passar a 100%.
+1915 testes (com a NiceGUI instalada; sem ela, os do `test_nicegui.py` saltam). Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
