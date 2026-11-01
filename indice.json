@@ -503,6 +503,13 @@
    "inicio": "2026-11-01T03:00Z",
    "fim": "2026-11-01T09:00Z",
    "tipo": "GAMET"
+  },
+  {
+   "ficheiro": "gamets/2026/11/20261101T0850Z_010900-011500_872737b996.txt",
+   "recolhido": "2026-11-01T08:50Z",
+   "inicio": "2026-11-01T09:00Z",
+   "fim": "2026-11-01T15:00Z",
+   "tipo": "GAMET"
   }
  ],
  "sigmets": [
@@ -617,6 +624,13 @@
    "inicio": "2026-11-01T04:50Z",
    "fim": "2026-11-01T08:50Z",
    "texto": "LPPC SIGMET T01 VALID 010450/010850 LPPT- LPPC LISBOA FIR EMBD TS FCST S OF LINE N3430 W01728 - N3430 W01728 AND SW OF LINE N3430 W01728 - N3156 W01459 TOP FL420 STNR NC"
+  },
+  {
+   "ficheiro": "sigmets/2026/11/20261101T0850Z_SIGMETT02_010850-011250_3a95bbaedf.txt",
+   "recolhido": "2026-11-01T08:50Z",
+   "inicio": "2026-11-01T08:50Z",
+   "fim": "2026-11-01T12:50Z",
+   "texto": "LPPC SIGMET T02 VALID 010850/011250 LPPT- LPPC LISBOA FIR EMBD TS FCST S OF N33 TOP FL390 STNR NC"
   }
  ]
 }
