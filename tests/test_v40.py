@@ -305,7 +305,7 @@ def test_mov_estende_e_stnr_nao(eng):
 @pytest.mark.parametrize("corpo", [
     "SFC VIS 0800M BR OBS N OF N4000 MOV E NC",              # MOV sem velocidade
     "SFC VIS 0800M BR OBS NW OF W00800 STNR NC",             # diagonal
-    "SFC VIS 0800M BR OBS N OF LINE N3800 W01000 - N4000 W00700 STNR NC",
+    "SFC VIS 0800M BR OBS N OF LINE N3800 W01000 STNR NC",  # LINE de um só ponto (4.5)
     "SFC VIS 0800M BR OBS STNR NC",                          # sem área
     "SFC VIS 0800M BR OBS WI N39 W07 - N40 W08 STNR NC",     # polígono ilegível
 ])

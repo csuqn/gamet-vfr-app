@@ -29,7 +29,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "4.4"
+APP_VERSION = "4.5"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -3246,18 +3246,128 @@ def area_sigmet(texto, ref=None):
     return geom, f"{desc} + {_SIGMET_MARGEM_NM} NM"
 
 
+# ---- "X OF LINE …" (4.5, pedido do Duarte a 1-nov-2026) ----
+# SIGMETs reais T01 de 31-out e de 1-nov-2026 (EMBD TS na parte oceânica da
+# FIR, a sul de 35°N e a oeste de 14°W): "SW OF LINE N3508 W01641 - N35
+# W01628 AND W OF LINE N35 W01628 - N3149 W01734". Até à 4.4 qualquer LINE
+# dava toda a área: NO-GO em todo o continente durante 7 h, por trovoada a
+# mais de 100 NM. Agora cada "D OF LINE p1 - p2 [- …]" (Anexo 3) é o
+# semiplano do lado D da linha, prolongada pelos troços das pontas (a linha
+# vai até à fronteira da FIR), e vários são intersectados (com ou sem AND,
+# como os qualificadores do GAMET). Na dúvida, sempre para o lado maior:
+#  · linha degenerada (todos os pontos iguais: "N3430 W01728 - N3430 W01728",
+#    gralha real do T01 de 1-nov) → esse qualificador não restringe nada;
+#  · direcção quase paralela a um troço (< 20°) → não restringe nada;
+#  · nenhum qualificador que restrinja, intersecção vazia, ou texto de área
+#    que sobra (WI, BTN, N OF N…, coordenadas soltas, LINE sem "D OF") →
+#    toda a área, como até à 4.4.
+# A geometria é feita em graus (como os polígonos WI) e recortada a uma caixa
+# à volta da área do GAMET alargada _LINHA_CAIXA_GRAUS; o MOV só é aceite se
+# a deslocação couber nessa folga (senão toda a área).
+_DIR_LINHA = {"N": (0, 1), "S": (0, -1), "E": (1, 0), "W": (-1, 0),
+              "NE": (1, 1), "NW": (-1, 1), "SE": (1, -1), "SW": (-1, -1)}
+_COORD_TXT = r"[NS]\d{2}(?:\d{2})?\s*[EW]\d{3}(?:\d{2})?"
+_LINHA_RE = re.compile(
+    rf"\b(NE|NW|SE|SW|N|S|E|W)\s+OF\s+LINE\s+((?:{_COORD_TXT}\s*-\s*)+{_COORD_TXT})(?![\dA-Z])")
+_LINHA_PARALELA_GRAUS = 20
+_LINHA_CAIXA_GRAUS = 10
+_LINHA_MOV_MAX_NM = 480                 # 8° — cabe na folga da caixa com a margem
+
+
+def _caixa_linhas():
+    x0, y0, x1, y1 = FIR_POLYGON.bounds
+    g = _LINHA_CAIXA_GRAUS
+    return box(x0 - g, y0 - g, x1 + g, y1 + g)
+
+
+def _semiplano_linha(direc, pts):
+    """
+    Semiplano do lado `direc` da linha `pts` (lon, lat), recortado à caixa.
+    None = não restringe (linha degenerada ou direcção quase paralela).
+    """
+    pts = [p for i, p in enumerate(pts) if i == 0 or p != pts[i - 1]]
+    if len(set(pts)) < 2:
+        return None
+    dx, dy = _DIR_LINHA[direc]
+    lat_m = sum(p[1] for p in pts) / len(pts)
+    k = math.cos(math.radians(lat_m))
+    for a, b in zip(pts, pts[1:]):
+        # Ângulo entre o troço e a direcção, em graus e em distâncias reais:
+        # o mais pequeno dos dois tem de passar o limite.
+        for kx in (1.0, k):
+            sx, sy = (b[0] - a[0]) * kx, b[1] - a[1]
+            ux, uy = dx * kx, dy
+            ns, nu = math.hypot(sx, sy), math.hypot(ux, uy)
+            if ns == 0:
+                continue
+            sen = abs(sx * uy - sy * ux) / (ns * nu)
+            if sen < math.sin(math.radians(_LINHA_PARALELA_GRAUS)):
+                return None
+    grande = 100.0
+    def _prolonga(p, q):            # de q para lá de p, na direcção q→p
+        vx, vy = p[0] - q[0], p[1] - q[1]
+        n = math.hypot(vx, vy)
+        return (p[0] + vx / n * grande, p[1] + vy / n * grande)
+    linha = [_prolonga(pts[0], pts[1])] + pts + [_prolonga(pts[-1], pts[-2])]
+    n = math.hypot(dx, dy)
+    vx, vy = dx / n * grande * 2, dy / n * grande * 2
+    faixas = []
+    for a, b in zip(linha, linha[1:]):
+        q = Polygon([a, b, (b[0] + vx, b[1] + vy), (a[0] + vx, a[1] + vy)])
+        if not q.is_valid:
+            q = q.buffer(0)
+        faixas.append(q)
+    return _clean_poly(unary_union(faixas).intersection(_caixa_linhas()))
+
+
+def _area_linhas(corpo):
+    """
+    Área de um boletim descrita só por "D OF LINE …". Devolve
+    (geometria, descrição), ou (None, motivo) → toda a área.
+    """
+    resto = _LINHA_RE.sub(" ", corpo)
+    # Texto de área que sobra: não se sabe combiná-lo com as linhas.
+    if re.search(r"\b(?:LINE|WI|BTN|OF|PART|ALONG)\b|\b[NS]\d{2,4}\b|\b[EW]\d{3,5}\b", resto):
+        return None, "toda a área (área ilegível)"
+    geom, n_lidas, n_ignoradas = _caixa_linhas(), 0, 0
+    for m in _LINHA_RE.finditer(corpo):
+        pts = [_coord(c) for c in _COORD_RE.findall(m.group(2))]
+        sp = _semiplano_linha(m.group(1), pts)
+        if sp is None:
+            n_ignoradas += 1
+            continue
+        geom = geom.intersection(sp)
+        n_lidas += 1
+    if n_lidas == 0:
+        return None, "toda a área (linha ilegível)"
+    geom = _clean_poly(geom)
+    if geom.is_empty:
+        return None, "toda a área (linhas sem área comum)"
+    desc = "semiplano" if n_lidas == 1 else f"{n_lidas} semiplanos"
+    if n_ignoradas:
+        desc += f" ({n_ignoradas} linha{'s' if n_ignoradas > 1 else ''} ilegíve{'is' if n_ignoradas > 1 else 'l'} ignorada{'s' if n_ignoradas > 1 else ''})"
+    return geom, desc
+
+
 def _area_boletim(t, corpo, ref=None):
     """
     Área de um SIGMET/AIRMET, SEM margem e sem recorte à FIR: WI polígono ou
-    círculo, ou os qualificadores do GAMET, estendida pelo MOV. Devolve
-    (geometria, descrição) ou (None, "toda a área (…)") se não se perceber.
-    Partilhada por area_sigmet (3.0) e ler_airmet (4.0).
+    círculo, "D OF LINE …" (4.5), ou os qualificadores do GAMET, estendida
+    pelo MOV. Devolve (geometria, descrição) ou (None, "toda a área (…)") se
+    não se perceber. Partilhada por area_sigmet (3.0) e ler_airmet (4.0).
     """
-    if re.search(r"\bENTIRE FIR\b|\bLINE\b", corpo):
+    if re.search(r"\bENTIRE FIR\b", corpo):
+        return None, "toda a área"
+    por_linhas = bool(re.search(r"\bLINE\b", corpo))
+    if por_linhas and (re.search(r"\bWI\b", corpo) or not _LINHA_RE.search(corpo)):
         return None, "toda a área"
 
     wis = [m.end() for m in re.finditer(r"\bWI\b", corpo)]
-    if wis:
+    if por_linhas:
+        geom, desc = _area_linhas(corpo)
+        if geom is None:
+            return None, desc
+    elif wis:
         # Todas as áreas "WI" (a observada e, com "FCST AT hhmmZ WI …", a
         # prevista): a envolvente de todas cobre também o caminho entre elas.
         partes = []
@@ -3310,7 +3420,12 @@ def _area_boletim(t, corpo, ref=None):
                 h += timedelta(days=1)
             inicio_mov = min(inicio_mov, h)
         from shapely import affinity
-        dist = int(mv.group(2)) * (fim - inicio_mov).total_seconds() / 3600 * _NM_GRAUS
+        dist_nm = int(mv.group(2)) * (fim - inicio_mov).total_seconds() / 3600
+        if por_linhas and dist_nm > _LINHA_MOV_MAX_NM:
+            # O semiplano foi recortado à caixa: uma deslocação maior do que a
+            # folga podia trazer para a FIR área que ficou fora da caixa.
+            return None, "toda a área (deslocação grande demais)"
+        dist = dist_nm * _NM_GRAUS
         rumo = math.radians(_RUMO[mv.group(1)])
         k = math.cos(math.radians(max(abs(geom.bounds[1]), abs(geom.bounds[3]))))
         movido = affinity.translate(geom, xoff=dist * math.sin(rumo) / k,

@@ -209,3 +209,15 @@ def avisos_redaccao_43(avisos):
             md = _RED44_AMSL.sub(r"aeródromos abrangidos: \1", md)
         out.append((tipo, md))
     return out
+
+
+# 4.5: "D OF LINE …" nos SIGMET/AIRMET passou a ser lido como semiplano (até à
+# 4.4: toda a área). Os testes que comparam todo o arquivo com motores fixos
+# anteriores (4.1, 4.2) verificam OUTRAS mudanças; tiram-se do índice só os
+# boletins com "OF LINE", cuja leitura mudou de propósito e é verificada
+# contra a 4.4 em test_v45.py (test_arquivo_contra_4_4).
+def indice_sem_linhas(indice):
+    if not indice:
+        return indice
+    return {**indice, "sigmets": [e for e in indice.get("sigmets", [])
+                                  if not re.search(r"\bOF\s+LINE\b", e.get("texto", ""))]}

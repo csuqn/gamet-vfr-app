@@ -236,7 +236,7 @@ definir `FIR_POLYGON` — não entram na decisão.
 | SIGWX SQL / FZRA / FZDZ / DS / SS / GR / FC | NO-GO |
 | MT OBSC | NO-GO |
 | VA (cinzas vulcânicas) | NO-GO |
-| SIGMET activo com área legível (página do IPMA / arquivo) | NO-GO na área + 10 NM, estendida pelo MOV (desde a 3.0) |
+| SIGMET activo com área legível (página do IPMA / arquivo) | NO-GO na área + 10 NM, estendida pelo MOV (desde a 3.0; `D OF LINE` como semiplano desde a 4.5) |
 | SIGMET sem área legível, ENTIRE FIR, ou só o identificador no GAMET | NO-GO em toda a área |
 | SIGMET referido no GAMET que se sabe terminado (expirou / CNL) | não conta; aviso (desde a 3.2). Estado desconhecido → toda a área |
 | AIRMET em vigor (página do IPMA / arquivo) | as regras acima, na área do AIRMET, **sem margem**, estendida pelo MOV (desde a 4.0). Área/MOV ilegível → toda a FIR + aviso |
@@ -258,8 +258,28 @@ estende a área na direcção do movimento desde a hora da observação
 `blocos_sigmet()` transforma cada SIGMET num `MetBlock("SIGMET")`, que entra
 em `compute_dynamic_regions` como qualquer fenómeno (decisão NO-GO).
 Continua a ser **toda a área** quando: a área não é legível, há `ENTIRE FIR`
-ou `LINE`, o `MOV` não tem direcção/velocidade legível, ou o GAMET refere um
-SIGMET cujo texto completo não está disponível (ex.: GAMET colado à mão).
+ou uma `LINE` que não se lê (ver abaixo), o `MOV` não tem direcção/velocidade
+legível, ou o GAMET refere um SIGMET cujo texto completo não está disponível
+(ex.: GAMET colado à mão).
+
+**`D OF LINE …` (4.5, pedido do Duarte a 1-nov-2026).** Casos reais: SIGMET
+T01 311035/311330 (`SW OF LINE N3508 W01641 - N35 W01628 AND W OF LINE N35
+W01628 - N3149 W01734`) e T01 010450/010850 (`S OF LINE N3430 W01728 - N3430
+W01728 AND SW OF LINE …`), EMBD TS oceânica a mais de 100 NM da área do GAMET;
+até à 4.4 qualquer `LINE` dava toda a área e o continente ficou 7 h em NO-GO.
+`_area_linhas()`/`_semiplano_linha()`: cada `D OF LINE p1 - p2 [- …]` (D = N,
+S, E, W, NE, NW, SE, SW) é o semiplano do lado D da linha, **prolongada pelos
+troços das pontas** (a linha vai até à fronteira da FIR); vários, com ou sem
+AND, são **intersectados** (como os qualificadores do GAMET). Geometria em
+graus, como os polígonos WI, recortada a uma caixa à volta da área do GAMET
+alargada 10° (`_LINHA_CAIXA_GRAUS`). Depois, margem de 10 NM e MOV como
+qualquer SIGMET (AIRMET: sem margem). Na dúvida, para o lado maior: linha
+degenerada (todos os pontos iguais — gralha real do T01 de 1-nov) ou direcção
+a menos de 20° de um troço → esse qualificador não restringe; nenhum que
+restrinja, intersecção vazia, `LINE` sem `D OF` ou com um só ponto, `LINE`
+junto com `WI`/`BTN`/`N OF N…`/coordenadas soltas, ou `MOV` de mais de 480 NM
+(`_LINHA_MOV_MAX_NM`, a folga da caixa) → toda a área. A faixa continua a
+dizer ACTIVO e o alerta "fora da área do GAMET".
 Os níveis (`TOP FL340`, `SFC/FL080`) ainda não restringem a decisão.
 Desde a 3.2 (decisão do Duarte), um SIGMET referido em `SIGMET APPLICABLE`
 que se **sabe** terminado — validade acabada ou `CNL SIGMET <id>` na página do
@@ -300,7 +320,8 @@ AGL/AMSL → AGL; `BKN CLD 120/900M` (metros, Anexo 3) → pés por defeito; TCU
 sozinho não conta; MOD TURB/ICE são informativos (nota na região). Área:
 `_area_boletim()` (partilhada com `area_sigmet`, que só junta a margem) — WI
 polígono/círculo ou qualificadores do GAMET, estendida pelo MOV — **sem** os
-10 NM do SIGMET, recortada por COT/LAN/MAR. MOV ilegível, `LINE`, área
+10 NM do SIGMET, recortada por COT/LAN/MAR (`D OF LINE` desde a 4.5, como no
+SIGMET). MOV ilegível, `LINE` ilegível, área
 ilegível ou ausente, ou restos de área não lidos (`OF`/`BTN`/`PART`/`WI` no
 valor) → toda a FIR + aviso "Área do AIRMET não reconhecida"; `ENTIRE FIR` →
 toda a FIR sem esse aviso. Fenómeno ilegível (nenhum campo reconhecido, ou um
@@ -412,7 +433,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-1872 testes (com a NiceGUI instalada; sem ela, os do `test_nicegui.py` saltam). Devem passar a 100%.
+1902 testes (com a NiceGUI instalada; sem ela, os do `test_nicegui.py` saltam). Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -532,6 +553,18 @@ python3 -m pytest
 - `tests/test_v44.py` — redacção da nota "Nuvens baixas na Secção II" para
   bases AMSL (GAMET real 301500: relevo/MEF, não "aeródromos abrangidos"; mesmos
   pontos; AGL do 300900 inalterada; decisão inalterada)
+- `tests/test_v45.py` — `D OF LINE` nos SIGMET/AIRMET (T01 reais de 31-out e
+  1-nov: decisões iguais às do GAMET sozinho, faixa ACTIVO, "fora da área";
+  N/E/diagonal, prolongamento, 3 pontos, intersecção com e sem AND, MOV, margem;
+  na dúvida toda a área — degenerada, paralela, um ponto, sem `D OF`, com WI/N OF,
+  sem área comum, MOV > 480 NM; AIRMET sem margem; aleatório com teste de lado
+  independente: nenhum ponto do lado D sem NO-GO) e contra o motor da **4.4**
+  (`tests/referencia/app_4_4.py`, cópia fixa do `app.py` do main 7e7fd12; não
+  editar): área de todos os boletins do arquivo igual excepto os `OF LINE`;
+  todo o arquivo em `arquivo_hist` a 3 horas igual fora dos períodos com
+  `OF LINE`, e nesses nunca abaixo da 4.4 sem esse boletim. Os testes do
+  arquivo contra a 4.1/4.2 tiram os boletins `OF LINE` do índice
+  (`conftest.indice_sem_linhas`)
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva
