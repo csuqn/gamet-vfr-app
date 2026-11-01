@@ -58,8 +58,10 @@ def test_area_ilegivel_vale_toda_a_area(eng):
 
 
 def test_entire_fir_e_line_valem_toda_a_area(eng):
+    # Desde a 4.5 "D OF LINE p1 - p2" é lido (test_v45.py); uma LINE que não
+    # se percebe (um só ponto) continua a ser toda a área.
     for corpo in ("SEV TURB FCST ENTIRE FIR SFC/FL080 STNR NC",
-                  "EMBD TS FCST N OF LINE N3800 W01000 - N4000 W00700 TOP FL300 STNR NC"):
+                  "EMBD TS FCST N OF LINE N3800 W01000 TOP FL300 STNR NC"):
         r = _r(eng, [_s(corpo)])
         assert {g["decision"] for g in r["regioes"]} == {"NO-GO"}, corpo
 
