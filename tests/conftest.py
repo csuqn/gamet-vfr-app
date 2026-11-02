@@ -221,3 +221,16 @@ def indice_sem_linhas(indice):
         return indice
     return {**indice, "sigmets": [e for e in indice.get("sigmets", [])
                                   if not re.search(r"\bOF\s+LINE\b", e.get("texto", ""))]}
+
+
+# 4.5.2: a faixa costeira (COT) passou a ter 10 km reais em todas as direcções
+# (até à 4.5.1, ~7,7 km em longitude). Os testes que comparam com motores fixos
+# anteriores (4.1, 4.2, 4.4) por igualdade verificam OUTRAS mudanças: dá-se ao
+# motor antigo a faixa da 4.5.2, que muda de propósito e é verificada contra a
+# 4.5.1 em test_v452.py. Os motores antigos só lêem a faixa em
+# SURFACE_POLYGONS["COT"] (surface_polygon), a partir de COASTAL_POLYGON.
+def cot_452(mod, eng):
+    """Põe no motor `mod` (fixo, anterior à 4.5.2) a faixa costeira de `eng`."""
+    mod.COASTAL_POLYGON = eng.COASTAL_POLYGON
+    mod.SURFACE_POLYGONS["COT"] = eng.COASTAL_POLYGON
+    return mod

@@ -392,12 +392,13 @@ GRAV = {"GO": 0, "MARGINAL": 1, "NO-GO": 2}
 
 
 @pytest.fixture(scope="module")
-def eng44():
+def eng44(eng):
     mod = types.ModuleType("motor_4_4")
     mod.__dict__["__file__"] = str(REF44)
     exec(compile(conftest._extract_engine(REF44.read_text(encoding="utf-8")), str(REF44),
                  "exec"), mod.__dict__)
-    return mod
+    # 4.5.2: a faixa COT da 4.5.2 (verificada contra a 4.5.1 em test_v452.py)
+    return conftest.cot_452(mod, eng)
 
 
 def test_referencia_4_4_le_line_como_toda_a_area(eng44):
