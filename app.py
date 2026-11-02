@@ -29,7 +29,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "4.5"
+APP_VERSION = "4.5.1"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -1119,16 +1119,19 @@ _DIAGONAL_RE = re.compile(r"\b[NSEW]{2,3}\s+OF\b")
 # LP78, mas não em Faro, Portimão e Lagos).
 _CARDINAL_BTN_RE = re.compile(r"\b[NSEW]\s+BTN\b")
 
-def extract_polygon(line, leituras=None):
+def extract_polygon(line, leituras=None, base=None):
     """
     Área dos qualificadores geográficos da linha, recortada à FIR, ou None
     se não houver nenhum legível. `leituras` (lista, opcional) recebe a
     leitura de cada cardinal solto antes de BTN (ex.: "S OF N3800"), para o
-    aviso.
+    aviso. `base` (4.5.1, só SIGMET/AIRMET): recorta a esse polígono em vez
+    da FIR — o semiplano do boletim, para a margem e o MOV partirem dele.
     """
     if _DIAGONAL_RE.search(line):
         return None
-    poly = FIR_POLYGON
+    fir = FIR_POLYGON if base is None else base
+    x0, y0, x1, y1 = fir.bounds
+    poly = fir
     geo_found = False
     partes = []  # cada qualificador isolado, recortado à FIR
     cardinais_lidos = 0
@@ -1146,14 +1149,14 @@ def extract_polygon(line, leituras=None):
         if card in ("E", "W"):
             return None                     # eixo trocado → sem área legível
         if card == "S":
-            lo = FIR_MINY
+            lo = y0
             lidas.append("S OF N" + (f"{d1}{m1}" if lat1 >= lat2 else f"{d2}{m2}"))
         elif card == "N":
-            hi = FIR_MAXY
+            hi = y1
             lidas.append("N OF N" + (f"{d1}{m1}" if lat1 <= lat2 else f"{d2}{m2}"))
         if card:
             cardinais_lidos += 1
-        partes.append(_clean_poly(FIR_POLYGON.intersection(box(FIR_MINX, lo, FIR_MAXX, hi))))
+        partes.append(_clean_poly(fir.intersection(box(x0, lo, x1, hi))))
         poly = _clean_poly(poly.intersection(partes[-1]))
 
     # BTN W/E\d\d\d\d AND W/E\d\d\d\d  (longitude)
@@ -1166,14 +1169,14 @@ def extract_polygon(line, leituras=None):
         if card in ("N", "S"):
             return None                     # eixo trocado → sem área legível
         if card == "E":
-            hi = FIR_MAXX
+            hi = x1
             lidas.append("E OF " + (f"{h1}{d1}{m1}" if lon1 <= lon2 else f"{h2}{d2}{m2}"))
         elif card == "W":
-            lo = FIR_MINX
+            lo = x0
             lidas.append("W OF " + (f"{h1}{d1}{m1}" if lon1 >= lon2 else f"{h2}{d2}{m2}"))
         if card:
             cardinais_lidos += 1
-        partes.append(_clean_poly(FIR_POLYGON.intersection(box(lo, FIR_MINY, hi, FIR_MAXY))))
+        partes.append(_clean_poly(fir.intersection(box(lo, y0, hi, y1))))
         poly = _clean_poly(poly.intersection(partes[-1]))
 
     # Um cardinal solto antes de um BTN que não foi lido (limites ilegíveis):
@@ -1185,34 +1188,34 @@ def extract_polygon(line, leituras=None):
     # (abaixo), e a união da 3.4 podia ser maior do que a leitura nova.
     antiga = None
     if cardinais_lidos:
-        antiga = extract_polygon(re.sub(r"\b[NSEW]\s+(BTN\b)", r"\1", line))
+        antiga = extract_polygon(re.sub(r"\b[NSEW]\s+(BTN\b)", r"\1", line), base=base)
 
     # N OF N\d\d\d\d
     for m in re.findall(r"\bN\s+OF\s+N(\d{2})(\d{2})", line):
         geo_found = True
         lat = int(m[0]) + int(m[1]) / 60
-        partes.append(_clean_poly(FIR_POLYGON.intersection(box(FIR_MINX, lat, FIR_MAXX, FIR_MAXY))))
+        partes.append(_clean_poly(fir.intersection(box(x0, lat, x1, y1))))
         poly = _clean_poly(poly.intersection(partes[-1]))
 
     # S OF N\d\d\d\d
     for m in re.findall(r"\bS\s+OF\s+N(\d{2})(\d{2})", line):
         geo_found = True
         lat = int(m[0]) + int(m[1]) / 60
-        partes.append(_clean_poly(FIR_POLYGON.intersection(box(FIR_MINX, FIR_MINY, FIR_MAXX, lat))))
+        partes.append(_clean_poly(fir.intersection(box(x0, y0, x1, lat))))
         poly = _clean_poly(poly.intersection(partes[-1]))
 
     # E OF W/E\d\d\d\d
     for m in re.findall(r"\bE\s+OF\s+([WE])(\d{2,3})(\d{2})", line):
         geo_found = True
         lon = _lon(m[1], m[2], m[0])
-        partes.append(_clean_poly(FIR_POLYGON.intersection(box(lon, FIR_MINY, FIR_MAXX, FIR_MAXY))))
+        partes.append(_clean_poly(fir.intersection(box(lon, y0, x1, y1))))
         poly = _clean_poly(poly.intersection(partes[-1]))
 
     # W OF W/E\d\d\d\d
     for m in re.findall(r"\bW\s+OF\s+([WE])(\d{2,3})(\d{2})", line):
         geo_found = True
         lon = _lon(m[1], m[2], m[0])
-        partes.append(_clean_poly(FIR_POLYGON.intersection(box(FIR_MINX, FIR_MINY, lon, FIR_MAXY))))
+        partes.append(_clean_poly(fir.intersection(box(x0, y0, lon, y1))))
         poly = _clean_poly(poly.intersection(partes[-1]))
 
     if geo_found and poly.is_empty and len(partes) > 1:
@@ -3366,6 +3369,11 @@ def _area_linhas(corpo):
     return geom, desc
 
 
+# Semiplano dos qualificadores de um boletim (4.5.1): fica só a parte a menos
+# de 1° da área do GAMET (> 10 NM em latitude e em longitude até 60°N).
+_QUAL_PERTO_GRAUS = 1
+
+
 def _area_boletim(t, corpo, ref=None):
     """
     Área de um SIGMET/AIRMET, SEM margem e sem recorte à FIR: WI polígono ou
@@ -3380,6 +3388,7 @@ def _area_boletim(t, corpo, ref=None):
         return None, "toda a área"
 
     wis = [m.end() for m in re.finditer(r"\bWI\b", corpo)]
+    qualificadores, geom45 = False, None
     if por_linhas:
         geom, desc = _area_linhas(corpo)
         if geom is None:
@@ -3403,9 +3412,17 @@ def _area_boletim(t, corpo, ref=None):
         if len(partes) > 1:
             desc = "área observada + prevista"
     else:
-        geom = extract_polygon(corpo)
+        # 4.5.1: o fenómeno ocupa o semiplano em toda a FIR LPPC, não só na
+        # área do GAMET. Lê-se numa caixa à volta da área do GAMET (como as
+        # linhas), para a margem do SIGMET e o MOV partirem dele — até à 4.5
+        # partiam da parte recortada à área do GAMET e perdiam-se pontos a
+        # menos de 10 NM do semiplano (degrau a N3800, costa a W01000;
+        # revisor do PR #33). geom45 é a leitura da 4.5, que se junta no fim.
+        geom = extract_polygon(corpo, base=_caixa_linhas())
         if geom is None:
             return None, "toda a área"
+        geom45 = extract_polygon(corpo)
+        qualificadores = True
         desc = "área"
 
     # Movimento: estende a área na direcção indicada durante toda a validade
@@ -3438,13 +3455,13 @@ def _area_boletim(t, corpo, ref=None):
             inicio_mov = min(inicio_mov, h)
         from shapely import affinity
         dist_nm = int(mv.group(2)) * (fim - inicio_mov).total_seconds() / 3600
-        if por_linhas and dist_nm > _LINHA_MOV_MAX_NM:
+        if (por_linhas or qualificadores) and dist_nm > _LINHA_MOV_MAX_NM:
             # O semiplano foi recortado à caixa: uma deslocação maior do que a
             # folga podia trazer para a FIR área que ficou fora da caixa.
             return None, "toda a área (deslocação grande demais)"
         dist = dist_nm * _NM_GRAUS
         rumo = math.radians(_RUMO[mv.group(1)])
-        if por_linhas:
+        if por_linhas or qualificadores:
             # O semiplano está recortado à caixa: os seus limites (até ~52°N)
             # não dizem a latitude onde a deslocação importa. Desloca-se com o
             # cos de cada extremo da área do GAMET (com folga) e fica a
@@ -3457,7 +3474,22 @@ def _area_boletim(t, corpo, ref=None):
         movidos = [affinity.translate(geom, xoff=dist * math.sin(rumo) / k,
                                       yoff=dist * math.cos(rumo)) for k in ks]
         geom = unary_union([geom] + movidos).convex_hull
+        if geom45 is not None and not geom45.is_empty:
+            # A deslocação da 4.5 (área recortada, cos do seu extremo norte)
+            k45 = math.cos(math.radians(max(abs(geom45.bounds[1]), abs(geom45.bounds[3]))))
+            geom45 = unary_union([geom45, affinity.translate(
+                geom45, xoff=dist * math.sin(rumo) / k45,
+                yoff=dist * math.cos(rumo))]).convex_hull
         desc += f", deslocação {mv.group(1)} {mv.group(2)} kt"
+    if qualificadores:
+        # Só interessa o semiplano junto à área do GAMET: fora de 1° dela não
+        # chega a 10 NM (e o cos da margem não desce por causa da caixa). A
+        # leitura da 4.5 junta-se sempre: nunca menos área do que até à 4.5.
+        x0, y0, x1, y1 = FIR_POLYGON.bounds
+        g = _QUAL_PERTO_GRAUS
+        geom = _clean_poly(geom.intersection(box(x0 - g, y0 - g, x1 + g, y1 + g)))
+        if geom45 is not None and not geom45.is_empty:
+            geom = _clean_poly(unary_union([geom, geom45]))
     return geom, desc
 
 
