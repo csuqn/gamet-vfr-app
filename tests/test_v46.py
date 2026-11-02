@@ -10,22 +10,30 @@ toda a área → NO-GO nos 52 pontos durante os GAMETs 010900/011500 e
 ("S OF N3430", "N3436") eram lidos e ficavam fora da área, como deve ser.
 
 Só nos boletins: no GAMET (parse_gamet) um "S OF N38" continua sem área (toda
-a FIR + aviso "Área não reconhecida"), exactamente como na 4.5.
+a FIR + aviso "Área não reconhecida"), exactamente como na 4.5.2.
+
+Junto com a 4.5.1 (margem de 10 NM medida a partir do semiplano não recortado)
+e a 4.5.2 (BTN com limites iguais → área ilegível): os qualificadores só com
+graus são lidos na caixa das linhas, como os com minutos, e a área é igual à
+do mesmo boletim com os minutos "00" escritos. Os exemplos do revisor do PR
+#33 escritos só com graus ficam NO-GO. Referência: o motor da 4.5.2.
 """
 import json
+import math
+import random
 import re
 import types
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
-from shapely.geometry import box
+from shapely.geometry import Point, box
 
 import conftest
 from conftest import build_gamet
 
 DADOS = Path(__file__).resolve().parent.parent / "dados"
-REF45 = Path(__file__).resolve().parent / "referencia" / "app_4_5.py"
+REF452 = Path(__file__).resolve().parent / "referencia" / "app_4_5_2.py"
 GRAV = {"GO": 0, "MARGINAL": 1, "NO-GO": 2}
 
 # GAMETs reais (ramo dados, gamets/2026/11/)
@@ -98,25 +106,25 @@ def _tudo_nogo(r):
 
 
 @pytest.fixture(scope="module")
-def eng45():
-    mod = types.ModuleType("motor_4_5")
-    mod.__dict__["__file__"] = str(REF45)
-    exec(compile(conftest._extract_engine(REF45.read_text(encoding="utf-8")), str(REF45),
+def eng452():
+    mod = types.ModuleType("motor_4_5_2")
+    mod.__dict__["__file__"] = str(REF452)
+    exec(compile(conftest._extract_engine(REF452.read_text(encoding="utf-8")), str(REF452),
                  "exec"), mod.__dict__)
     return mod
 
 
-def test_referencia_e_a_4_5(eng, eng45):
-    assert eng45.APP_VERSION == "4.5"
+def test_referencia_e_a_4_5_2(eng, eng452):
+    assert eng452.APP_VERSION == "4.5.2"
     assert tuple(int(x) for x in eng.APP_VERSION.split(".")) >= (4, 6)
 
 
 # --- Boletins reais ---------------------------------------------------------
 
 @pytest.mark.parametrize("sig,agora", [(T02, "2026-11-01T09:30"), (T03, "2026-11-01T13:00")])
-def test_sigmets_reais_area_lida_fora_da_area(eng, eng45, sig, agora):
+def test_sigmets_reais_area_lida_fora_da_area(eng, eng452, sig, agora):
     agora = _t(agora)
-    assert eng45.area_sigmet(sig, agora)[0] is None          # 4.5: toda a área
+    assert eng452.area_sigmet(sig, agora)[0] is None          # 4.5.2: toda a área
     g, d = eng.area_sigmet(sig, agora)
     assert g is not None and g.is_empty, d                  # fora da área do GAMET
     assert d == "área + 10 NM"
@@ -231,7 +239,7 @@ def test_airmet_so_graus_sem_margem(eng):
 
 
 # Semiplano lido à mão; a área de referência é a do mesmo boletim escrito com
-# minutos ("N40" → "N4000"), lida pela 4.5.
+# minutos ("N40" → "N4000"), lida pela 4.5.2.
 @pytest.mark.parametrize("corpo,semi,com_minutos,toda_45", [
     ("EMBD TS FCST N OF N40 TOP FL300 MOV S 10KT NC", (-12, 40, -5, 43),
      "EMBD TS FCST N OF N4000 TOP FL300 MOV S 10KT NC", True),
@@ -241,22 +249,22 @@ def test_airmet_so_graus_sem_margem(eng):
      "EMBD TS FCST BTN W00900 AND W00800 TOP FL300 STNR NC", True),
     ("EMBD TS FCST S BTN N38 - N39 TOP FL300 STNR NC", (-12, 35, -5, 39),
      "EMBD TS FCST S BTN N3800 - N3900 TOP FL300 STNR NC", True),
-    # Misto (minutos + só graus): a 4.5 lia só o N OF N3930 e ignorava em
+    # Misto (minutos + só graus): a 4.5.2 lia só o N OF N3930 e ignorava em
     # silêncio o E OF W008 (área maior); a 4.6 lê os dois e intersecta-os,
     # como os qualificadores do GAMET. Nenhum boletim do arquivo é assim.
     ("EMBD TS FCST N OF N3930 AND E OF W008 TOP FL300 STNR NC", (-8, 39.5, -5, 43),
      "EMBD TS FCST N OF N3930 AND E OF W00800 TOP FL300 STNR NC", False),
 ])
-def test_so_graus_igual_a_forma_com_minutos(eng, eng45, corpo, semi, com_minutos, toda_45):
-    """Área nova ⊆ toda a área (4.5), ⊇ semiplano lido, = a forma com minutos."""
+def test_so_graus_igual_a_forma_com_minutos(eng, eng452, corpo, semi, com_minutos, toda_45):
+    """Área nova ⊆ toda a área (4.5.2), ⊇ semiplano lido, = a forma com minutos."""
     s = _s(corpo)
-    assert (eng45.area_sigmet(s, AGORA)[0] is None) == toda_45
+    assert (eng452.area_sigmet(s, AGORA)[0] is None) == toda_45
     g, d = eng.area_sigmet(s, AGORA)
     assert g is not None and not g.is_empty
     assert g.difference(eng.FIR_POLYGON).area < 1e-9
     alvo = eng.FIR_POLYGON.intersection(box(*semi))
     assert alvo.difference(g).area < 1e-9, corpo
-    g5, d5 = eng45.area_sigmet(_s(com_minutos), AGORA)
+    g5, d5 = eng452.area_sigmet(_s(com_minutos), AGORA)
     assert d == d5
     assert g.symmetric_difference(g5).area < 1e-12, corpo
 
@@ -277,10 +285,10 @@ def test_so_graus_igual_a_forma_com_minutos(eng, eng45, corpo, semi, com_minutos
     "EMBD TS FCST W OF W0080 TOP FL300 STNR NC",
     "EMBD TS FCST NW OF N40 TOP FL300 STNR NC",                  # diagonal: toda a área
 ])
-def test_formas_antigas_iguais_a_4_5(eng, eng45, corpo):
+def test_formas_antigas_iguais_a_4_5_2(eng, eng452, corpo):
     s = _s(corpo)
     g6, d6 = eng.area_sigmet(s, AGORA)
-    g5, d5 = eng45.area_sigmet(s, AGORA)
+    g5, d5 = eng452.area_sigmet(s, AGORA)
     assert d6 == d5
     assert (g6 is None) == (g5 is None)
     if g6 is not None:
@@ -294,36 +302,36 @@ def test_formas_antigas_iguais_a_4_5(eng, eng45, corpo):
     "SFC VIS: BTN N38 AND N39 0800M FG",
     "SIG CLD: N OF N4000 BKN 002/010HFT AGL",
 ])
-def test_gamet_inalterado(eng, eng45, corpo):
+def test_gamet_inalterado(eng, eng452, corpo):
     """No GAMET um qualificador só com graus continua toda a FIR + aviso."""
     if "N4000" not in corpo:
         assert eng.extract_polygon(corpo) is None
     g = build_gamet("SECN I " + corpo, validity="171500/172100")
     r6 = eng.analisar_gamet(g, "manual", agora=AGORA)
-    r5 = eng45.analisar_gamet(g, "manual", agora=AGORA)
+    r5 = eng452.analisar_gamet(g, "manual", agora=AGORA)
     assert r6["avisos"] == r5["avisos"]
     assert r6["por_dec"] == r5["por_dec"]
-    assert _decisoes(eng, r6) == _decisoes(eng45, r5)
+    assert _decisoes(eng, r6) == _decisoes(eng452, r5)
     if "N4000" not in corpo:
         assert _tudo_nogo(r6)
         assert any("Área não reconhecida" in m for _, m in r6["avisos"])
 
 
-# --- Contra o motor da 4.5: todo o arquivo -----------------------------------
-# tests/referencia/app_4_5.py é cópia fixa do app.py do main f40e20f (não
-# editar).
+# --- Contra o motor da 4.5.2: todo o arquivo ---------------------------------
+# tests/referencia/app_4_5_2.py é cópia fixa do app.py do main 947f47d
+# (`git show 947f47d:app.py`; não editar).
 
-def test_boletins_do_arquivo_contra_4_5(eng, eng45):
+def test_boletins_do_arquivo_contra_4_5_2(eng, eng452):
     indice = _arquivo()
     graus = 0
     for e in indice.get("sigmets", []):
         txt = e.get("texto", "")
         ref = eng._iso_utc(e.get("inicio")) or AGORA
         g6, d6 = eng.area_sigmet(txt, ref)
-        g5, d5 = eng45.area_sigmet(txt, ref)
+        g5, d5 = eng452.area_sigmet(txt, ref)
         if GRAUS_RE.search(txt):
             graus += 1
-            assert g5 is None, txt                             # 4.5: toda a área
+            assert g5 is None, txt                             # 4.5.2: toda a área
             assert g6 is not None, txt
             assert g6.difference(eng.FIR_POLYGON).area < 1e-9, txt
             m = re.search(r"\b([NS])\s+OF\s+N(\d{2})(?![\dA-Z])", txt)
@@ -331,8 +339,8 @@ def test_boletins_do_arquivo_contra_4_5(eng, eng45):
                 lat = int(m.group(2))
                 semi = box(-30, lat, 10, 60) if m.group(1) == "N" else box(-30, 20, 10, lat)
                 assert eng.FIR_POLYGON.intersection(semi).difference(g6).area < 1e-9, txt
-                # igual ao mesmo boletim com os minutos escritos (lido pela 4.5)
-                g5m, _ = eng45.area_sigmet(txt.replace(m.group(0), m.group(0) + "00"), ref)
+                # igual ao mesmo boletim com os minutos escritos (lido pela 4.5.2)
+                g5m, _ = eng452.area_sigmet(txt.replace(m.group(0), m.group(0) + "00"), ref)
                 assert g5m is not None and g6.symmetric_difference(g5m).area < 1e-12, txt
             continue
         assert d6 == d5, txt
@@ -341,12 +349,12 @@ def test_boletins_do_arquivo_contra_4_5(eng, eng45):
             assert g6.symmetric_difference(g5).area < 1e-9, txt
         a6 = eng.ler_airmet(txt, ref) if "AIRMET" in txt[:20] else None
         if a6 is not None:
-            a5 = eng45.ler_airmet(txt, ref)
+            a5 = eng452.ler_airmet(txt, ref)
             assert repr(a6) == repr(a5), txt
     assert graus >= 2                                          # o T02 e o T03 reais
 
 
-def test_arquivo_contra_4_5(eng, eng45):
+def test_arquivo_contra_4_5_2(eng, eng452):
     indice = _arquivo()
     piso_idx = _sem_graus(indice)
     com_graus = 0
@@ -365,8 +373,8 @@ def test_arquivo_contra_4_5(eng, eng45):
                       fim - timedelta(minutes=15)):
             kw = dict(indice=indice, entrada=entrada, agora=agora)
             rn = eng.analisar_gamet(texto, "arquivo_hist", **kw)
-            rv = eng45.analisar_gamet(texto, "arquivo_hist", **kw)
-            dn, dv = _decisoes(eng, rn), _decisoes(eng45, rv)
+            rv = eng452.analisar_gamet(texto, "arquivo_hist", **kw)
+            dn, dv = _decisoes(eng, rn), _decisoes(eng452, rv)
             if not tem:
                 assert rn["por_dec"] == rv["por_dec"], f.name
                 assert rn["avisos"] == rv["avisos"], f.name
@@ -374,11 +382,167 @@ def test_arquivo_contra_4_5(eng, eng45):
                 assert dn == dv, f.name
                 continue
             com_graus += 1
-            piso = eng45.analisar_gamet(texto, "arquivo_hist", indice=piso_idx,
+            piso = eng452.analisar_gamet(texto, "arquivo_hist", indice=piso_idx,
                                         entrada=entrada, agora=agora)
-            dp = _decisoes(eng45, piso)
+            dp = _decisoes(eng452, piso)
             for n in eng.AERODROMES:
                 assert GRAV[dn[n]] <= GRAV[dv[n]], (f.name, n)
                 assert GRAV[dn[n]] >= GRAV[dp[n]], (f.name, n)   # nunca abaixo do piso
+            # Os T02/T03 de 1-nov estão a > 100 NM: igual à 4.5.2 sem eles.
+            assert dn == dp, f.name
+            assert rn["por_dec"] == piso["por_dec"], f.name
             assert rn["faixa_sig"] == rv["faixa_sig"], f.name    # continua ACTIVO
     assert com_graus > 0
+
+
+# --- 4.6 junto com a 4.5.1: margem a partir do semiplano não recortado --------
+# Os exemplos do revisor do PR #33, escritos só com graus: na 4.6 sem a 4.5.1
+# ficavam em GO (0,4–8,6 NM do semiplano, mas longe da parte recortada à área
+# do GAMET).
+
+AGORA_M = datetime(2026, 11, 1, 11, 0, tzinfo=timezone.utc)
+CALMO_M = build_gamet("SECN I SFC VIS: N OF N4100 5000M BR", validity="011000/011400")
+
+
+def _sig_m(q, mov="STNR NC", tipo="SIGMET", sid="T01", fen="EMBD TS"):
+    return (f"LPPC {tipo} {sid} VALID 011000/011400 LPPT- LPPC LISBOA FIR {fen} FCST {q} "
+            f"TOP FL390 {mov}")
+
+
+@pytest.mark.parametrize("q,lat,lon", [
+    ("S OF N38", 38.0067, -9.9833),
+    ("W OF W010", 37.2567, -9.8333),
+    ("E OF W008", 41.9667, -8.1833),
+    ("N OF N42", None, None),                       # LPBG
+])
+def test_exemplos_do_revisor_so_graus_nogo(eng, eng452, q, lat, lon):
+    if lat is None:
+        lat, lon = eng.AERODROMES["Bragança (LPBG)"]
+    s = _sig_m(q)
+    assert eng.FIR_POLYGON.contains(Point(lon, lat))
+    assert eng452.area_sigmet(s, AGORA_M)[0] is None          # 4.5.2: toda a área
+    g, d = eng.area_sigmet(s, AGORA_M)
+    assert g is not None and d == "área + 10 NM", d
+    assert g.contains(Point(lon, lat)), q
+    r = eng.analisar_gamet(CALMO_M, "ipma", boletins=[s], boletins_at=AGORA_M, agora=AGORA_M)
+    assert not _tudo_nogo(r)
+    assert _dec(eng, r, lat, lon) == "NO-GO", q
+    # Igual ao mesmo boletim com os minutos escritos, lido pela 4.5.2
+    m = _com_minutos(q)
+    gm, dm = eng452.area_sigmet(_sig_m(m), AGORA_M)
+    assert dm == d and g.symmetric_difference(gm).area < 1e-12, (q, m)
+
+
+def _com_minutos(q):
+    """A mesma linha com "00" acrescentado às coordenadas só com graus."""
+    return re.sub(r"\b(N\d{2}|[WE]\d{3})(?![\dA-Z])", r"\g<1>00", q)
+
+
+def _gera_graus(rnd):
+    """Qualificador gerado (como em test_v46_margem) com parte das coordenadas
+    só com graus. Devolve (texto, intervalo de latitude, de longitude)."""
+    import test_v46_margem as tm
+    q, la, lo = tm._gera_qual(rnd)
+    # Só com graus as coordenadas com minutos 00 (sorteadas uma a uma)
+    q = re.sub(r"\b(N\d{2}|[WE]\d{3})00\b",
+               lambda m: m.group(1) if rnd.random() < 0.7 else m.group(0), q)
+    return q, la, lo
+
+
+@pytest.mark.parametrize("com_mov", [False, True])
+def test_margem_so_graus_contra_semiplano_e_contem_minutos(eng, eng452, com_mov, monkeypatch):
+    """A propriedade do test_v46_margem para formas só com graus: todo o ponto
+    da área do GAMET a ≤ 9,8 NM da área varrida fica dentro; área igual à da
+    forma com minutos na 4.6 e ⊇ a da forma com minutos na 4.5.2."""
+    import test_v46_margem as tm
+    # O gerador do test_v46_margem, com mais coordenadas de minutos 00
+    minutos = [0, 0, 0, 0, 0, 15, 30, 45]
+    monkeypatch.setattr(tm, "_gera_lat", lambda r: f"N{r.randint(36, 42):02d}{r.choice(minutos):02d}")
+    monkeypatch.setattr(tm, "_gera_lon", lambda r: f"W{r.randint(6, 10):03d}{r.choice(minutos):02d}")
+    rnd = random.Random(4600 + com_mov)
+    verificados = so_graus = 0
+    for _ in range(200):
+        n = 1 if com_mov else rnd.choice([1, 1, 2, 2, 3])
+        partes, lat_iv, lon_iv = [], (-math.inf, math.inf), (-math.inf, math.inf)
+        for _ in range(n):
+            t, la, lo = _gera_graus(rnd)
+            partes.append(t)
+            lat_iv = (max(lat_iv[0], la[0]), min(lat_iv[1], la[1]))
+            lon_iv = (max(lon_iv[0], lo[0]), min(lon_iv[1], lo[1]))
+        q = rnd.choice([" AND ", " "]).join(partes)
+        mov, dn, de = "STNR NC", 0.0, 0.0
+        if com_mov:
+            rumo = rnd.choice(["N", "S", "E", "W", "NE", "SW", "NW", "SE", "ENE", "SSW"])
+            kt = rnd.randint(5, 30)
+            mov = f"MOV {rumo} {kt}KT NC"
+            ang = math.radians(tm._RUMOS[rumo])
+            dn, de = kt * 4 * math.cos(ang), kt * 4 * math.sin(ang)
+        m = _com_minutos(q)
+        if m != q:
+            so_graus += 1
+        s, sm = _sig_m(q, mov), _sig_m(m, mov)
+        g, d = eng.area_sigmet(s, AGORA_M)
+        gm6, dm6 = eng.area_sigmet(sm, AGORA_M)
+        gm, _ = eng452.area_sigmet(sm, AGORA_M)
+        assert d == dm6, (s, d, dm6)
+        assert (g is None) == (gm6 is None) == (gm is None), s
+        if g is None:
+            continue
+        assert g.symmetric_difference(gm6).area < 1e-12, s
+        assert tm._contem(g, gm), s
+        if lat_iv[0] <= lat_iv[1] and lon_iv[0] <= lon_iv[1]:
+            verificados += tm._verifica_margem(eng, g, lat_iv, lon_iv, dn, de, s)
+        # AIRMET: sem margem; igual à forma com minutos
+        a = _sig_m(q, mov, tipo="AIRMET", sid="3", fen="BKN CLD 002/010HFT AGL")
+        am = _sig_m(m, mov, tipo="AIRMET", sid="3", fen="BKN CLD 002/010HFT AGL")
+        la6, lam = eng.ler_airmet(a, AGORA_M), eng.ler_airmet(am, AGORA_M)
+        # (a descrição cita o texto do boletim, só com graus)
+        assert _com_minutos(la6["area"]) == lam["area"], a
+        assert la6["area_lida"] == lam["area_lida"] and la6["fora"] == lam["fora"], a
+        ga = eng.unary_union([b.polygon for b in la6["blocos"]])
+        gam = eng.unary_union([b.polygon for b in lam["blocos"]])
+        assert ga.symmetric_difference(gam).area < 1e-12, a
+    assert so_graus > 100
+    assert verificados > 1000
+
+
+# --- 4.6 junto com a 4.5.2: BTN degenerado só com graus -----------------------
+
+BTN_DEGENERADOS_GRAUS = [
+    "BTN N39 AND N39",
+    "BTN N39 AND N3900",
+    "BTN N3900 - N39",
+    "S BTN N39 - N39",
+    "N BTN N39-N3900",
+    "BTN W008 AND W008",
+    "BTN W008 - W00800",
+    "E BTN W008 - W0800",
+]
+
+
+@pytest.mark.parametrize("q", BTN_DEGENERADOS_GRAUS)
+def test_btn_degenerado_so_graus_area_ilegivel(eng, q):
+    assert eng._btn_degenerado(q, graus=True)
+    assert not eng._btn_degenerado(q)                         # sem graus: como na 4.5.2
+    for mov in ("STNR NC", "MOV E 10KT NC"):
+        s = _sig_m(q, mov)
+        g, d = eng.area_sigmet(s, AGORA_M)
+        assert g is None and d == "toda a área (área ilegível)", (q, mov, d)
+        r = eng.analisar_gamet(CALMO_M, "ipma", boletins=[s], boletins_at=AGORA_M, agora=AGORA_M)
+        assert _tudo_nogo(r), (q, mov)
+        assert not any("fora da área" in m for _, m in r["avisos"]), (q, mov)
+        a = _sig_m(q, mov, tipo="AIRMET", sid="1", fen="BKN CLD 002/010HFT AGL")
+        la = eng.ler_airmet(a, AGORA_M)
+        assert la["area_lida"] is False and not la["fora"], (q, mov)
+        assert la["area"].startswith("toda a FIR")
+        r = eng.analisar_gamet(CALMO_M, "ipma", boletins=[a], boletins_at=AGORA_M, agora=AGORA_M)
+        assert any("Área do AIRMET não reconhecida" in m for _, m in r["avisos"]), (q, mov)
+        assert _tudo_nogo(r), (q, mov)
+
+
+@pytest.mark.parametrize("q", ["BTN N39 AND N3901", "BTN N38 - N39", "BTN W008 - W00801",
+                               "S BTN N38 AND N39"])
+def test_btn_so_graus_nao_degenerado_lido(eng, q):
+    assert not eng._btn_degenerado(q, graus=True)
+    g, d = eng.area_sigmet(_sig_m(q), AGORA_M)
+    assert g is not None and not g.is_empty and d == "área + 10 NM", (q, d)

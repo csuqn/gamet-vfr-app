@@ -286,20 +286,69 @@ caixa) → toda a área. O MOV desloca com o cos dos dois extremos de latitude d
 diagonal encurtava a margem para 5–8 NM (revisor do #32). A faixa continua a
 dizer ACTIVO e o alerta "fora da área do GAMET".
 Os níveis (`TOP FL340`, `SFC/FL080`) ainda não restringem a decisão.
-**Qualificadores só com graus nos boletins (4.6).** SIGMETs reais T02
+
+**BTN degenerado e COT em km (4.5.2, pedido do Duarte a 2-nov-2026; sem caso
+real).** Um `BTN` com os dois limites iguais (`BTN N3945 AND N3945`,
+`S BTN N3945 - N3945`, `BTN W00800 - W0800`; `_btn_degenerado`) dava área
+vazia: SIGMET/AIRMET "fora da área do GAMET" sem aviso (também com MOV) e
+subentrada do GAMET descartada em silêncio. Agora não é área legível, como a
+linha degenerada do `D OF LINE`: `extract_polygon` devolve None → SIGMET toda a
+área ("área ilegível"), AIRMET toda a FIR + aviso "Área do AIRMET não
+reconhecida", Secção I do GAMET toda a FIR + aviso "Área não reconhecida"
+(regra da 3.4). Na Secção II (`nuvens_baixas_secn2`, só informativa) a nota
+"Nuvens baixas" fica em toda a FIR, **sem** o aviso "Área não reconhecida"
+(revisor do #35). BTN com limites diferentes fica igual. **COT**: o buffer da
+costa era em graus (`10/111`, ~7,7 km em longitude a 40°N); agora é em km reais
+(`_faixa_costeira_km`: cada troço com a longitude escalada pelo cos da latitude
+mais a norte, raio corrigido para o polígono inscrito), unido ao antigo — ≥ 10
+km em todas as direcções, nunca menor (área +19%). LAN/MAR não mudam; nenhum
+dos 52 pontos muda de COT. Contra o motor da 4.5.1 (`tests/referencia/
+app_4_5_1.py`, `test_v452.py`): arquivo a 2-nov-2026 (77 GAMETs, 42 com COT, 3
+horas) igual nos aeródromos e nos avisos, 0 mais permissivas; na grelha de
+0,2°, 7 pontos em terra a 8–10 km da costa ficam mais severos em 27 GAMETs. Os testes que
+comparam por igualdade com os motores da 4.1/4.2/4.4 dão ao motor antigo a
+faixa COT nova (`conftest.cot_452`), porque verificam outras mudanças.
+
+**Margem a partir do semiplano (4.5.1, revisor do PR #33).** Com os
+qualificadores do GAMET (`S OF N3800`, `W OF W01000`, `BTN …`) num SIGMET, a
+4.5 recortava o semiplano à área do GAMET e só depois somava os 10 NM (e o
+MOV): um ponto da área do GAMET a menos de 10 NM do semiplano mas longe da
+parte recortada (degrau a N3800, costa a W01000, fronteira) ficava fora do
+NO-GO. Agora `extract_polygon(…, base=_caixa_linhas())` lê o semiplano na
+caixa das linhas, o MOV desloca-o com os cos dos extremos da área do GAMET
+(±1°, como as linhas; MOV > 360 NM → toda a área), fica a parte a menos de
+`_QUAL_PERTO_GRAUS` (1°) da área do GAMET e junta-se **sempre** a leitura da
+4.5 (área nova ⊇ 4.5). WI e `D OF LINE` já não eram recortados: iguais. No
+SIGMET, COT/LAN/MAR continuam a não recortar nada. AIRMET: sem margem; sem
+MOV, igual à 4.5 dentro da FIR; com MOV pode crescer. `parse_gamet` igual
+(`base` só nos boletins).
+
+**Qualificadores só com graus nos boletins (4.6, PR #33).** SIGMETs reais T02
 010850/011250 (`EMBD TS FCST S OF N33`) e T03 011250/011650 (`S OF N34`): os
 minutos podem faltar e valem 00' (Anexo 3, a mesma regra da 3.5 para as
 coordenadas), mas `N/S OF Nnn`, `E/W OF Wnnn` e `BTN` exigiam 4 algarismos →
-toda a área → NO-GO nos 52 pontos durante o 010900/011500 e o 011500/012100.
-`extract_polygon(…, graus=True)` (só em `_area_boletim`, SIGMET e AIRMET)
-aceita `Nnn`/`Wnnn` inteiros (seguidos de algo que não é algarismo nem letra:
-`N343`, `N33X`, `W08`, `W0080` continuam como na 4.5); a área é igual à do
-mesmo boletim escrito com minutos. Num boletim misto (`N OF N3930 AND E OF
-W008`) a 4.5 ignorava em silêncio o qualificador só com graus; agora
+toda a área → NO-GO nos 52 pontos durante o 010300/010900, o 010900/011500 e o
+011500/012100 (em `arquivo_hist` conta todo boletim que se sobrepõe à
+validade). `extract_polygon(…, graus=True)` (só em `_area_boletim`, SIGMET e
+AIRMET) aceita `Nnn`/`Wnnn` inteiros (seguidos de algo que não é algarismo nem
+letra: `N343`, `N33X`, `W08`, `W0080` continuam ilegíveis). Vale junto com a
+4.5.1 e a 4.5.2: o semiplano lido com graus é lido na caixa
+(`base=_caixa_linhas()`, margem e MOV a partir dele, `_QUAL_PERTO_GRAUS`) e
+unido com `geom45` = `extract_polygon(corpo, graus=True)` recortado à FIR,
+que é a leitura da 4.5 da mesma linha com os minutos `00` escritos — a área é
+**igual à do mesmo boletim escrito com minutos** (`S OF N38` ≡ `S OF N3800`:
+os exemplos do revisor do #33 — 38.0067/-9.9833, `W OF W010` em
+37.2567/-9.8333, `E OF W008` em 41.9667/-8.1833, `N OF N42` em LPBG — ficam
+NO-GO). `_btn_degenerado(…, graus=True)` reconhece também `BTN N39 AND N39` e
+`BTN N39 - N3900` → área ilegível. Num boletim misto (`N OF N3930 AND E OF
+W008`) a 4.5.2 ignorava em silêncio o qualificador só com graus; agora
 intersecta os dois (nenhum caso no arquivo). **No GAMET não muda**: um
 `S OF N38` na Secção I continua toda a FIR + aviso "Área não reconhecida"
-(aceitá-lo seria mais permissivo; fica para o Duarte decidir). Testado contra
-o motor da 4.5 (`tests/referencia/app_4_5.py`, `test_v46.py`).
+(aceitá-lo seria mais permissivo; fica para o Duarte decidir). Contra o motor
+da 4.5.2 (`tests/referencia/app_4_5_2.py`, `test_v46.py`): arquivo a
+2-nov-2026 (77 GAMETs, 3 horas, `arquivo_hist`) igual fora dos períodos com o
+T02/T03; nesses (010300, 010900, 011500) igual à 4.5.2 sem esses boletins —
+deixa de ser NO-GO em todo o lado (0 mais severas).
 Desde a 3.2 (decisão do Duarte), um SIGMET referido em `SIGMET APPLICABLE`
 que se **sabe** terminado — validade acabada ou `CNL SIGMET <id>` na página do
 IPMA ou nos boletins arquivados das últimas 24 h (`sigmets_terminados`) —
@@ -452,7 +501,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-1956 testes (com a NiceGUI instalada; sem ela, os do `test_nicegui.py` saltam). Devem passar a 100%.
+2078 testes (com a NiceGUI instalada; sem ela, os do `test_nicegui.py` saltam). Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -585,19 +634,47 @@ python3 -m pytest
   `OF LINE`, e nesses nunca abaixo da 4.4 sem esse boletim. Os testes do
   arquivo contra a 4.1/4.2 tiram os boletins `OF LINE` do índice
   (`conftest.indice_sem_linhas`)
+- `tests/test_v46_margem.py` — margem do SIGMET a partir do semiplano não
+  recortado (4.5.1): os exemplos do revisor do PR #33 (`S OF N3800` em
+  38.0067/-9.9833, `W OF W01000` em 37.2567/-9.8333 → NO-GO, na 4.5 GO);
+  qualificadores, BTN, cardinal + BTN e combinações gerados, parados e com MOV:
+  todo o ponto da área do GAMET a ≤ 9,8 NM da área varrida (calculada à mão)
+  fica dentro, área ⊇ 4.5 (SIGMET e AIRMET; AIRMET sem MOV igual); WI/LINE e
+  `extract_polygon` do GAMET iguais; contra o motor da **4.5**
+  (`tests/referencia/app_4_5.py`, cópia fixa do `app.py` do main f40e20f; não
+  editar): boletins do arquivo ⊇ 4.5 e todo o arquivo em `arquivo_hist` a 3
+  horas nunca mais permissivo. `test_v45.py` aceita ⊇ (em vez de igual) para os
+  boletins do arquivo com qualificadores
+- `tests/test_v452.py` — BTN degenerado (limites iguais em latitude/longitude,
+  AND/hífen, cardinal solto) → SIGMET toda a área, AIRMET toda a FIR + aviso,
+  GAMET toda a FIR + aviso "Área não reconhecida" (e o erro na 4.5.1); BTN não
+  degenerados iguais; COT em km (⊇ antigo, ≥ 9,9 km em 8 direcções numa amostra
+  da costa, não cresce demais, aeródromos e LAN/MAR iguais, ponto a 8,5 km da
+  costa, recorte de AIRMET); contra o motor da **4.5.1**
+  (`tests/referencia/app_4_5_1.py`, cópia fixa do `app.py` do main a76a93b; não
+  editar): casos gerados de COT/LAN/MAR/BTN (GAMET e boletins) e todo o arquivo
+  em `arquivo_hist` a 3 horas, nunca mais permissivo nos 52 aeródromos e numa
+  grelha de 0,2°
 - `tests/test_v46.py` — qualificadores de SIGMET/AIRMET só com graus (T02 e T03
   reais de 1-nov, `S OF N33`/`S OF N34`: área lida, fora da área do GAMET,
   faixa ACTIVO; 010900 e 011500 com fonte `ipma` e `arquivo_hist` iguais ao
   GAMET sozinho; `N OF N40`, `W OF W008`, `BTN N38 AND N39`, `S BTN N38 - N39`
   NO-GO na área + 10 NM e iguais à forma com minutos; AIRMET sem margem; formas
-  com minutos e ilegíveis iguais à 4.5; no GAMET `S OF N38` continua toda a
-  FIR + aviso) e contra o motor da **4.5** (`tests/referencia/app_4_5.py`,
-  cópia fixa do `app.py` do main f40e20f; não editar): área de todos os
-  boletins do arquivo igual excepto os só com graus (nesses ⊆ toda a área e ⊇
-  o semiplano lido); todo o arquivo em `arquivo_hist` a 3 horas igual fora dos
-  períodos com esses boletins, e nesses nunca acima da 4.5 nem abaixo da 4.5
-  sem eles. Os testes do arquivo contra a 4.1/4.2/4.4 tiram esses boletins do
-  índice (`conftest.indice_sem_graus`)
+  com minutos e ilegíveis iguais à 4.5.2; no GAMET `S OF N38` continua toda a
+  FIR + aviso). Com a 4.5.1: os exemplos do revisor do #33 só com graus
+  (`S OF N38`, `W OF W010`, `E OF W008`, `N OF N42` em LPBG) → NO-GO; a
+  propriedade do `test_v46_margem.py` com coordenadas só com graus (parado e
+  com MOV: todo o ponto a ≤ 9,8 NM da área varrida dentro; área = a da forma
+  com minutos, ⊇ a da 4.5.2; AIRMET igual). Com a 4.5.2: BTN degenerado só com
+  graus (`BTN N39 AND N39`, `BTN N39 - N3900`, `BTN W008 - W00800`) → área
+  ilegível (SIGMET toda a área, AIRMET toda a FIR + aviso). Contra o motor da
+  **4.5.2** (`tests/referencia/app_4_5_2.py`, cópia fixa do `app.py` do main
+  947f47d; não editar): área de todos os boletins do arquivo igual excepto os
+  só com graus (nesses = a forma com minutos lida pela 4.5.2); todo o arquivo
+  em `arquivo_hist` a 3 horas igual fora dos períodos com esses boletins, e
+  nesses nunca acima da 4.5.2 e igual à 4.5.2 sem eles. Os testes do arquivo
+  contra a 4.1/4.2/4.4/4.5/4.5.1 tiram esses boletins do índice
+  (`conftest.indice_sem_graus`)
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva

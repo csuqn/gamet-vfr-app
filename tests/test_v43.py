@@ -55,12 +55,13 @@ CASO2 = "SFC VIS:09/11 0800M FG 13/15 2000M BR"
 
 
 @pytest.fixture(scope="module")
-def eng42():
+def eng42(eng):
     src = REF.read_text(encoding="utf-8")
     mod = types.ModuleType("motor_4_2")
     mod.__dict__["__file__"] = str(REF)
     exec(compile(conftest._extract_engine(src), str(REF), "exec"), mod.__dict__)
-    return mod
+    # 4.5.2: a faixa COT da 4.5.2 (verificada contra a 4.5.1 em test_v452.py)
+    return conftest.cot_452(mod, eng)
 
 
 def _t(h, m=0, dia=28):
