@@ -74,12 +74,13 @@ def _a(corpo, n="5", val="281000/281500"):
 
 
 @pytest.fixture(scope="module")
-def eng41():
+def eng41(eng):
     src = REF.read_text(encoding="utf-8")
     mod = types.ModuleType("motor_4_1")
     mod.__dict__["__file__"] = str(REF)
     exec(compile(conftest._extract_engine(src), str(REF), "exec"), mod.__dict__)
-    return mod
+    # 4.5.2: a faixa COT da 4.5.2 (verificada contra a 4.5.1 em test_v452.py)
+    return conftest.cot_452(mod, eng)
 
 
 def test_referencia_e_a_4_1(eng41):

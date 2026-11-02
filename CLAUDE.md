@@ -287,6 +287,26 @@ diagonal encurtava a margem para 5–8 NM (revisor do #32). A faixa continua a
 dizer ACTIVO e o alerta "fora da área do GAMET".
 Os níveis (`TOP FL340`, `SFC/FL080`) ainda não restringem a decisão.
 
+**BTN degenerado e COT em km (4.5.2, pedido do Duarte a 2-nov-2026; sem caso
+real).** Um `BTN` com os dois limites iguais (`BTN N3945 AND N3945`,
+`S BTN N3945 - N3945`, `BTN W00800 - W0800`; `_btn_degenerado`) dava área
+vazia: SIGMET/AIRMET "fora da área do GAMET" sem aviso (também com MOV) e
+subentrada do GAMET descartada em silêncio. Agora não é área legível, como a
+linha degenerada do `D OF LINE`: `extract_polygon` devolve None → SIGMET toda a
+área ("área ilegível"), AIRMET toda a FIR + aviso "Área do AIRMET não
+reconhecida", GAMET (Secção I e II) toda a FIR + aviso "Área não reconhecida"
+(regra da 3.4). BTN com limites diferentes fica igual. **COT**: o buffer da
+costa era em graus (`10/111`, ~7,7 km em longitude a 40°N); agora é em km reais
+(`_faixa_costeira_km`: cada troço com a longitude escalada pelo cos da latitude
+mais a norte, raio corrigido para o polígono inscrito), unido ao antigo — ≥ 10
+km em todas as direcções, nunca menor (área +19%). LAN/MAR não mudam; nenhum
+dos 52 pontos muda de COT. Contra o motor da 4.5.1 (`tests/referencia/
+app_4_5_1.py`, `test_v452.py`): arquivo a 2-nov-2026 (77 GAMETs, 42 com COT, 3
+horas) igual nos aeródromos e nos avisos, 0 mais permissivas; na grelha de
+0,2°, 7 pontos em terra a 8–10 km da costa ficam mais severos em 27 GAMETs. Os testes que
+comparam por igualdade com os motores da 4.1/4.2/4.4 dão ao motor antigo a
+faixa COT nova (`conftest.cot_452`), porque verificam outras mudanças.
+
 **Margem a partir do semiplano (4.5.1, revisor do PR #33).** Com os
 qualificadores do GAMET (`S OF N3800`, `W OF W01000`, `BTN …`) num SIGMET, a
 4.5 recortava o semiplano à área do GAMET e só depois somava os 10 NM (e o
@@ -452,7 +472,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-1927 testes (com a NiceGUI instalada; sem ela, os do `test_nicegui.py` saltam). Devem passar a 100%.
+2015 testes (com a NiceGUI instalada; sem ela, os do `test_nicegui.py` saltam). Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -596,6 +616,16 @@ python3 -m pytest
   editar): boletins do arquivo ⊇ 4.5 e todo o arquivo em `arquivo_hist` a 3
   horas nunca mais permissivo. `test_v45.py` aceita ⊇ (em vez de igual) para os
   boletins do arquivo com qualificadores
+- `tests/test_v452.py` — BTN degenerado (limites iguais em latitude/longitude,
+  AND/hífen, cardinal solto) → SIGMET toda a área, AIRMET toda a FIR + aviso,
+  GAMET toda a FIR + aviso "Área não reconhecida" (e o erro na 4.5.1); BTN não
+  degenerados iguais; COT em km (⊇ antigo, ≥ 9,9 km em 8 direcções numa amostra
+  da costa, não cresce demais, aeródromos e LAN/MAR iguais, ponto a 8,5 km da
+  costa, recorte de AIRMET); contra o motor da **4.5.1**
+  (`tests/referencia/app_4_5_1.py`, cópia fixa do `app.py` do main a76a93b; não
+  editar): casos gerados de COT/LAN/MAR/BTN (GAMET e boletins) e todo o arquivo
+  em `arquivo_hist` a 3 horas, nunca mais permissivo nos 52 aeródromos e numa
+  grelha de 0,2°
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva

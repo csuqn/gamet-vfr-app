@@ -29,7 +29,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "4.5.1"
+APP_VERSION = "4.5.2"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -720,7 +720,30 @@ SEA_POLYGON = FIR_POLYGON.difference(LAND_POLYGON)
 # Faixa costeira (COT): banda de ~10 km para cada lado da linha, que é a
 # convenção que adoptámos — a definição OACI não fixa uma largura.
 _COT_KM = 10.0
-COASTAL_POLYGON = COASTLINE.buffer(_COT_KM / 111.0).intersection(FIR_POLYGON)
+# Até à 4.5.1 o buffer era em graus (_COT_KM / 111): em longitude dava só
+# ~7,7 km a 40°N. Desde a 4.5.2 é em km reais: cada troço da costa é
+# bufferizado com a longitude escalada pelo cos da latitude mais a norte do
+# troço (+ o raio), com 110,9 km por grau de latitude (menos do que o real
+# a 37–42°N) e o raio corrigido para o polígono inscrito do círculo — ≥ 10 km
+# em todas as direcções. Une-se a faixa antiga: nunca menor do que até à 4.5.1.
+_COT_KM_GRAU_LAT = 110.9
+_COT_QUAD_SEGS = 32
+
+
+def _faixa_costeira_km(linha, km):
+    from shapely import affinity
+    r = km / _COT_KM_GRAU_LAT / math.cos(math.pi / (4 * _COT_QUAD_SEGS))
+    cs = list(linha.coords)
+    faixas = [linha.buffer(km / 111.0)]               # a faixa da 4.5.1
+    for a, b in zip(cs, cs[1:]):
+        k = math.cos(math.radians(max(abs(a[1]), abs(b[1])) + r))
+        seg = affinity.scale(LineString([a, b]), xfact=k, yfact=1, origin=(0, 0))
+        faixas.append(affinity.scale(seg.buffer(r, quad_segs=_COT_QUAD_SEGS),
+                                     xfact=1 / k, yfact=1, origin=(0, 0)))
+    return unary_union(faixas)
+
+
+COASTAL_POLYGON = _faixa_costeira_km(COASTLINE, _COT_KM).intersection(FIR_POLYGON)
 
 SURFACE_POLYGONS = {
     "MAR": SEA_POLYGON,
@@ -1101,6 +1124,30 @@ def _clean_poly(geom):
 
 # Separador dos dois limites de um BTN: "AND" ou hífen, com ou sem espaços.
 _BTN_SEP = r"(?:\s+AND\s+|\s*-\s*)"
+_BTN_LAT_RE = re.compile(r"(?:\b([NSEW])\s+)?BTN\s+N(\d{2})(\d{2})" + _BTN_SEP + r"N(\d{2})(\d{2})")
+_BTN_LON_RE = re.compile(r"(?:\b([NSEW])\s+)?BTN\s+([WE])(\d{2,3})(\d{2})" + _BTN_SEP
+                         + r"([WE])(\d{2,3})(\d{2})")
+
+
+def _btn_degenerado(line):
+    """
+    BTN com os dois limites iguais ("BTN N3945 AND N3945", "S BTN N3945 -
+    N3945", "BTN W00800 - W0800"; 4.5.2). A faixa tem largura zero: até à
+    4.5.1 dava área vazia (SIGMET/AIRMET "fora da área", subentrada do GAMET
+    descartada em silêncio). Não é área legível — como a linha degenerada do
+    "D OF LINE" (4.5): toda a área / toda a FIR + aviso.
+    """
+    for m in _BTN_LAT_RE.finditer(line):
+        _, d1, m1, d2, m2 = m.groups()
+        if int(d1) * 60 + int(m1) == int(d2) * 60 + int(m2):
+            return True
+    for m in _BTN_LON_RE.finditer(line):
+        _, h1, d1, m1, h2, d2, m2 = m.groups()
+        a = (int(d1) * 60 + int(m1)) * (-1 if h1 == "W" else 1)
+        b = (int(d2) * 60 + int(m2)) * (-1 if h2 == "W" else 1)
+        if a == b:
+            return True
+    return False
 
 # Qualificador diagonal ("NW OF W00800", "SE OF N3840", 3.4). A app não o
 # interpreta: a linha inteira fica sem área legível (→ toda a FIR + aviso em
@@ -1127,7 +1174,7 @@ def extract_polygon(line, leituras=None, base=None):
     aviso. `base` (4.5.1, só SIGMET/AIRMET): recorta a esse polígono em vez
     da FIR — o semiplano do boletim, para a margem e o MOV partirem dele.
     """
-    if _DIAGONAL_RE.search(line):
+    if _DIAGONAL_RE.search(line) or _btn_degenerado(line):
         return None
     fir = FIR_POLYGON if base is None else base
     x0, y0, x1, y1 = fir.bounds
@@ -1140,7 +1187,7 @@ def extract_polygon(line, leituras=None, base=None):
     # BTN N\d\d\d\d AND N\d\d\d\d  (latitude). O IPMA também escreve
     # "BTN N4050 - N3840" (GAMET real 171500/172100): até à 3.0 o hífen não
     # era lido e a subentrada herdava a área da anterior.
-    for m in re.finditer(r"(?:\b([NSEW])\s+)?BTN\s+N(\d{2})(\d{2})" + _BTN_SEP + r"N(\d{2})(\d{2})", line):
+    for m in _BTN_LAT_RE.finditer(line):
         geo_found = True
         card, d1, m1, d2, m2 = m.groups()
         lat1 = int(d1) + int(m1) / 60
@@ -1160,7 +1207,7 @@ def extract_polygon(line, leituras=None, base=None):
         poly = _clean_poly(poly.intersection(partes[-1]))
 
     # BTN W/E\d\d\d\d AND W/E\d\d\d\d  (longitude)
-    for m in re.finditer(r"(?:\b([NSEW])\s+)?BTN\s+([WE])(\d{2,3})(\d{2})" + _BTN_SEP + r"([WE])(\d{2,3})(\d{2})", line):
+    for m in _BTN_LON_RE.finditer(line):
         geo_found = True
         card, h1, d1, m1, h2, d2, m2 = m.groups()
         lon1 = _lon(d1, m1, h1)
@@ -1888,7 +1935,8 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
         p = extract_polygon(comb)
         if p is None:
             p = (FIR_POLYGON if (_AREA_INI_RE.match(conteudo_c) or _DIAGONAL_RE.search(conteudo_c)
-                                 or _CARDINAL_BTN_RE.search(conteudo_c)) else antes)
+                                 or _CARDINAL_BTN_RE.search(conteudo_c)
+                                 or _btn_degenerado(conteudo_c)) else antes)
         if p is None or p.is_empty:
             return None, ""
         sup_c = "/".join(s for s in ("COT", "LAN", "MAR") if re.search(rf"\b{s}\b", conteudo_c))
@@ -2033,14 +2081,15 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
                 for leitura in lidas:
                     alargadas.append((f"{campo_txt}: {content}", leitura))
         elif (_AREA_INI_RE.match(content) or _DIAGONAL_RE.search(content)
-              or _CARDINAL_BTN_RE.search(content)):
+              or _CARDINAL_BTN_RE.search(content) or _btn_degenerado(content)):
             # Subentrada com ar de qualificador geográfico, mas sem área
             # legível (3.4, pedido do Duarte): vale para toda a FIR e fica
             # registada para o aviso. Até à 3.3 herdava em silêncio a área
             # da subentrada anterior (GAMET real 171500 antes da 3.1: a base
             # da costa W ia para uma tira junto ao Guadiana). Linhas sem
             # qualificador nenhum continuam a usar a área da subentrada;
-            # "ENTIRE FIR" é toda a FIR lida e não gera aviso.
+            # "ENTIRE FIR" é toda a FIR lida e não gera aviso. Um BTN com os
+            # dois limites iguais (4.5.2), em qualquer posição, também.
             current_polygon = FIR_POLYGON
             if sem_area is not None and not _ENTIRE_FIR_RE.match(content):
                 sem_area.append(f"{campo_txt}: {content}")
@@ -2054,7 +2103,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
         # a linha já tinha, com a superfície da parte anterior.
         so_valores = (janela_corte is not None and not prefixo and new_poly is None
                       and not (_AREA_INI_RE.match(content) or _DIAGONAL_RE.search(content)
-                               or _CARDINAL_BTN_RE.search(content)
+                               or _CARDINAL_BTN_RE.search(content) or _btn_degenerado(content)
                                or _JANELA_SUP_RE.match(content)))
 
         # Subentrada nova (3.9): a linha abre o campo ou traz qualificador
@@ -2062,7 +2111,8 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
         # cada parte cortada por uma janela a meio da linha.
         if new_state or sub is None or new_poly is not None or janela_corte is not None or (
                 _AREA_INI_RE.match(content) or _DIAGONAL_RE.search(content)
-                or _CARDINAL_BTN_RE.search(content) or _JANELA_SUP_RE.match(content)):
+                or _CARDINAL_BTN_RE.search(content) or _btn_degenerado(content)
+                or _JANELA_SUP_RE.match(content)):
             # (4.3, decisão do Duarte a 28-out-2026; revisor) Parte que abre
             # com "HH/HH SUP" + qualificador geográfico ("11/15 MAR WI …",
             # "11/15 MAR N PART …", "11/15 MAR W OF …" cedido à linha
@@ -3420,7 +3470,9 @@ def _area_boletim(t, corpo, ref=None):
         # revisor do PR #33). geom45 é a leitura da 4.5, que se junta no fim.
         geom = extract_polygon(corpo, base=_caixa_linhas())
         if geom is None:
-            return None, "toda a área"
+            # BTN com os dois limites iguais (4.5.2): área ilegível
+            return None, ("toda a área (área ilegível)" if _btn_degenerado(corpo)
+                          else "toda a área")
         geom45 = extract_polygon(corpo)
         qualificadores = True
         desc = "área"
