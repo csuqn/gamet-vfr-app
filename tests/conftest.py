@@ -221,3 +221,20 @@ def indice_sem_linhas(indice):
         return indice
     return {**indice, "sigmets": [e for e in indice.get("sigmets", [])
                                   if not re.search(r"\bOF\s+LINE\b", e.get("texto", ""))]}
+
+
+# 4.6: qualificadores dos SIGMET/AIRMET só com graus ("S OF N33", "W OF W008",
+# "BTN N38 AND N39") passaram a ser lidos (até à 4.5: toda a área). Os testes
+# que comparam todo o arquivo com motores fixos anteriores (4.1, 4.2, 4.4)
+# verificam OUTRAS mudanças; tiram-se do índice só esses boletins, cuja
+# leitura mudou de propósito e é verificada contra a 4.5 em test_v46.py
+# (test_arquivo_contra_4_5).
+GRAUS_RE = re.compile(r"\b[NSEW]\s+(?:OF|BTN)\s+(?:N\d{2}|[WE]\d{3})(?![\dA-Z])"
+                      r"|\bBTN\s+\S+\s*(?:AND|-)\s*(?:N\d{2}|[WE]\d{3})(?![\dA-Z])")
+
+
+def indice_sem_graus(indice):
+    if not indice:
+        return indice
+    return {**indice, "sigmets": [e for e in indice.get("sigmets", [])
+                                  if not GRAUS_RE.search(e.get("texto", ""))]}

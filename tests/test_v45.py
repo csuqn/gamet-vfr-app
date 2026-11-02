@@ -385,7 +385,7 @@ import types  # noqa: E402
 from datetime import timedelta  # noqa: E402
 
 import conftest  # noqa: E402
-from conftest import indice_sem_linhas  # noqa: E402
+from conftest import GRAUS_RE, indice_sem_graus, indice_sem_linhas  # noqa: E402
 
 REF44 = Path(__file__).resolve().parent / "referencia" / "app_4_4.py"
 GRAV = {"GO": 0, "MARGINAL": 1, "NO-GO": 2}
@@ -415,6 +415,8 @@ def test_boletins_do_arquivo_area_igual_a_4_4_sem_line(eng, eng44):
         ref = eng._iso_utc(e.get("inicio")) or AGORA
         g5, _ = eng.area_sigmet(txt, ref)
         g4, _ = eng44.area_sigmet(txt, ref)
+        if GRAUS_RE.search(txt):                               # 4.6: test_v46.py
+            continue
         if re.search(r"\bOF\s+LINE\b", txt):
             linhas += 1
             assert g4 is None                                  # 4.4: toda a área
@@ -428,7 +430,8 @@ def test_boletins_do_arquivo_area_igual_a_4_4_sem_line(eng, eng44):
 def test_arquivo_contra_4_4(eng, eng44):
     if not (DADOS / "indice.json").exists():
         pytest.skip("sem dados/")
-    indice = json.loads((DADOS / "indice.json").read_text(encoding="utf-8"))
+    # 4.6: sem os boletins só com graus (verificados contra a 4.5 em test_v46.py)
+    indice = indice_sem_graus(json.loads((DADOS / "indice.json").read_text(encoding="utf-8")))
     sem = indice_sem_linhas(indice)
     com_linha = 0
     for entrada in indice.get("gamets", []):

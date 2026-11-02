@@ -29,7 +29,7 @@ from pathlib import Path
 import pytest
 
 import conftest
-from conftest import avisos_redaccao_43, build_gamet, indice_sem_linhas
+from conftest import avisos_redaccao_43, build_gamet, indice_sem_graus, indice_sem_linhas
 
 GRAV = {"GO": 0, "MARGINAL": 1, "NO-GO": 2}
 RAIZ = Path(__file__).resolve().parent.parent
@@ -342,8 +342,8 @@ def test_arquivo_principal_igual_a_41_e_resto_nunca_mais_severo(eng, eng41):
     ficheiros = _casos_arquivo()
     if not ficheiros:
         pytest.skip("arquivo (ramo dados) não disponível")
-    indice = indice_sem_linhas(
-        json.loads(INDICE.read_text(encoding="utf-8")) if INDICE.exists() else None)  # 4.5
+    indice = indice_sem_graus(indice_sem_linhas(
+        json.loads(INDICE.read_text(encoding="utf-8")) if INDICE.exists() else None))  # 4.5, 4.6
     entradas = {e["ficheiro"]: e for e in (indice or {}).get("gamets", [])}
     com_resto = 0
     for f in ficheiros:
