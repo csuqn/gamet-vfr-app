@@ -295,6 +295,8 @@ def test_boletins_do_arquivo_contem_4_5(eng, eng45):
     for e in indice.get("sigmets", []):
         txt = e.get("texto", "")
         ref = eng._iso_utc(e.get("inicio")) or AGORA
+        if conftest.GRAUS_RE.search(txt):          # 4.6: só com graus, em test_v46.py
+            continue
         if re.match(r"\s*LPPC\s+AIRMET", txt):
             la, la45 = eng.ler_airmet(txt, ref), eng45.ler_airmet(txt, ref)
             for b45 in la45["blocos"]:
@@ -314,7 +316,9 @@ def test_boletins_do_arquivo_contem_4_5(eng, eng45):
 def test_arquivo_contra_4_5(eng, eng45):
     if not (DADOS / "indice.json").exists():
         pytest.skip("sem dados/")
-    indice = json.loads((DADOS / "indice.json").read_text(encoding="utf-8"))
+    # 4.6: sem os boletins só com graus (verificados contra a 4.5.2 em test_v46.py)
+    indice = conftest.indice_sem_graus(
+        json.loads((DADOS / "indice.json").read_text(encoding="utf-8")))
     n = 0
     for entrada in indice.get("gamets", []):
         f = DADOS / entrada["ficheiro"]

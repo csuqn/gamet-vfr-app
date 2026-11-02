@@ -29,7 +29,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "4.5.2"
+APP_VERSION = "4.6"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -1093,7 +1093,7 @@ def extract_sigmet_applicable(text):
 
 def _lon(deg, minn, hemi):
     """Converte graus+minutos numa longitude com sinal (W negativo, E positivo)."""
-    val = int(deg) + int(minn) / 60
+    val = int(deg) + int(minn or 0) / 60
     return -val if hemi == "W" else val
 
 def _clean_poly(geom):
@@ -1124,27 +1124,44 @@ def _clean_poly(geom):
 
 # Separador dos dois limites de um BTN: "AND" ou hífen, com ou sem espaços.
 _BTN_SEP = r"(?:\s+AND\s+|\s*-\s*)"
-_BTN_LAT_RE = re.compile(r"(?:\b([NSEW])\s+)?BTN\s+N(\d{2})(\d{2})" + _BTN_SEP + r"N(\d{2})(\d{2})")
-_BTN_LON_RE = re.compile(r"(?:\b([NSEW])\s+)?BTN\s+([WE])(\d{2,3})(\d{2})" + _BTN_SEP
-                         + r"([WE])(\d{2,3})(\d{2})")
+
+# Latitude e longitude dos qualificadores. Com minutos (GAMET e boletins):
+# "N3800", "W00800". Só nos SIGMET/AIRMET (4.6, `graus=True`) os minutos podem
+# faltar e valem 00' (Anexo 3; SIGMETs reais T02 010850/011250 "S OF N33" e
+# T03 011250/011650 "S OF N34": até à 4.5.2 toda a área → NO-GO nos 52 pontos).
+# A forma só com graus exige o número inteiro ("N33", "W008" seguidos de algo
+# que não é algarismo nem letra); a 1.ª alternativa é a da 4.5.2, por isso as
+# formas com minutos casam exactamente como antes. No GAMET (graus=False) um
+# "S OF N38" continua sem área (toda a FIR + aviso), como na 4.5.2.
+_LAT_Q = r"N(\d{2})(\d{2})"
+_LON_Q = r"([WE])(\d{2,3})(\d{2})"
+_LAT_Q_GRAUS = r"N(\d{2})(\d{2}|(?![\dA-Z]))"
+_LON_Q_GRAUS = r"([WE])(\d{2,3})(\d{2}|(?<=[WE]\d{3})(?![\dA-Z]))"
+_BTN_LAT_RE = re.compile(r"(?:\b([NSEW])\s+)?BTN\s+" + _LAT_Q + _BTN_SEP + _LAT_Q)
+_BTN_LON_RE = re.compile(r"(?:\b([NSEW])\s+)?BTN\s+" + _LON_Q + _BTN_SEP + _LON_Q)
+_BTN_LAT_RE_GRAUS = re.compile(r"(?:\b([NSEW])\s+)?BTN\s+" + _LAT_Q_GRAUS + _BTN_SEP + _LAT_Q_GRAUS)
+_BTN_LON_RE_GRAUS = re.compile(r"(?:\b([NSEW])\s+)?BTN\s+" + _LON_Q_GRAUS + _BTN_SEP + _LON_Q_GRAUS)
 
 
-def _btn_degenerado(line):
+def _btn_degenerado(line, graus=False):
     """
     BTN com os dois limites iguais ("BTN N3945 AND N3945", "S BTN N3945 -
     N3945", "BTN W00800 - W0800"; 4.5.2). A faixa tem largura zero: até à
     4.5.1 dava área vazia (SIGMET/AIRMET "fora da área", subentrada do GAMET
     descartada em silêncio). Não é área legível — como a linha degenerada do
-    "D OF LINE" (4.5): toda a área / toda a FIR + aviso.
+    "D OF LINE" (4.5): toda a área / toda a FIR + aviso. `graus=True` (4.6,
+    SIGMET/AIRMET): também só com graus ("BTN N39 AND N39", "BTN N39 - N3900").
     """
-    for m in _BTN_LAT_RE.finditer(line):
+    lat_re = _BTN_LAT_RE_GRAUS if graus else _BTN_LAT_RE
+    lon_re = _BTN_LON_RE_GRAUS if graus else _BTN_LON_RE
+    for m in lat_re.finditer(line):
         _, d1, m1, d2, m2 = m.groups()
-        if int(d1) * 60 + int(m1) == int(d2) * 60 + int(m2):
+        if int(d1) * 60 + int(m1 or 0) == int(d2) * 60 + int(m2 or 0):
             return True
-    for m in _BTN_LON_RE.finditer(line):
+    for m in lon_re.finditer(line):
         _, h1, d1, m1, h2, d2, m2 = m.groups()
-        a = (int(d1) * 60 + int(m1)) * (-1 if h1 == "W" else 1)
-        b = (int(d2) * 60 + int(m2)) * (-1 if h2 == "W" else 1)
+        a = (int(d1) * 60 + int(m1 or 0)) * (-1 if h1 == "W" else 1)
+        b = (int(d2) * 60 + int(m2 or 0)) * (-1 if h2 == "W" else 1)
         if a == b:
             return True
     return False
@@ -1166,15 +1183,19 @@ _DIAGONAL_RE = re.compile(r"\b[NSEW]{2,3}\s+OF\b")
 # LP78, mas não em Faro, Portimão e Lagos).
 _CARDINAL_BTN_RE = re.compile(r"\b[NSEW]\s+BTN\b")
 
-def extract_polygon(line, leituras=None, base=None):
+def extract_polygon(line, leituras=None, base=None, graus=False):
     """
     Área dos qualificadores geográficos da linha, recortada à FIR, ou None
     se não houver nenhum legível. `leituras` (lista, opcional) recebe a
     leitura de cada cardinal solto antes de BTN (ex.: "S OF N3800"), para o
     aviso. `base` (4.5.1, só SIGMET/AIRMET): recorta a esse polígono em vez
     da FIR — o semiplano do boletim, para a margem e o MOV partirem dele.
+    `graus=True` (só SIGMET/AIRMET, 4.6) aceita também coordenadas só com
+    graus ("S OF N33" = 33°00').
     """
-    if _DIAGONAL_RE.search(line) or _btn_degenerado(line):
+    lat_q = _LAT_Q_GRAUS if graus else _LAT_Q
+    lon_q = _LON_Q_GRAUS if graus else _LON_Q
+    if _DIAGONAL_RE.search(line) or _btn_degenerado(line, graus=graus):
         return None
     fir = FIR_POLYGON if base is None else base
     x0, y0, x1, y1 = fir.bounds
@@ -1187,11 +1208,11 @@ def extract_polygon(line, leituras=None, base=None):
     # BTN N\d\d\d\d AND N\d\d\d\d  (latitude). O IPMA também escreve
     # "BTN N4050 - N3840" (GAMET real 171500/172100): até à 3.0 o hífen não
     # era lido e a subentrada herdava a área da anterior.
-    for m in _BTN_LAT_RE.finditer(line):
+    for m in (_BTN_LAT_RE_GRAUS if graus else _BTN_LAT_RE).finditer(line):
         geo_found = True
         card, d1, m1, d2, m2 = m.groups()
-        lat1 = int(d1) + int(m1) / 60
-        lat2 = int(d2) + int(m2) / 60
+        lat1 = int(d1) + int(m1 or 0) / 60
+        lat2 = int(d2) + int(m2 or 0) / 60
         lo, hi = min(lat1, lat2), max(lat1, lat2)
         if card in ("E", "W"):
             return None                     # eixo trocado → sem área legível
@@ -1207,7 +1228,7 @@ def extract_polygon(line, leituras=None, base=None):
         poly = _clean_poly(poly.intersection(partes[-1]))
 
     # BTN W/E\d\d\d\d AND W/E\d\d\d\d  (longitude)
-    for m in _BTN_LON_RE.finditer(line):
+    for m in (_BTN_LON_RE_GRAUS if graus else _BTN_LON_RE).finditer(line):
         geo_found = True
         card, h1, d1, m1, h2, d2, m2 = m.groups()
         lon1 = _lon(d1, m1, h1)
@@ -1235,31 +1256,31 @@ def extract_polygon(line, leituras=None, base=None):
     # (abaixo), e a união da 3.4 podia ser maior do que a leitura nova.
     antiga = None
     if cardinais_lidos:
-        antiga = extract_polygon(re.sub(r"\b[NSEW]\s+(BTN\b)", r"\1", line), base=base)
+        antiga = extract_polygon(re.sub(r"\b[NSEW]\s+(BTN\b)", r"\1", line), base=base, graus=graus)
 
     # N OF N\d\d\d\d
-    for m in re.findall(r"\bN\s+OF\s+N(\d{2})(\d{2})", line):
+    for m in re.findall(r"\bN\s+OF\s+" + lat_q, line):
         geo_found = True
-        lat = int(m[0]) + int(m[1]) / 60
+        lat = int(m[0]) + int(m[1] or 0) / 60
         partes.append(_clean_poly(fir.intersection(box(x0, lat, x1, y1))))
         poly = _clean_poly(poly.intersection(partes[-1]))
 
     # S OF N\d\d\d\d
-    for m in re.findall(r"\bS\s+OF\s+N(\d{2})(\d{2})", line):
+    for m in re.findall(r"\bS\s+OF\s+" + lat_q, line):
         geo_found = True
-        lat = int(m[0]) + int(m[1]) / 60
+        lat = int(m[0]) + int(m[1] or 0) / 60
         partes.append(_clean_poly(fir.intersection(box(x0, y0, x1, lat))))
         poly = _clean_poly(poly.intersection(partes[-1]))
 
     # E OF W/E\d\d\d\d
-    for m in re.findall(r"\bE\s+OF\s+([WE])(\d{2,3})(\d{2})", line):
+    for m in re.findall(r"\bE\s+OF\s+" + lon_q, line):
         geo_found = True
         lon = _lon(m[1], m[2], m[0])
         partes.append(_clean_poly(fir.intersection(box(lon, y0, x1, y1))))
         poly = _clean_poly(poly.intersection(partes[-1]))
 
     # W OF W/E\d\d\d\d
-    for m in re.findall(r"\bW\s+OF\s+([WE])(\d{2,3})(\d{2})", line):
+    for m in re.findall(r"\bW\s+OF\s+" + lon_q, line):
         geo_found = True
         lon = _lon(m[1], m[2], m[0])
         partes.append(_clean_poly(fir.intersection(box(x0, y0, lon, y1))))
@@ -3468,12 +3489,15 @@ def _area_boletim(t, corpo, ref=None):
         # partiam da parte recortada à área do GAMET e perdiam-se pontos a
         # menos de 10 NM do semiplano (degrau a N3800, costa a W01000;
         # revisor do PR #33). geom45 é a leitura da 4.5, que se junta no fim.
-        geom = extract_polygon(corpo, base=_caixa_linhas())
+        # 4.6: coordenadas só com graus ("S OF N33" = 33°00', Anexo 3); geom45
+        # é então a leitura da 4.5 da mesma linha com os minutos "00" escritos
+        # (= extract_polygon com graus e o recorte antigo à FIR).
+        geom = extract_polygon(corpo, base=_caixa_linhas(), graus=True)
         if geom is None:
             # BTN com os dois limites iguais (4.5.2): área ilegível
-            return None, ("toda a área (área ilegível)" if _btn_degenerado(corpo)
+            return None, ("toda a área (área ilegível)" if _btn_degenerado(corpo, graus=True)
                           else "toda a área")
-        geom45 = extract_polygon(corpo)
+        geom45 = extract_polygon(corpo, graus=True)
         qualificadores = True
         desc = "área"
 

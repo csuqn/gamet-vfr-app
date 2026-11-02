@@ -415,7 +415,9 @@ def test_gerados_boletins_contra_451(eng, eng451):
 def test_arquivo_contra_451(eng, eng451):
     if not (DADOS / "indice.json").exists():
         pytest.skip("sem dados/")
-    indice = json.loads((DADOS / "indice.json").read_text(encoding="utf-8"))
+    # 4.6: sem os boletins só com graus (verificados contra a 4.5.2 em test_v46.py)
+    indice = conftest.indice_sem_graus(
+        json.loads((DADOS / "indice.json").read_text(encoding="utf-8")))
     n = 0
     for entrada in indice.get("gamets", []):
         f = DADOS / entrada["ficheiro"]
@@ -438,4 +440,4 @@ def test_arquivo_contra_451(eng, eng451):
 
 def test_versoes(eng, eng451):
     assert eng451.APP_VERSION == "4.5.1"
-    assert eng.APP_VERSION == "4.5.2"
+    assert tuple(int(x) for x in eng.APP_VERSION.split(".")) >= (4, 5, 2)
