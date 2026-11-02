@@ -420,7 +420,11 @@ def test_boletins_do_arquivo_area_igual_a_4_4_sem_line(eng, eng44):
             assert g4 is None                                  # 4.4: toda a área
             continue
         assert (g5 is None) == (g4 is None), txt
-        if g5 is not None:
+        if g5 is not None and not re.search(r"\bWI\b", txt):
+            # 4.5.1: a margem dos qualificadores parte do semiplano não
+            # recortado (test_v46_margem.py) — só pode crescer.
+            assert g4.difference(g5).area < 1e-9, txt
+        elif g5 is not None:
             assert g5.symmetric_difference(g4).area < 1e-9, txt
     assert linhas >= 2                                         # os dois T01 reais
 

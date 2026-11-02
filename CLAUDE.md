@@ -286,6 +286,20 @@ caixa) → toda a área. O MOV desloca com o cos dos dois extremos de latitude d
 diagonal encurtava a margem para 5–8 NM (revisor do #32). A faixa continua a
 dizer ACTIVO e o alerta "fora da área do GAMET".
 Os níveis (`TOP FL340`, `SFC/FL080`) ainda não restringem a decisão.
+
+**Margem a partir do semiplano (4.5.1, revisor do PR #33).** Com os
+qualificadores do GAMET (`S OF N3800`, `W OF W01000`, `BTN …`) num SIGMET, a
+4.5 recortava o semiplano à área do GAMET e só depois somava os 10 NM (e o
+MOV): um ponto da área do GAMET a menos de 10 NM do semiplano mas longe da
+parte recortada (degrau a N3800, costa a W01000, fronteira) ficava fora do
+NO-GO. Agora `extract_polygon(…, base=_caixa_linhas())` lê o semiplano na
+caixa das linhas, o MOV desloca-o com os cos dos extremos da área do GAMET
+(±1°, como as linhas; MOV > 360 NM → toda a área), fica a parte a menos de
+`_QUAL_PERTO_GRAUS` (1°) da área do GAMET e junta-se **sempre** a leitura da
+4.5 (área nova ⊇ 4.5). WI e `D OF LINE` já não eram recortados: iguais. No
+SIGMET, COT/LAN/MAR continuam a não recortar nada. AIRMET: sem margem; sem
+MOV, igual à 4.5 dentro da FIR; com MOV pode crescer. `parse_gamet` igual
+(`base` só nos boletins).
 Desde a 3.2 (decisão do Duarte), um SIGMET referido em `SIGMET APPLICABLE`
 que se **sabe** terminado — validade acabada ou `CNL SIGMET <id>` na página do
 IPMA ou nos boletins arquivados das últimas 24 h (`sigmets_terminados`) —
@@ -438,7 +452,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-1915 testes (com a NiceGUI instalada; sem ela, os do `test_nicegui.py` saltam). Devem passar a 100%.
+1927 testes (com a NiceGUI instalada; sem ela, os do `test_nicegui.py` saltam). Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -571,6 +585,17 @@ python3 -m pytest
   `OF LINE`, e nesses nunca abaixo da 4.4 sem esse boletim. Os testes do
   arquivo contra a 4.1/4.2 tiram os boletins `OF LINE` do índice
   (`conftest.indice_sem_linhas`)
+- `tests/test_v46_margem.py` — margem do SIGMET a partir do semiplano não
+  recortado (4.5.1): os exemplos do revisor do PR #33 (`S OF N3800` em
+  38.0067/-9.9833, `W OF W01000` em 37.2567/-9.8333 → NO-GO, na 4.5 GO);
+  qualificadores, BTN, cardinal + BTN e combinações gerados, parados e com MOV:
+  todo o ponto da área do GAMET a ≤ 9,8 NM da área varrida (calculada à mão)
+  fica dentro, área ⊇ 4.5 (SIGMET e AIRMET; AIRMET sem MOV igual); WI/LINE e
+  `extract_polygon` do GAMET iguais; contra o motor da **4.5**
+  (`tests/referencia/app_4_5.py`, cópia fixa do `app.py` do main f40e20f; não
+  editar): boletins do arquivo ⊇ 4.5 e todo o arquivo em `arquivo_hist` a 3
+  horas nunca mais permissivo. `test_v45.py` aceita ⊇ (em vez de igual) para os
+  boletins do arquivo com qualificadores
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva
