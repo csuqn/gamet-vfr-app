@@ -765,10 +765,15 @@ sem editar código.
 
 ## Duas interfaces, um motor (2.6)
 
-- **NiceGUI** (`nicegui_app/`) — a interface **principal**, publicada no Render
+- **Streamlit** (`app.py`) — a interface **principal**, no Streamlit Cloud
+  (https://gamet-vfr-app-bxdwwklaarl2kdpiprmhu5.streamlit.app/), a partir do
+  ramo `main`. É a que o Duarte usa (decisão do Duarte a 3-nov-2026: volta a
+  ser a principal; entre a 2.6 e a 4.7 foi a NiceGUI). Verificações no browser
+  e prioridades olham primeiro para ela.
+- **NiceGUI** (`nicegui_app/`) — reserva, publicada no Render
   (https://gamet-vfr-app.onrender.com/, plano gratuito: adormece após 15 min
-  sem uso, ~1 min a acordar) a partir do ramo `main`.
-- **Streamlit** (`app.py`) — reserva, no Streamlit Cloud.
+  sem uso, ~1 min a acordar) a partir do ramo `main`. Continua testada e com o
+  mesmo motor.
 - O motor vive no `app.py`. `nicegui_app/motor.py` executa as mesmas secções
   que os testes extraem (`tests/conftest.py`) e a secção de rede. **Não há
   cópia do motor** — uma correcção no `app.py` vale para as duas.
