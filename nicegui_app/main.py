@@ -39,7 +39,20 @@ body { background:#0E151C; color:#E6EDF3; }
 .leaflet-tooltip.gv-lbl { background: rgba(14,21,28,.85); color:#E6EDF3; border:0; box-shadow:none;
   font-family:'IBM Plex Mono',monospace; font-size:10px; padding:0 4px; border-radius:3px; }
 .leaflet-tooltip.gv-lbl::before { display:none; }
+.gv-cal { max-width: 360px; margin: 0 auto; background:#15202A; border-color:#22303C; }
+.gv-cal .q-date__calendar-item--out { opacity: .35; }
 """
+
+
+# Nomes do calendário (QDate) em português — o Quasar vem em inglês.
+_QDATE_PT = {
+    "days": "Domingo_Segunda_Terça_Quarta_Quinta_Sexta_Sábado".split("_"),
+    "daysShort": "Dom_Seg_Ter_Qua_Qui_Sex_Sáb".split("_"),
+    "months": ("Janeiro_Fevereiro_Março_Abril_Maio_Junho_Julho_Agosto_Setembro_"
+               "Outubro_Novembro_Dezembro").split("_"),
+    "monthsShort": "Jan_Fev_Mar_Abr_Mai_Jun_Jul_Ago_Set_Out_Nov_Dez".split("_"),
+    "firstDayOfWeek": 1,
+}
 
 
 def _md(txt):
@@ -271,15 +284,51 @@ async def pagina():
                 if not ok:
                     ui.label(f"Não foi possível ler o arquivo: {idx}").classes("gv-k")
                     return
-                lista = sorted(idx["gamets"], key=lambda e: (e.get("inicio") or "", e["recolhido"]), reverse=True)
-                opc = {i: f"{(e.get('inicio') or '')[8:10]}/{(e.get('inicio') or '')[5:7]} "
-                          f"{(e.get('inicio') or '')[11:13]}–{(e.get('fim') or '')[11:13]}Z"
-                          + ("" if e.get("tipo", "GAMET") == "GAMET" else f" {e['tipo']}")
-                       for i, e in enumerate(lista)}
-                sel = ui.select(opc, value=0 if opc else None, label="GAMET").classes("w-full").props("dark outlined")
+                # 4.7: calendário (só os dias com GAMETs, marcados) e, depois,
+                # os GAMETs do dia. Dia = dia UTC do início da validade.
+                por_dia = M.arquivo_por_dia(idx)
+                d0, d1 = M.arquivo_dias_extremos(por_dia)
+                if d1 is None:
+                    ui.label("O arquivo ainda está vazio.").classes("gv-k")
+                    return
+                n = sum(len(v) for v in por_dia.values())
+                ui.label(f"{n} GAMETs em {len(por_dia)} dias "
+                         f"({d0[8:10]}/{d0[5:7]}/{d0[:4]} a {d1[8:10]}/{d1[5:7]}/{d1[:4]}). "
+                         "Dias UTC, pelo início da validade.").classes("gv-k")
+                qdias = [d.replace("-", "/") for d in por_dia]   # o QDate usa AAAA/MM/DD
+                cal = ui.date(value=d1).classes("w-full gv-cal").props(
+                    "dark minimal flat bordered color=primary event-color=primary first-day-of-week=1 "
+                    f"navigation-min-year-month={d0[:7].replace('-', '/')} "
+                    f"navigation-max-year-month={d1[:7].replace('-', '/')}")
+                cal.props["options"] = qdias
+                cal.props["events"] = qdias
+                cal.props["locale"] = _QDATE_PT
+                zona_dia = ui.column().classes("w-full gap-2")
+                estado_arq = {"lista": [], "sel": None}
+
+                def mostrar_dia():
+                    zona_dia.clear()
+                    dia = cal.value
+                    with zona_dia:
+                        if not dia or dia not in por_dia:
+                            ui.label("Escolhe um dia com GAMETs (marcados no calendário).").classes("gv-k")
+                            estado_arq.update(lista=[], sel=None)
+                            return
+                        lista = por_dia[dia]
+                        ui.label(f"{dia[8:10]}/{dia[5:7]}/{dia[:4]} · {len(lista)} GAMET(s)").classes("gv-sec")
+                        opc = {i: x["rotulo"] for i, x in enumerate(lista)}
+                        # O mais recente do dia escolhido por defeito
+                        sel = ui.select(opc, value=len(lista) - 1, label="GAMET").classes("w-full").props(
+                            "dark outlined")
+                        estado_arq.update(lista=lista, sel=sel)
+                        ui.button("Carregar e analisar", icon="search", on_click=carregar).classes(
+                            "w-full").props("outline no-caps")
 
                 async def carregar():
-                    e = lista[sel.value]
+                    sel = estado_arq["sel"]
+                    if sel is None or sel.value is None:
+                        return
+                    e = estado_arq["lista"][sel.value]["entrada"]
                     ok2, txt = await run.io_bound(M.fetch_arquivo, e["ficheiro"])
                     if not ok2:
                         ui.notify(f"Não foi possível ler o GAMET: {txt}", type="negative")
@@ -288,7 +337,9 @@ async def pagina():
                     caixa.value = txt
                     desenhar(await run.cpu_bound(analisar, txt, "arquivo_hist", None, None, "", idx, e))
                     ui.run_javascript("window.scrollTo({top:0,behavior:'smooth'})")
-                ui.button("Carregar e analisar", on_click=carregar).classes("w-full").props("outline no-caps")
+
+                cal.on_value_change(lambda _: mostrar_dia())
+                mostrar_dia()
         ui.button("Abrir arquivo", icon="folder_open", on_click=abrir_arquivo).props("flat no-caps")
 
     async def carregar_actual():

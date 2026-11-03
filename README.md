@@ -102,8 +102,10 @@ tempo (`11/15` = só das 11 às 15 UTC) e na extensão (`ISOL`, `OCNL`, `FRQ`,
 A app também funciona sem internet, com o GAMET colado à mão.
 
 **📚 Arquivo de GAMETs.** No painel com esse nome podes abrir qualquer GAMET
-recolhido desde 14/10/2026 (escolhe o dia e o período) e analisá-lo como se
-fosse o actual. É analisado com os SIGMETs que estiveram em vigor durante a
+recolhido desde 14/10/2026 e analisá-lo como se fosse o actual: escolhe o dia
+num calendário (só os dias com GAMETs estão marcados e se podem escolher; o
+dia é o do início da validade, em UTC — o GAMET das 21Z fica no dia em que
+começa), depois o GAMET desse dia, e carrega em "Carregar e analisar". É analisado com os SIGMETs que estiveram em vigor durante a
 sua validade — nunca com os de agora — e aparece sempre com o aviso "GAMET
 DO ARQUIVO — não é o GAMET actual". Serve para rever situações passadas,
 não para planear um voo.
@@ -271,7 +273,7 @@ Algarve não afecta Lisboa.
 
 ## 10. Qualidade e testes
 
-- **2078 testes automáticos** cobrem a leitura do texto, a geometria, as
+- **2096 testes automáticos** cobrem a leitura do texto, a geometria, as
   decisões, os dados aeronáuticos e a app completa. Cada erro alguma vez
   encontrado tem um teste que impede que volte a aparecer.
 - **Verificação cruzada:** em centenas de GAMETs gerados, a decisão de cada
@@ -291,7 +293,7 @@ Algarve não afecta Lisboa.
 pip install -r requirements.txt -r requirements-dev.txt
 cd nicegui_app && python main.py   # a app principal (NiceGUI), http://localhost:8080
 streamlit run app.py               # a versão de reserva (Streamlit)
-python3 -m pytest                  # os testes (2078)
+python3 -m pytest                  # os testes (2096)
 ```
 
 | Ficheiro / pasta | Conteúdo |
