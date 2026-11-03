@@ -501,7 +501,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-2096 testes (com a NiceGUI instalada; sem ela, os do `test_nicegui.py` saltam). Devem passar a 100%.
+2114 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2085 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -681,13 +681,27 @@ python3 -m pytest
   `nicegui.run.cpu_bound`, igual à análise local; PDF noutro processo; página
   simulada: excepção na análise (GAMET actual, colado, arquivo) ou ao obter o
   GAMET → erro claro e sem o briefing anterior
+- `tests/test_v47.py` — calendário do arquivo (4.7): `arquivo_por_dia` com o
+  índice real (`dados/indice.json`, salta sem `dados/`: nenhum GAMET perdido,
+  ordem, rótulos distintos, 21/03 e 06/09 isolados) e sintéticos (vazio, um
+  dia, AMD/COR, duas emissões, travessia da meia-noite, recolha na véspera,
+  sem `inicio`, datas impossíveis, meses/anos), dia mais próximo; Streamlit
+  completo com a rede simulada (abre no dia mais recente, min/max, escolher dia
+  → lista → carregar → `arquivo_hist`; dia sem GAMETs → mensagem + botão;
+  arquivo vazio); NiceGUI (`nicegui.testing.user_simulation`, síncrono com
+  `asyncio.run`, salta sem NiceGUI): `options`/`events`/navegação do `ui.date`,
+  escolher dia + GAMET chama `analisar_gamet(…, "arquivo_hist", …, indice,
+  entrada)` por `analisar_e_desenhar`, erro de leitura → notificação
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva
   do que a do motor da **3.4**, carregado de `tests/referencia/app_3_4.py`
   (cópia fixa do `app.py` do main 46e8d8e; o checkout do CI não tem
   histórico). Não editar a cópia.
-- `tests/conftest.py` — extrai o motor da app sem executar a UI. Os imports
+- `tests/conftest.py` — extrai o motor da app sem executar a UI. Repõe
+  `sys.modules["__main__"]` depois de cada teste (`_repor_main`): a
+  `user_simulation` da NiceGUI tira-o ao sair e os processos spawn/forkserver
+  do `test_v461.py` rebentavam se uma simulação corresse antes (4.7). Os imports
   vêm da própria app (nunca de uma lista fixa — escondia imports em falta)
 
 `test_regioes_concordam_com_oraculo` é o teste mais importante: compara a
@@ -826,6 +840,27 @@ através de `dados/indice.json`, que `scripts/recolher_gamet.py`
 - **Consulta:** painel "📚 Arquivo de GAMETs". Um GAMET do arquivo usa os
   SIGMETs arquivados que se **sobrepõem à sua validade**
   (`boletins_do_periodo`; um SIGMET cancelado a meio conta).
+- **Calendário (4.7, pedido do Duarte a 2-nov-2026):** escolhe-se o dia e
+  depois o GAMET desse dia. A lógica está em funções puras na secção de rede
+  (junto de `fetch_arquivo_indice`, porque o painel do Streamlit corre antes
+  de o motor estar definido; testes com o fixture `net`):
+  `arquivo_por_dia(indice)` → `{"AAAA-MM-DD": [{"entrada", "rotulo"}, …]}`
+  por ordem cronológica — dia UTC do **início** da validade (2100/0300 fica no
+  dia das 21Z), sem início o da recolha, sem data legível fica de fora;
+  rótulos "09–15Z", "09–15Z AMD", "(2.ª emissão)" como até à 4.6, e
+  "validade ilegível (recolhido às HH:MMZ)" —, `arquivo_dias_extremos` e
+  `arquivo_dia_mais_proximo` (empate → o mais recente). NiceGUI: `ui.date`
+  (QDate) com `options`/`events` = os dias do arquivo (formato `AAAA/MM/DD`),
+  navegação limitada aos meses do arquivo, abre no dia mais recente, nomes em
+  português; por baixo, um `ui.select` com os GAMETs do dia (o mais recente
+  escolhido) e "Carregar e analisar" (fonte `arquivo_hist`, como antes; pelo
+  `analisar_e_desenhar` da 4.6.1 — spinner, erro claro sem o briefing anterior —
+  e depois volta ao topo).
+  Streamlit: `st.date_input` com min/max do arquivo (estado em
+  `session_state["_arquivo_dia"]`); dia sem GAMETs → "Não há GAMETs
+  arquivados a …" com o dia mais próximo e um botão para lá ir (callback);
+  depois o selectbox do dia (mais recente primeiro, como antes). O motor de
+  decisão não muda.
 - **Origem do GAMET** em `st.session_state["gamet_fonte"]`: `ipma`,
   `arquivo_recurso`, `arquivo_hist`. (O "Histórico de GAMETs analisados" da
   sessão foi retirado na 2.1 — para GAMETs antigos há o arquivo.)

@@ -29,7 +29,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "4.6.1"
+APP_VERSION = "4.7"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -210,6 +210,91 @@ def fetch_arquivo_indice() -> tuple:
         return False, "índice com formato inesperado"
     dados.setdefault("sigmets", [])
     return True, dados
+
+
+_DIA_RE = re.compile(r"^\d{4}-\d{2}-\d{2}")
+
+
+def arquivo_por_dia(indice):
+    """
+    GAMETs do arquivo agrupados por dia, para o calendário do painel
+    "Arquivo de GAMETs" (4.7; Streamlit e NiceGUI). Pura (sem rede); fica
+    nesta secção porque o painel do Streamlit corre antes de o motor estar
+    definido. Testada com o fixture `net` (tests/test_v47.py).
+
+    Devolve {"AAAA-MM-DD": [{"entrada": e, "rotulo": "09–15Z"}, …]}, com as
+    entradas de cada dia por ordem cronológica (início da validade e, dentro
+    do mesmo início, hora de recolha). O dia é o dia UTC do INÍCIO da
+    validade (um GAMET 2100/0300 fica no dia das 21Z); sem início, o dia da
+    recolha. Entradas sem nenhuma das duas datas não têm dia e ficam de fora.
+
+    Rótulo = validade (+ AMD/COR); várias emissões do mesmo período (mesmo
+    início, fim e tipo) numeram-se pela ordem de recolha ("(2.ª emissão)").
+    Sem início legível: "validade ilegível (recolhido às HH:MMZ)".
+    """
+    from collections import defaultdict
+    from datetime import date as _date
+    entradas = []
+    for e in (indice or {}).get("gamets", []):
+        if not isinstance(e, dict) or not e.get("ficheiro"):
+            continue
+        dia = e.get("inicio") or e.get("recolhido") or ""
+        if not isinstance(dia, str) or not _DIA_RE.match(dia):
+            continue
+        try:
+            _date.fromisoformat(dia[:10])
+        except ValueError:      # "2026-13-45": sem dia legível
+            continue
+        entradas.append((dia[:10], e))
+
+    def _chave(e):
+        return (e.get("inicio"), e.get("fim"), e.get("tipo", "GAMET"))
+
+    total = defaultdict(int)
+    for _, e in entradas:
+        if e.get("inicio"):
+            total[_chave(e)] += 1
+    vistos = defaultdict(int)
+    rotulos = {}
+    for _, e in sorted(entradas, key=lambda t: t[1].get("recolhido") or ""):
+        tipo = e.get("tipo", "GAMET")
+        ini, fim = e.get("inicio") or "", e.get("fim") or ""
+        if not ini:
+            rec = e.get("recolhido") or ""
+            rot = "validade ilegível" + (f" (recolhido às {rec[11:16]}Z)" if rec[11:16] else "")
+        else:
+            rot = f"{ini[11:13]}–{fim[11:13] or '??'}Z"
+        if tipo != "GAMET":
+            rot += f" {tipo}"
+        if ini and total[_chave(e)] > 1:
+            vistos[_chave(e)] += 1
+            rot += f" ({vistos[_chave(e)]}.ª emissão)"
+        rotulos[id(e)] = rot
+
+    por_dia = defaultdict(list)
+    for dia, e in sorted(entradas, key=lambda t: (t[1].get("inicio") or t[1].get("recolhido") or "",
+                                                  t[1].get("recolhido") or "")):
+        por_dia[dia].append({"entrada": e, "rotulo": rotulos[id(e)]})
+    return dict(sorted(por_dia.items()))
+
+
+def arquivo_dias_extremos(por_dia):
+    """(primeiro, último) dia com GAMETs ("AAAA-MM-DD"), ou (None, None)."""
+    dias = sorted(por_dia or {})
+    return (dias[0], dias[-1]) if dias else (None, None)
+
+
+def arquivo_dia_mais_proximo(por_dia, dia):
+    """
+    O dia com GAMETs mais próximo de `dia` ("AAAA-MM-DD" ou date) — o próprio,
+    se tiver. Em empate, o mais recente. None se o arquivo estiver vazio.
+    """
+    from datetime import date as _date
+    if not por_dia:
+        return None
+    alvo = _date.fromisoformat(dia if isinstance(dia, str) else dia.isoformat())
+    return min(por_dia, key=lambda d: (abs((_date.fromisoformat(d) - alvo).days),
+                                       -_date.fromisoformat(d).toordinal()))
 
 # O "=" final NÃO é obrigatório: os primeiros SIGMET/AIRMET reais na página
 # do IPMA (17-out-2026, SIGMET T01 e AIRMET 1) vinham sem ele, e até à 2.6 o
@@ -426,51 +511,55 @@ with _c_ctrl:
             elif not _idx["gamets"]:
                 st.info("O arquivo ainda está vazio.")
             else:
-                _por_dia = defaultdict(list)
-                for _e in _idx["gamets"]:
-                    _por_dia[(_e.get("inicio") or _e["recolhido"])[:10]].append(_e)
-                _dias = sorted(_por_dia, reverse=True)
-                _dia = st.selectbox(
-                    "Dia (início da validade)", _dias,
-                    format_func=lambda d: f"{d[8:10]}/{d[5:7]}/{d[:4]} · {len(_por_dia[d])} GAMET(s)")
-                _lista = sorted(_por_dia[_dia], key=lambda e: (e.get("inicio") or "", e["recolhido"]),
-                                reverse=True)
-
-                # Rótulo = validade (+ AMD/COR). Se houver mais do que uma emenda
-                # para o mesmo período, numeram-se pela ordem de emissão.
-                _total = defaultdict(int)
-                for _e in _lista:
-                    _total[(_e.get("inicio"), _e.get("fim"), _e.get("tipo", "GAMET"))] += 1
-                _vistos = defaultdict(int)
-                _rotulos = {}
-                for _e in sorted(_lista, key=lambda e: e["recolhido"]):
-                    ini, fim = _e.get("inicio") or "", _e.get("fim") or ""
-                    tipo = _e.get("tipo", "GAMET")
-                    chave = (_e.get("inicio"), _e.get("fim"), tipo)
-                    _vistos[chave] += 1
-                    rot = f"{ini[11:13]}–{fim[11:13]}Z"
-                    if tipo != "GAMET":
-                        rot += f" {tipo}"
-                    if _total[chave] > 1:
-                        rot += f" ({_vistos[chave]}.ª emissão)"
-                    _rotulos[_e["ficheiro"]] = rot
+                # 4.7: calendário (dia UTC do início da validade) e, depois, os
+                # GAMETs desse dia. A lógica está no motor (arquivo_por_dia).
+                _por_dia = arquivo_por_dia(_idx)
+                _d0, _d1 = arquivo_dias_extremos(_por_dia)
+                _lista, _rot = [], {}
+                if _d0 is None:
+                    st.info("O arquivo não tem GAMETs com data legível.")
+                else:
+                    from datetime import date as _date
+                    _min, _max = _date.fromisoformat(_d0), _date.fromisoformat(_d1)
+                    _sel = st.session_state.get("_arquivo_dia")
+                    if not (_sel and _min <= _sel <= _max):
+                        # Primeira abertura (ou índice novo): o dia mais recente
+                        st.session_state["_arquivo_dia"] = _max
+                    st.caption(f"{sum(len(v) for v in _por_dia.values())} GAMETs em "
+                               f"{len(_por_dia)} dias, de {_min:%d/%m/%Y} a {_max:%d/%m/%Y}.")
+                    _dia_d = st.date_input("Dia (UTC, início da validade)", min_value=_min,
+                                           max_value=_max, format="DD/MM/YYYY", key="_arquivo_dia")
+                    _dia = _dia_d.isoformat() if _dia_d else None
+                    if _dia and _dia not in _por_dia:
+                        _prox = arquivo_dia_mais_proximo(_por_dia, _dia)
+                        _p = _date.fromisoformat(_prox)
+                        st.info(f"Não há GAMETs arquivados a {_dia_d:%d/%m/%Y}. "
+                                f"O dia com GAMETs mais próximo é {_p:%d/%m/%Y} "
+                                f"({len(_por_dia[_prox])} GAMET(s)).")
+                        st.button(f"Ver {_p:%d/%m/%Y}",
+                                  on_click=lambda d=_p: st.session_state.update(_arquivo_dia=d))
+                    elif _dia:
+                        # Mais recente primeiro, como até à 4.6
+                        _lista = [x["entrada"] for x in reversed(_por_dia[_dia])]
+                        _rot = {x["entrada"]["ficheiro"]: x["rotulo"] for x in _por_dia[_dia]}
 
                 def _rotulo(e):
-                    return _rotulos[e["ficheiro"]]
-                _esc = st.selectbox("GAMET", range(len(_lista)), format_func=lambda i: _rotulo(_lista[i]))
-                if st.button("Carregar e analisar este GAMET"):
-                    _ok_t, _txt = fetch_arquivo(_lista[_esc]["ficheiro"])
-                    if not _ok_t:
-                        st.error(f"Não foi possível ler o GAMET: {_txt}")
-                    else:
-                        _txt = re.sub(r"\s+", " ", _txt).strip()
-                        st.session_state["gamet_loaded"] = _txt
-                        st.session_state["gamet_loaded_at"] = f"arquivo ({_rotulo(_lista[_esc])})"
-                        st.session_state["gamet_fonte"] = "arquivo_hist"
-                        st.session_state["arquivo_entrada"] = _lista[_esc]
-                        st.session_state["arquivo_indice"] = _idx
-                        st.session_state["_active_gamet_text"] = _txt
-                        st.rerun()
+                    return _rot[e["ficheiro"]]
+                if _lista:
+                    _esc = st.selectbox("GAMET", range(len(_lista)), format_func=lambda i: _rotulo(_lista[i]))
+                    if st.button("Carregar e analisar este GAMET"):
+                        _ok_t, _txt = fetch_arquivo(_lista[_esc]["ficheiro"])
+                        if not _ok_t:
+                            st.error(f"Não foi possível ler o GAMET: {_txt}")
+                        else:
+                            _txt = re.sub(r"\s+", " ", _txt).strip()
+                            st.session_state["gamet_loaded"] = _txt
+                            st.session_state["gamet_loaded_at"] = f"arquivo ({_rotulo(_lista[_esc])})"
+                            st.session_state["gamet_fonte"] = "arquivo_hist"
+                            st.session_state["arquivo_entrada"] = _lista[_esc]
+                            st.session_state["arquivo_indice"] = _idx
+                            st.session_state["_active_gamet_text"] = _txt
+                            st.rerun()
 
     # Preencher text_area com GAMET carregado (ou vazio para input manual)
     _default = st.session_state.get("gamet_loaded", "")
