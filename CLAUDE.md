@@ -501,7 +501,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-2078 testes (com a NiceGUI instalada; sem ela, os do `test_nicegui.py` saltam). Devem passar a 100%.
+2096 testes (com a NiceGUI instalada; sem ela, os do `test_nicegui.py` saltam). Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -675,6 +675,12 @@ python3 -m pytest
   nesses nunca acima da 4.5.2 e igual à 4.5.2 sem eles. Os testes do arquivo
   contra a 4.1/4.2/4.4/4.5/4.5.1 tiram esses boletins do índice
   (`conftest.indice_sem_graus`)
+- `tests/test_v461.py` — NiceGUI: resultado da análise por pickle (GAMET
+  251500 com os AIRMET 1 e 2 reais: índice sintético e arquivo real, que salta
+  sem `dados/`) num `ProcessPoolExecutor` real (fork, spawn, forkserver) e no
+  `nicegui.run.cpu_bound`, igual à análise local; PDF noutro processo; página
+  simulada: excepção na análise (GAMET actual, colado, arquivo) ou ao obter o
+  GAMET → erro claro e sem o briefing anterior
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva
@@ -752,6 +758,16 @@ sem editar código.
 - O motor vive no `app.py`. `nicegui_app/motor.py` executa as mesmas secções
   que os testes extraem (`tests/conftest.py`) e a secção de rede. **Não há
   cópia do motor** — uma correcção no `app.py` vale para as duas.
+- **O resultado volta por pickle** (4.6.1, revisor do PR #36): a NiceGUI corre
+  `analisar` com `run.cpu_bound`, noutro processo. `motor.py` regista o módulo
+  `motor_gamet` em `sys.modules` antes de o executar — sem isso, um resultado
+  com AIRMETs lidos (`MetBlock` em `airmet_leituras`) dava `PicklingError` e o
+  briefing não aparecia (GAMET 251500 do arquivo com os AIRMET 1 e 2). Os
+  testes que trocam o `cpu_bound` por uma chamada local não apanham isto: o
+  `test_v461.py` corre num processo a sério. Qualquer falha da análise
+  (`analisar_e_desenhar` em `main.py`) tira o briefing anterior e mostra "Não
+  foi possível analisar este GAMET — tipo: mensagem"; até à 4.6 ficava no ecrã
+  o briefing do GAMET anterior (colado/arquivo) ou "A carregar…" para sempre.
 - `analisar_gamet()` (secção `# ANÁLISE COMPLETA`) faz tudo o que vai do
   texto ao briefing: validade, regiões, SIGMETs (GAMET / IPMA / arquivo),
   faixa e avisos `(tipo, markdown)`. As duas interfaces só desenham.
