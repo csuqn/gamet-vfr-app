@@ -250,7 +250,15 @@ async def pagina():
                     ui.markdown(_LEGENDA)
 
             async def pdf():
-                dados = await run.cpu_bound(_gerar_pdf, r["regioes"], r["texto"], r["fz"], r["qnh"], r["validity_label"])
+                try:
+                    dados = await run.cpu_bound(_gerar_pdf, r["regioes"], r["texto"], r["fz"], r["qnh"],
+                                                r["validity_label"])
+                    if not dados:
+                        raise RuntimeError("o PDF veio vazio")
+                except Exception as x:  # noqa: BLE001
+                    ui.notify(f"Não foi possível gerar o PDF — {_descr_excepcao(x)}", type="negative",
+                              multi_line=True)
+                    return
                 ui.download(dados, f"briefing_lppc_{datetime.now(timezone.utc):%Y%m%d_%H%MZ}.pdf")
             ui.button("Descarregar briefing (PDF)", icon="download", on_click=pdf).classes("w-full").props(
                 "unelevated color=primary text-color=dark size=lg no-caps")
@@ -262,6 +270,23 @@ async def pagina():
         with briefing:
             ui.html(f'<div class="gv-alerta gv-erro">{_md(msg)}</div>').classes("w-full")
 
+    async def analisar_e_desenhar(*args):
+        """Analisa noutro processo e desenha. Qualquer falha (na análise, no
+        regresso do resultado por pickle ou no desenho) tira o briefing
+        anterior e mostra o erro — nunca fica no ecrã o briefing de outro
+        GAMET (4.6.1)."""
+        briefing.clear()
+        with briefing:
+            ui.spinner(size="lg", color="primary")
+            ui.label("A analisar o GAMET…").classes("gv-k")
+        try:
+            r = await run.cpu_bound(analisar, *args)
+            if r is None:   # a NiceGUI devolve None se a app estiver a parar
+                raise RuntimeError("a análise foi interrompida")
+            desenhar(r)
+        except Exception as x:  # noqa: BLE001
+            erro(_msg_erro_analise(x))
+
     # ---- Controlos (fim da página) ----
     ui.label("GAMET E ARQUIVO").classes("gv-sec")
     with ui.expansion("Texto do GAMET (colar ou editar)", icon="edit_note").classes("w-full gv-card"):
@@ -269,7 +294,7 @@ async def pagina():
 
         async def analisar_colado():
             if caixa.value.strip():
-                desenhar(await run.cpu_bound(analisar, caixa.value.strip(), "manual"))
+                await analisar_e_desenhar(caixa.value.strip(), "manual")
         ui.button("Analisar este texto", icon="search", on_click=analisar_colado).classes("w-full").props("outline no-caps")
 
     with ui.expansion("Arquivo de GAMETs", icon="inventory_2").classes("w-full gv-card"):
@@ -335,7 +360,7 @@ async def pagina():
                         return
                     txt = re.sub(r"\s+", " ", txt).strip()
                     caixa.value = txt
-                    desenhar(await run.cpu_bound(analisar, txt, "arquivo_hist", None, None, "", idx, e))
+                    await analisar_e_desenhar(txt, "arquivo_hist", None, None, "", idx, e)
                     ui.run_javascript("window.scrollTo({top:0,behavior:'smooth'})")
 
                 cal.on_value_change(lambda _: mostrar_dia())
@@ -343,18 +368,37 @@ async def pagina():
         ui.button("Abrir arquivo", icon="folder_open", on_click=abrir_arquivo).props("flat no-caps")
 
     async def carregar_actual():
-        g = await run.io_bound(obter_gamet_actual)
+        try:
+            g = await run.io_bound(obter_gamet_actual)
+        except Exception as x:  # noqa: BLE001
+            erro("**Não foi possível obter o GAMET.** Cola o texto em baixo.\n\n"
+                 f"{_descr_excepcao(x)}")
+            return
         if not g["texto"]:
             erro("**Não foi possível obter o GAMET.** Cola o texto em baixo.\n\n" + g["erro"])
             return
         caixa.value = g["texto"]
-        desenhar(await run.cpu_bound(analisar, g["texto"], g["fonte"], g["boletins"],
-                                     g["boletins_at"], g["boletins_fonte"], None, None,
-                                     g.get("arquivo")))
+        await analisar_e_desenhar(g["texto"], g["fonte"], g["boletins"],
+                                  g["boletins_at"], g["boletins_fonte"], None, None,
+                                  g.get("arquivo"))
 
     ui.button("Recarregar GAMET", icon="refresh", on_click=carregar_actual).classes("w-full").props("flat no-caps")
     await ui.context.client.connected()
     await carregar_actual()
+
+
+def _descr_excepcao(x):
+    """Tipo e mensagem da excepção (a do subprocesso, se veio do cpu_bound)."""
+    tipo = getattr(x, "original_type", None) or type(x).__name__
+    msg = getattr(x, "original_message", None)
+    msg = str(x) if msg is None else msg
+    return f"{tipo}: {msg}" if msg else tipo
+
+
+def _msg_erro_analise(x):
+    return ("**Não foi possível analisar este GAMET** — " + _descr_excepcao(x) + "\n\n"
+            "Não há briefing para este texto: consulta o GAMET e os SIGMET/AIRMET "
+            "no briefing oficial.")
 
 
 def _gerar_pdf(*a):

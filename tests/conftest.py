@@ -82,6 +82,21 @@ def _extract_engine(src: str) -> str:
     return "\n\n".join(parts)
 
 
+_MAIN_ORIGINAL = sys.modules.get("__main__")
+
+
+@pytest.fixture(autouse=True)
+def _repor_main():
+    """A `nicegui.testing.user_simulation` corre o main.py com runpy como
+    `__main__` e, ao sair, `nicegui_reset_globals` tira de sys.modules o módulo
+    das páginas — o próprio `__main__`. Os testes seguintes que lançam
+    processos com spawn/forkserver (test_v461.py) rebentavam com
+    KeyError: '__main__' (4.7: o test_v47.py corre antes). Repõe-se o original."""
+    yield
+    if _MAIN_ORIGINAL is not None and sys.modules.get("__main__") is None:
+        sys.modules["__main__"] = _MAIN_ORIGINAL
+
+
 @pytest.fixture(scope="session")
 def app_path() -> Path:
     return _find_app()

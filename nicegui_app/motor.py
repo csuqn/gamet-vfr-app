@@ -23,6 +23,12 @@ def carregar():
     src = APP.read_text(encoding="utf-8")
     mod = types.ModuleType("motor_gamet")
     mod.__dict__["__file__"] = str(APP)
+    # Registado em sys.modules ANTES de executar (4.6.1): run.cpu_bound corre a
+    # análise noutro processo e o resultado volta por pickle, que procura as
+    # classes do motor (MetBlock, …) pelo nome do módulo. Sem isto, um
+    # resultado com AIRMETs lidos (MetBlock) falhava com PicklingError e o
+    # briefing não aparecia.
+    sys.modules[mod.__name__] = mod
     exec(compile(conftest._extract_engine(src), str(APP), "exec"), mod.__dict__)
     # Rede (IPMA e arquivo) — o mesmo código da app Streamlit
     a, b = src.index(_MARCA_REDE[0]), src.index(_MARCA_REDE[1])
