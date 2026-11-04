@@ -29,7 +29,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "4.7"
+APP_VERSION = "4.7.1"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -4101,6 +4101,13 @@ TS_RISK = {
     "GEN":       2,   # NO-GO (genérico sem qualificador — conservador)
 }
 
+def _camadas_de(events, tipo, valor):
+    """Camadas (sem repetições, pela ordem) dos eventos `tipo` com `valor` —
+    para o texto do motivo mostrar só a camada do fenómeno que decide (4.7.1)."""
+    return list(dict.fromkeys(layer for t, v, q, layer in events
+                              if t == tipo and v == valor and layer))
+
+
 def decision(events):
     vis_vals    = [v for t, v, *_ in events if t == "VIS"]
     base_vals   = [v for t, v, *_ in events if t == "BASE"]
@@ -4175,14 +4182,19 @@ def decision(events):
     # especialmente crítico em ultraleves) ----
     if "SEV" in turb_vals:
         decision_level = "NO-GO"
-        layer_note = f" {'/'.join(turb_layers)}" if turb_layers else ""
+        # (4.7.1) Só as camadas da TURB SEV: com uma TURB MOD na mesma
+        # célula, a camada dela aparecia colada ao motivo da SEV
+        # ("TURB SEV SFC/FL070/SFC/FL060"). turb_layers continua com todas.
+        sev_l = _camadas_de(events, "TURB", "SEV")
+        layer_note = f" {'/'.join(sev_l)}" if sev_l else ""
         reasons.append(f"TURB SEV{layer_note} — risco severo")
 
     # ---- Gelo severo — NO-GO (a generalidade dos ultraleves não tem
     # sistemas de degelo) ----
     if "SEV" in ice_vals:
         decision_level = "NO-GO"
-        layer_note = f" {'/'.join(ice_layers)}" if ice_layers else ""
+        sev_l = _camadas_de(events, "ICE", "SEV")
+        layer_note = f" {'/'.join(sev_l)}" if sev_l else ""
         reasons.append(f"ICE SEV{layer_note} — risco severo")
 
     # ---- Vento generalizado à superfície (SFC WSPD) — NO-GO a partir de
@@ -4196,7 +4208,8 @@ def decision(events):
     # da turbulência moderada: as descendentes junto ao relevo são perigosas
     # para aeronaves com pouca potência ----
     mtw_vals = [v for t, v, *_ in events if t == "MTW"]
-    mtw_layers = [layer for t, v, q, layer in events if t == "MTW" and layer]
+    mtw_nivel = "SEV" if "SEV" in mtw_vals else "MOD"
+    mtw_layers = _camadas_de(events, "MTW", mtw_nivel)
     mtw_note = f" {'/'.join(mtw_layers)}" if mtw_layers else ""
     if "SEV" in mtw_vals:
         decision_level = "NO-GO"

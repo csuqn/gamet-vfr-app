@@ -29,7 +29,7 @@ from pathlib import Path
 import pytest
 
 import conftest
-from conftest import avisos_redaccao_43, build_gamet, indice_sem_graus, indice_sem_linhas
+from conftest import avisos_redaccao_43, build_gamet, indice_sem_graus, indice_sem_linhas, motivos_sem_camada_471
 
 GRAV = {"GO": 0, "MARGINAL": 1, "NO-GO": 2}
 RAIZ = Path(__file__).resolve().parent.parent
@@ -306,6 +306,9 @@ def _iguais(novo, antigo):
                 # é lida: GAMET real 232100/240300 ganha "TURB: apenas
                 # 21–24Z" (TURB MOD, informativo). Mais nada pode mudar.
                 assert [n for n in a[k] if not re.search(r"apenas \d{2}–24Z", n)] == b[k], k
+            elif k == "reasons":
+                # 4.7.1: só a nota de camada de TURB/ICE/MTW pode mudar
+                assert motivos_sem_camada_471(a[k]) == motivos_sem_camada_471(b[k]), k
             else:
                 assert a[k] == b[k], k
 
