@@ -580,6 +580,13 @@
    "inicio": "2026-11-03T21:00Z",
    "fim": "2026-11-04T03:00Z",
    "tipo": "GAMET"
+  },
+  {
+   "ficheiro": "gamets/2026/11/20261104T0244Z_040300-040900_3eacdfdb7d.txt",
+   "recolhido": "2026-11-04T02:44Z",
+   "inicio": "2026-11-04T03:00Z",
+   "fim": "2026-11-04T09:00Z",
+   "tipo": "GAMET"
   }
  ],
  "sigmets": [
