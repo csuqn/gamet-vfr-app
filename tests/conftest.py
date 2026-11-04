@@ -266,3 +266,16 @@ def cot_452(mod, eng):
     mod.COASTAL_POLYGON = eng.COASTAL_POLYGON
     mod.SURFACE_POLYGONS["COT"] = eng.COASTAL_POLYGON
     return mod
+
+
+# 4.7.1: o motivo "TURB SEV …" / "ICE SEV …" / "MTW SEV|MOD …" passou a mostrar
+# só as camadas dos eventos com esse nível (até à 4.7, todas as do tipo:
+# "TURB SEV SFC/FL070/SFC/FL060"). Os testes que comparam motivos por igualdade
+# com motores fixos anteriores verificam OUTRAS mudanças: comparam-se os
+# motivos sem a nota de camada dessas três linhas. A camada nova é verificada
+# em test_v471.py; a decisão continua a ser comparada à parte.
+_CAMADA_471_RE = re.compile(r"^((?:TURB|ICE) SEV|MTW (?:SEV|MOD)) [^—(]*?(?= —| \(onda|$)")
+
+
+def motivos_sem_camada_471(motivos):
+    return [_CAMADA_471_RE.sub(r"\1", m) for m in motivos]

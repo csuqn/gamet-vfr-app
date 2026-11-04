@@ -242,6 +242,13 @@ definir `FIR_POLYGON` — não entram na decisão.
 | AIRMET em vigor (página do IPMA / arquivo) | as regras acima, na área do AIRMET, **sem margem**, estendida pelo MOV (desde a 4.0). Área/MOV ilegível → toda a FIR + aviso |
 | AIRMET em vigor com fenómeno ilegível | MARGINAL na área do AIRMET + aviso "AIRMET não interpretado" (desde a 4.0) |
 
+**Camada no motivo (4.7.1, pedido do Duarte a 4-nov-2026).** O motivo "TURB
+SEV …" / "ICE SEV …" / "MTW SEV|MOD …" mostra só as camadas dos eventos com
+esse nível (`_camadas_de`, sem repetições). Até à 4.7, numa célula com TURB SEV
+SFC/FL070 e TURB MOD SFC/FL060 (GAMET real 030900/031500) aparecia "TURB SEV
+SFC/FL070/SFC/FL060". Só muda o texto: decisões, `turb_layers` e `ice_layers`
+(que o briefing e o PDF usam) ficam iguais.
+
 TURB e ICE severos forçam NO-GO desde a v23: a maioria dos ultraleves não
 tem sistemas de degelo nem margem estrutural para turbulência severa.
 
@@ -501,7 +508,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-2114 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2085 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
+2121 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2092 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -692,6 +699,9 @@ python3 -m pytest
   `asyncio.run`, salta sem NiceGUI): `options`/`events`/navegação do `ui.date`,
   escolher dia + GAMET chama `analisar_gamet(…, "arquivo_hist", …, indice,
   entrada)` por `analisar_e_desenhar`, erro de leitura → notificação
+- `tests/test_v471.py` — motivo de TURB/ICE/MTW só com a camada do fenómeno que
+  decide (GAMET real 030900/031500: "TURB SEV SFC/FL070", não
+  "SFC/FL070/SFC/FL060"; decisões e `turb_layers`/`ice_layers` iguais)
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva
