@@ -615,6 +615,13 @@
    "inicio": "2026-11-05T03:00Z",
    "fim": "2026-11-05T09:00Z",
    "tipo": "GAMET"
+  },
+  {
+   "ficheiro": "gamets/2026/11/20261105T0850Z_050900-051500_dac483ff43.txt",
+   "recolhido": "2026-11-05T08:50Z",
+   "inicio": "2026-11-05T09:00Z",
+   "fim": "2026-11-05T15:00Z",
+   "tipo": "GAMET"
   }
  ],
  "sigmets": [
