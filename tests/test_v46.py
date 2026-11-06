@@ -106,12 +106,13 @@ def _tudo_nogo(r):
 
 
 @pytest.fixture(scope="module")
-def eng452():
+def eng452(eng):
     mod = types.ModuleType("motor_4_5_2")
     mod.__dict__["__file__"] = str(REF452)
     exec(compile(conftest._extract_engine(REF452.read_text(encoding="utf-8")), str(REF452),
                  "exec"), mod.__dict__)
-    return mod
+    # 4.7.2: a base com dois topos (verificada em test_v472.py)
+    return conftest.cld_base_472(mod, eng)
 
 
 def test_referencia_e_a_4_5_2(eng, eng452):
