@@ -268,6 +268,22 @@ def cot_452(mod, eng):
     return mod
 
 
+# 4.7.2: _CLD_BASE_RE passou a aceitar um segundo topo depois de outra barra
+# ("060-090/100/130HFT AMSL"); até à 4.7.1 a base desaparecia em silêncio. No
+# arquivo só muda a nota informativa "Nuvens baixas na Secção II" do GAMET
+# 211500/212100 de 21-mar ("AS/AC 060/090-100/150HFT AMSL": 6000 ft AMSL junto
+# ao relevo) — nenhuma decisão. Os testes que comparam avisos por igualdade com
+# motores fixos anteriores (4.1, 4.2, 4.4, 4.5.2) verificam OUTRAS mudanças:
+# dá-se ao motor antigo a expressão da 4.7.2, que muda de propósito e é
+# verificada em test_v472.py (e contra a 3.10 em test_v40_contra_310.py, que
+# não a recebe). O ciclo do estado "CLD" dos motores antigos só lê os grupos
+# da 4.0; o 2.º topo colado é ignorado em ambos.
+def cld_base_472(mod, eng):
+    """Põe no motor `mod` (fixo, anterior à 4.7.2) a _CLD_BASE_RE de `eng`."""
+    mod._CLD_BASE_RE = eng._CLD_BASE_RE
+    return mod
+
+
 # 4.7.1: o motivo "TURB SEV …" / "ICE SEV …" / "MTW SEV|MOD …" passou a mostrar
 # só as camadas dos eventos com esse nível (até à 4.7, todas as do tipo:
 # "TURB SEV SFC/FL070/SFC/FL060"). Os testes que comparam motivos por igualdade

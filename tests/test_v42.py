@@ -80,7 +80,8 @@ def eng41(eng):
     mod.__dict__["__file__"] = str(REF)
     exec(compile(conftest._extract_engine(src), str(REF), "exec"), mod.__dict__)
     # 4.5.2: a faixa COT da 4.5.2 (verificada contra a 4.5.1 em test_v452.py)
-    return conftest.cot_452(mod, eng)
+    # 4.7.2: a base com dois topos (verificada em test_v472.py)
+    return conftest.cld_base_472(conftest.cot_452(mod, eng), eng)
 
 
 def test_referencia_e_a_4_1(eng41):

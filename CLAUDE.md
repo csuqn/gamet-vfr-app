@@ -79,6 +79,21 @@ Três pormenores que já causaram erros reais:
   (`004 - 008`) não é apagado. Verificado contra o motor da 3.10
   (`tests/referencia/app_3_10.py`, `test_v40_contra_310.py`, gerador de SIG
   CLD). Nenhum GAMET do arquivo tinha estes formatos (26-out-2026: nada muda).
+- **Topo com duas barras** (`060-090/100/130HFT AMSL`, GAMET real 060300/060900,
+  Secção II; gralha do IPMA de `100-130`; 4.7.2): até à 4.7.1 nada casava a
+  partir da base e ela desaparecia em silêncio — em SIG CLD, `BKN
+  002-008/010/015HFT AGL` dava GO (com "Campo não interpretado") e, ao lado de
+  um `ISOL TCU/CB`, MARGINAL sem aviso. `_CLD_BASE_RE` aceita um segundo topo
+  depois de outra barra (`st2`/`topo2`): colado é topo e é ignorado (a base é o
+  primeiro número); com espaços ou ABV entra no mínimo, como na 4.0
+  (`002/010 / 015HFT` → 200, a 4.7.1 lia 1500). O AIRMET passa pelo mesmo
+  caminho (metros com duas barras continuam por ler → "AIRMET não
+  interpretado"). No GAMET real 060300 não muda nada (6000 ft AMSL sem nota);
+  no arquivo só o GAMET 211500/212100 de 21-mar (`AS/AC 060/090-100/150HFT
+  AMSL`) ganha a nota "Nuvens baixas" (6000 ft AMSL junto ao relevo: LPBG,
+  LPSE, LP66). Arquivo a 6-nov-2026 (92 GAMETs, `--indice`): 0 decisões mais
+  permissivas, 0 mais severas. Os testes do arquivo contra a 4.1/4.2/4.4/4.5.2
+  dão ao motor antigo a expressão nova (`conftest.cld_base_472`).
 - **MT OBSC e VA: um bloco por subentrada** (3.10). Até à 3.9 só a linha que
   abre o campo gerava bloco: em `MT OBSC:N OF N4100 LAN S OF N3800 LAN` o S de
   N3800 ficava fora da decisão. Cada subentrada gera agora o seu, com a sua
@@ -508,7 +523,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-2121 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2092 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
+2146 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2117 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -702,6 +717,13 @@ python3 -m pytest
 - `tests/test_v471.py` — motivo de TURB/ICE/MTW só com a camada do fenómeno que
   decide (GAMET real 030900/031500: "TURB SEV SFC/FL070", não
   "SFC/FL070/SFC/FL060"; decisões e `turb_layers`/`ice_layers` iguais)
+- `tests/test_v472.py` — topo com duas barras (GAMET real 060300: Secção II lê
+  a base AS/AC 6000 ft AMSL, sem nota "Nuvens baixas", 52 pontos iguais; SIG
+  CLD `BKN 002-008/010/015HFT AGL` sozinho e com `ISOL TCU/CB` → NO-GO a N de
+  N3830, sem "Campo não interpretado"; topo colado nunca é base, com
+  espaços/ABV entra no mínimo; formas antigas, vento e níveis inalterados;
+  AIRMET; GAMET do arquivo 211500 de 21-mar: nota AMSL em LPBG/LPSE/LP66,
+  decisões iguais)
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva

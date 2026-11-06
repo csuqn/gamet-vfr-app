@@ -29,7 +29,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "4.7.1"
+APP_VERSION = "4.7.2"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -1684,7 +1684,13 @@ _CLD_BASE_RE = re.compile(
     # "002/ABV 030HFT", "002/ABV030HFT", "002 / 030HFT". Até à 4.0 a base
     # não casava e o TOPO era lido como base (3000 ft → GO em silêncio).
     r"(?:(?P<stopo>\s*/\s*(?:ABV\s*)?)"
-    r"(?:(?P<topo>\d{3,5})(?:(?P<stf>\s*-\s*)(?P<topofim>\d{3,5}))?|XXX))?"
+    r"(?:(?P<topo>\d{3,5})(?:(?P<stf>\s*-\s*)(?P<topofim>\d{3,5}))?|XXX)"
+    # Segundo topo depois de outra barra (4.7.2): "060-090/100/130HFT AMSL"
+    # (GAMET real 060300/060900, Secção II; gralha do IPMA de "100-130").
+    # Sem isto nada casava a partir da base e ela desaparecia em silêncio
+    # ("002-008/010/015HFT" em SIG CLD → GO). Colado é topo (ignorado); com
+    # espaços ou ABV entra no mínimo, como os outros separadores da 4.0.
+    r"(?:(?P<st2>\s*/\s*(?:ABV\s*)?)(?P<topo2>\d{3,5}))?)?"
     # "HTF" (3.7) é gralha do IPMA para "HFT" (GAMET real 201500/202100:
     # "LCA BKN 008/010HTF AGL"). Sem ela a base desaparecia em silêncio.
     r"\s*(?P<unit>HFT|HTF|FT)\b"
@@ -2411,6 +2417,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
             #   "002/010HFT AGL"      base/topo (forma-modelo OACI)
             #   "002-004/010HFT AGL"  intervalo de bases/topo
             #   "050-090/100-130HFT"  topo em intervalo (3.8)
+            #   "060-090/100/130HFT"  topo com duas barras (gralha, 4.7.2)
             #   "004/XXXHFT AGL"      topo desconhecido
             #   "SFC/010HFT AGL"      base à superfície → 0 ft
             #   "800/1100FT AGL"      valores em pés (sem o H de centenas)
@@ -2429,7 +2436,8 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
                 # Números lidos depois de um separador com espaços ou ABV
                 # (que a 3.10 lia como base) entram no mínimo; os colados não.
                 nums = [int(base_txt)] if base_txt != "SFC" else []
-                for sep, num in (("sfim", "fim"), ("stopo", "topo"), ("stf", "topofim")):
+                for sep, num in (("sfim", "fim"), ("stopo", "topo"), ("stf", "topofim"),
+                                 ("st2", "topo2")):
                     if m.group(num) and m.group(sep) not in ("-", "/"):
                         nums.append(int(m.group(num)))
                 if base_txt == "SFC":
