@@ -643,6 +643,13 @@
    "inicio": "2026-11-06T03:00Z",
    "fim": "2026-11-06T09:00Z",
    "tipo": "GAMET"
+  },
+  {
+   "ficheiro": "gamets/2026/11/20261106T0841Z_060900-061500_f32bab6a2c.txt",
+   "recolhido": "2026-11-06T08:41Z",
+   "inicio": "2026-11-06T09:00Z",
+   "fim": "2026-11-06T15:00Z",
+   "tipo": "GAMET"
   }
  ],
  "sigmets": [
