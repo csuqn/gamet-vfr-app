@@ -308,8 +308,10 @@ def _iguais(novo, antigo):
                 # 21–24Z" (TURB MOD, informativo). Mais nada pode mudar.
                 assert [n for n in a[k] if not re.search(r"apenas \d{2}–24Z", n)] == b[k], k
             elif k == "reasons":
-                # 4.7.1: só a nota de camada de TURB/ICE/MTW pode mudar
-                assert motivos_sem_camada_471(a[k]) == motivos_sem_camada_471(b[k]), k
+                # 4.7.1: só a nota de camada de TURB/ICE/MTW pode mudar;
+                # 4.7.3: e o prefixo "parte da zona: " (conftest)
+                assert (conftest.motivos_sem_parcial_473(motivos_sem_camada_471(a[k]))
+                        == sorted(motivos_sem_camada_471(b[k]))), k
             else:
                 assert a[k] == b[k], k
 

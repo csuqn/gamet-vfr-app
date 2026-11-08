@@ -264,6 +264,24 @@ SFC/FL070 e TURB MOD SFC/FL060 (GAMET real 030900/031500) aparecia "TURB SEV
 SFC/FL070/SFC/FL060". Só muda o texto: decisões, `turb_layers` e `ice_layers`
 (que o briefing e o PDF usam) ficam iguais.
 
+**Motivos de regiões fundidas (4.7.3, pedido do Duarte a 7-nov-2026).** GAMET
+real 061500/062100: o CB (`BTN N4030 - N3800 MAR AND COT ISOL TCU/CB`) só cobre
+LPCS/LPSC/LP49/LP63, mas `_merge_slivers` juntava a fatia de 1,2% com o CB à
+região do interior norte (a 1.ª escolha, `_assinatura`, não compara CB, WSPD,
+MTW, SIGWX, SIGMET nem AIRMET) e `_absorb_values` unia os motivos: LPBG/LPCH/LPPR
+diziam "CB ISOL". A fusão fica igual (polígonos, decisões, valores);
+`_motivos_fundidos` deixa pleno só o motivo que vale nas duas partes (base pelo
+limiar, valor mais baixo) e marca o resto `parte da zona: <motivo>`
+(`_MOTIVO_PARCIAL`; não é "LCA"). Nenhum motivo desaparece; a coluna CB/TS diz
+"CB (parte da zona)". Contra a 4.7.2 (`tests/referencia/app_4_7_2.py`,
+`test_v473.py`): arquivo a 8-nov-2026 (101 GAMETs, manual e `arquivo_hist`)
+com regiões, valores, avisos, resto e decisões (52 pontos + grelha) iguais e os
+mesmos motivos sem o prefixo; 9 GAMETs ganham motivos parciais (em manual só o
+061500 e o 060900 de 6-set; com os SIGMETs do arquivo, sobretudo "SIGMET …"/TS
+de fatias NO-GO absorvidas). Oráculo: cada motivo pleno vale em cada ponto da
+região. Os testes contra a 4.1 (`test_v42.py`) comparam os motivos sem o
+prefixo (`conftest.motivos_sem_parcial_473`).
+
 TURB e ICE severos forçam NO-GO desde a v23: a maioria dos ultraleves não
 tem sistemas de degelo nem margem estrutural para turbulência severa.
 
@@ -523,7 +541,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-2146 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2117 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
+2158 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2129 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -724,6 +742,12 @@ python3 -m pytest
   espaços/ABV entra no mínimo; formas antigas, vento e níveis inalterados;
   AIRMET; GAMET do arquivo 211500 de 21-mar: nota AMSL em LPBG/LPSE/LP66,
   decisões iguais)
+- `tests/test_v473.py` — motivos de regiões fundidas (GAMET real 061500:
+  LPBG/LPCH/LPPR sem "CB ISOL" pleno, "parte da zona: CB ISOL" na região
+  grande, LPCS com CB pleno, decisões; `_motivos_fundidos`; coluna CB/TS; PDF)
+  contra o motor da **4.7.2** (`tests/referencia/app_4_7_2.py`, cópia fixa do
+  `app.py` do main d30a657; não editar): todo o arquivo (manual e
+  `arquivo_hist`) igual excepto o prefixo; oráculo de motivos plenos por ponto
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva

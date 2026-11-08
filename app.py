@@ -29,7 +29,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "4.7.2"
+APP_VERSION = "4.7.3"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -2784,6 +2784,35 @@ def _aggregate_results(resultados):
     }
 
 
+# 4.7.3 (pedido do Duarte a 7-nov-2026): motivo que só vale em parte de uma
+# região fundida. Não é "LCA" (localmente, do GAMET): é parte da região.
+_MOTIVO_PARCIAL = "parte da zona: "
+
+
+def _sem_parcial(motivo):
+    return motivo[len(_MOTIVO_PARCIAL):] if motivo.startswith(_MOTIVO_PARCIAL) else motivo
+
+
+def _motivos_fundidos(motivos_a, motivos_b):
+    """
+    (4.7.3) Motivos de duas regiões que se fundem. Fica pleno o motivo que
+    vale nas duas (a base conta pelo limiar, com o valor mais baixo); o que
+    só vale numa delas, ou já era parcial, fica "parte da zona: …". Nenhum
+    motivo desaparece. Até à 4.7.2 era a união: uma fatia com CB absorvida
+    na região do interior norte punha "CB ISOL" em LPBG (GAMET real 061500).
+    """
+    def _chave(m):
+        return _BASE_REASON_RE.sub(r"\1BASE #ft", m)
+
+    plenos_a = [m for m in motivos_a if not m.startswith(_MOTIVO_PARCIAL)]
+    plenos_b = [m for m in motivos_b if not m.startswith(_MOTIVO_PARCIAL)]
+    comuns = {_chave(m) for m in plenos_a} & {_chave(m) for m in plenos_b}
+    todos = [_sem_parcial(m) for m in list(motivos_a) + list(motivos_b)]
+    plenos = _dedupe_base_reasons({m for m in todos if _chave(m) in comuns})
+    parciais = _dedupe_base_reasons({m for m in todos if _chave(m) not in comuns})
+    return plenos + [_MOTIVO_PARCIAL + m for m in parciais]
+
+
 def _absorb_values(alvo, peq):
     """
     Quando uma região absorve outra (lasca ou bolsa consolidada), os
@@ -2803,7 +2832,7 @@ def _absorb_values(alvo, peq):
         alvo[campo] = min(vals) if vals else None
     for campo in ("ts", "turb", "turb_layers", "ice", "ice_layers", "mt_obsc", "va"):
         alvo[campo] = sorted(set(alvo.get(campo, [])) | set(peq.get(campo, [])))
-    alvo["reasons"] = _dedupe_base_reasons(set(alvo.get("reasons", [])) | set(peq.get("reasons", [])))
+    alvo["reasons"] = _motivos_fundidos(alvo.get("reasons", []), peq.get("reasons", []))
     alvo["notas"] = sorted(set(alvo.get("notas", [])) | set(peq.get("notas", [])))
 
 
@@ -3093,7 +3122,9 @@ def _merge_slivers(regions, min_area_frac=0.015):
                 tuple(r["mt_obsc"]), tuple(r["va"]))
 
     def _motivos(r):
-        return {_BASE_REASON_RE.sub(r"\1BASE #ft", m) for m in r.get("reasons", [])}
+        # 4.7.3: um motivo parcial conta como o próprio motivo (a escolha da
+        # vizinha fica igual à da 4.7.2; só muda o texto)
+        return {_BASE_REASON_RE.sub(r"\1BASE #ft", _sem_parcial(m)) for m in r.get("reasons", [])}
 
     def _bolsa_irma(a, b):
         # Mesmo grupo de compute_dynamic_regions (mesma decisão, mesmos
@@ -4959,8 +4990,11 @@ def _camadas(vals, layers, parcial):
 def _cb_ts(region):
     if region.get("ts"):
         return ", ".join(_ts_label(v) for v in region["ts"])
-    if any(re.match(r"(?:AIRMET \S+ — )?CB\b", str(r)) for r in region.get("reasons", [])):
+    motivos = [str(r) for r in region.get("reasons", [])]
+    if any(re.match(r"(?:AIRMET \S+ — )?CB\b", r) for r in motivos):
         return "CB"
+    if any(re.match(r"(?:AIRMET \S+ — )?CB\b", _sem_parcial(r)) for r in motivos):
+        return "CB (parte da zona)"      # 4.7.3: só numa parte da região
     return "—"
 
 
