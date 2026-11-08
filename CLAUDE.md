@@ -282,6 +282,24 @@ de fatias NO-GO absorvidas). Oráculo: cada motivo pleno vale em cada ponto da
 região. Os testes contra a 4.1 (`test_v42.py`) comparam os motivos sem o
 prefixo (`conftest.motivos_sem_parcial_473`).
 
+**Notas de regiões fundidas (4.7.4, pedido do Duarte a 8-nov-2026).** O mesmo
+para as notas de alcance (`region["notas"]`, linha "Alcance" do cartão e do
+PDF): no GAMET real 061500 a região do interior norte (LPBG/LPCH/LPPR) dizia
+"BASE: apenas sobre a costa e o mar (área já recortada); CB: apenas sobre a
+costa e o mar", vindas da fatia costeira — como se a base de 400 ft não contasse
+em terra. `_absorb_values` usa `_notas_fundidas` (regra de `_motivos_fundidos`):
+plena só a nota que vale nas duas partes, o resto `parte da zona: <nota>`, no
+fim; nenhuma desaparece. A escolha da vizinha (`_assinatura`, `_motivos`,
+`_grupo`) não lê notas: fusões iguais. `annotate_window_notes` continua a
+reconhecer a janela com o prefixo. Contra a 4.7.3 (`tests/referencia/
+app_4_7_3.py`, `test_v474.py`): arquivo a 8-nov-2026 (101 GAMETs, manual e
+`arquivo_hist`) com regiões, polígonos, valores, motivos, avisos, resto e
+decisões (52 pontos + grelha) iguais e as mesmas notas sem o prefixo; 8 GAMETs
+ganham notas parciais (6 em manual). Oráculo: cada nota plena de superfície/
+janela vale em cada ponto da região. `comparar_versoes.py --indice`: 0 mais
+permissivas, 0 mais severas. Os testes contra a 4.1/4.7.2 comparam as notas sem
+o prefixo (`conftest.notas_sem_parcial_474`).
+
 TURB e ICE severos forçam NO-GO desde a v23: a maioria dos ultraleves não
 tem sistemas de degelo nem margem estrutural para turbulência severa.
 
@@ -541,7 +559,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-2158 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2129 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
+2171 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2142 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -748,6 +766,13 @@ python3 -m pytest
   contra o motor da **4.7.2** (`tests/referencia/app_4_7_2.py`, cópia fixa do
   `app.py` do main d30a657; não editar): todo o arquivo (manual e
   `arquivo_hist`) igual excepto o prefixo; oráculo de motivos plenos por ponto
+- `tests/test_v474.py` — notas de alcance de regiões fundidas (GAMET real
+  061500: LPBG/LPCH/LPPR… sem "BASE/CB: apenas sobre a costa e o mar" pleno, com
+  "parte da zona: …"; LPCS com as notas plenas; decisões; `_notas_fundidas`;
+  `annotate_window_notes`, cartão e PDF) contra o motor da **4.7.3**
+  (`tests/referencia/app_4_7_3.py`, cópia fixa do `app.py` do main 65374dd; não
+  editar): todo o arquivo (manual e `arquivo_hist`) igual excepto o prefixo das
+  notas; oráculo de notas plenas por ponto
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva

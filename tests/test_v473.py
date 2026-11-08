@@ -207,6 +207,10 @@ def _comparar_regioes(eng, eng472, regs_n, regs_v, nome):
                 continue
             if k == "polygon":
                 continue
+            if k == "notas":
+                # 4.7.4: notas de alcance parciais ganham o prefixo (test_v474)
+                assert conftest.notas_sem_parcial_474(a[k]) == b[k], (nome, k)
+                continue
             assert a[k] == b[k], (nome, k)
         # Nenhum motivo desaparece nem aparece: só passa a "parte da zona"
         assert sorted(_sem_prefixo(m) for m in a["reasons"]) == sorted(b["reasons"]), \

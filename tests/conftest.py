@@ -309,3 +309,10 @@ MOTIVO_PARCIAL_473 = "parte da zona: "
 def motivos_sem_parcial_473(motivos):
     return sorted(m[len(MOTIVO_PARCIAL_473):] if m.startswith(MOTIVO_PARCIAL_473) else m
                   for m in motivos)
+
+
+# 4.7.4: o mesmo para as NOTAS de alcance de uma região fundida ("parte da
+# zona: BASE: apenas sobre a costa e o mar…"); até à 4.7.3 eram a união, sem
+# prefixo, por ordem alfabética. O prefixo é verificado em test_v474.py.
+def notas_sem_parcial_474(notas):
+    return motivos_sem_parcial_473(notas)
