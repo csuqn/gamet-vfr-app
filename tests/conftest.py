@@ -295,3 +295,17 @@ _CAMADA_471_RE = re.compile(r"^((?:TURB|ICE) SEV|MTW (?:SEV|MOD)) [^—(]*?(?= �
 
 def motivos_sem_camada_471(motivos):
     return [_CAMADA_471_RE.sub(r"\1", m) for m in motivos]
+
+
+# 4.7.3: numa região fundida, o motivo que só vale numa das partes passou a
+# "parte da zona: <motivo>" (até à 4.7.2 aparecia sem prefixo, como se valesse
+# em toda a região), e os parciais vão no fim da lista. Os testes que comparam
+# motivos por igualdade com motores fixos anteriores verificam OUTRAS mudanças:
+# comparam-se os motivos da versão nova sem o prefixo, por ordem. O prefixo é
+# verificado em test_v473.py (contra a 4.7.2: os mesmos motivos sem o prefixo).
+MOTIVO_PARCIAL_473 = "parte da zona: "
+
+
+def motivos_sem_parcial_473(motivos):
+    return sorted(m[len(MOTIVO_PARCIAL_473):] if m.startswith(MOTIVO_PARCIAL_473) else m
+                  for m in motivos)
