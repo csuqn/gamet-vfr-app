@@ -29,7 +29,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "4.7.3"
+APP_VERSION = "4.7.4"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -2813,6 +2813,23 @@ def _motivos_fundidos(motivos_a, motivos_b):
     return plenos + [_MOTIVO_PARCIAL + m for m in parciais]
 
 
+def _notas_fundidas(notas_a, notas_b):
+    """
+    (4.7.4) Notas de alcance ("BASE: apenas sobre a costa e o mar…") de duas
+    regiões que se fundem, com a regra de _motivos_fundidos: fica plena a
+    nota que vale nas duas; a que só vale numa delas, ou já era parcial, fica
+    "parte da zona: …". Nenhuma nota desaparece. Até à 4.7.3 era a união: a
+    fatia costeira com o CB absorvida no interior norte punha "BASE apenas
+    sobre a costa e o mar" em LPBG, como se a base de 400 ft não contasse
+    em terra (GAMET real 061500).
+    """
+    plenas_a = {n for n in notas_a if not n.startswith(_MOTIVO_PARCIAL)}
+    plenas_b = {n for n in notas_b if not n.startswith(_MOTIVO_PARCIAL)}
+    comuns = plenas_a & plenas_b
+    todas = {_sem_parcial(n) for n in list(notas_a) + list(notas_b)}
+    return sorted(comuns) + [_MOTIVO_PARCIAL + n for n in sorted(todas - comuns)]
+
+
 def _absorb_values(alvo, peq):
     """
     Quando uma região absorve outra (lasca ou bolsa consolidada), os
@@ -2833,7 +2850,7 @@ def _absorb_values(alvo, peq):
     for campo in ("ts", "turb", "turb_layers", "ice", "ice_layers", "mt_obsc", "va"):
         alvo[campo] = sorted(set(alvo.get(campo, [])) | set(peq.get(campo, [])))
     alvo["reasons"] = _motivos_fundidos(alvo.get("reasons", []), peq.get("reasons", []))
-    alvo["notas"] = sorted(set(alvo.get("notas", [])) | set(peq.get("notas", [])))
+    alvo["notas"] = _notas_fundidas(alvo.get("notas", []), peq.get("notas", []))
 
 
 def _refine_cells(cells, splitters, tol=1e-3):

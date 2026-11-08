@@ -306,7 +306,9 @@ def _iguais(novo, antigo):
                 # Desde a 4.3 a janela "21/24" (até 24, o critério dos cortes)
                 # é lida: GAMET real 232100/240300 ganha "TURB: apenas
                 # 21–24Z" (TURB MOD, informativo). Mais nada pode mudar.
-                assert [n for n in a[k] if not re.search(r"apenas \d{2}–24Z", n)] == b[k], k
+                # 4.7.4: e o prefixo "parte da zona: " das notas (conftest)
+                assert [n for n in conftest.notas_sem_parcial_474(a[k])
+                        if not re.search(r"apenas \d{2}–24Z", n)] == b[k], k
             elif k == "reasons":
                 # 4.7.1: só a nota de camada de TURB/ICE/MTW pode mudar;
                 # 4.7.3: e o prefixo "parte da zona: " (conftest)
