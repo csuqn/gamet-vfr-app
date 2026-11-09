@@ -29,7 +29,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "4.7.5"
+APP_VERSION = "4.7.6"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -1849,6 +1849,55 @@ def _cortes_janela(linha):
     return cortes
 
 
+# Superfície a meio da linha (4.7.6): "LCA BKN 006-008/012HFT AGL MAR AND COT
+# ISOL/EMBD TCU/CB …" (GAMET real 081500/082100 de 8-nov-2026). Até à 4.7.5 só
+# uma janela abria parte nova; a superfície recortava a linha inteira e o LCA
+# BKN 006 ficava só no mar e na costa (com uma base < 500 ft o interior ficava
+# GO). Uma superfície depois de conteúdo do campo e seguida de mais conteúdo
+# abre parte nova: o que vem antes fica com a área da subentrada, o que vem
+# depois com a superfície. Cada parte é unida com a área que a 4.7.5 lhe dava
+# (garantia em parse_gamet, como a da 4.3).
+_SUP_MEIO_RE = re.compile(r"(?<![\w/\-])" + _SUP_SEQ)
+# Algo com ar de área depois da superfície (mesmo mais à frente na parte): não
+# se parte, fica como na 4.7.5 — a parte nova nunca abre uma subentrada.
+_AREA_ALGURES_RE = re.compile(
+    r"\b(?:[NS][EW]?|[EW])\s+(?:OF|PART)\b|\b(?:BTN|WI|ALONG|ENTIRE|LINE)\b"
+    r"|\b[NS]\d{2,4}\b|\b[WE]\d{3,5}\b|\b\d{1,3}\s*NM\b")
+
+
+def _cortes_superficie(linha, cortes_janela=()):
+    """
+    Posições das superfícies a meio da linha que abrem uma parte nova (4.7.6),
+    dentro de cada parte de `_cortes_janela` (posições `cortes_janela`). Não
+    parte se antes (desde o início da parte ou o corte anterior) só há o nome
+    do campo, área, superfície, LCA ou janelas, nem se depois da superfície vem
+    o fim da linha, outra janela ou um qualificador geográfico, nem se há algo
+    com ar de área (`_AREA_ALGURES_RE`) no resto da parte.
+    """
+    lim = [0] + sorted(cortes_janela) + [len(linha)]
+    cortes = []
+    for a, b in zip(lim, lim[1:]):
+        ini = a
+        for m in _SUP_MEIO_RE.finditer(linha, a, b):
+            antes = linha[ini:m.start()]
+            if ini == 0:
+                mc = _CAMPO_LINHA_RE.match(antes)
+                if mc:
+                    antes = antes[mc.end():]
+            # Conteúdo do campo: um termo que não é área (só pontuação não conta:
+            # "BTN N4050 ~ N3840 MAR …" é uma área ilegível, não um valor)
+            if all(_SO_AREA_TOK_RE.fullmatch(t) or not re.search(r"[A-Z0-9]", t)
+                   for t in re.findall(r"[^\s:,;.=]+", antes)):
+                continue
+            resto = linha[m.end():b]
+            if (_SEM_CONTEUDO_RE.fullmatch(resto) or _DEPOIS_SUP_QUAL_RE.match(resto)
+                    or _AREA_ALGURES_RE.search(resto) or _DIAGONAL_RE.search(resto)):
+                continue
+            cortes.append(m.start())
+            ini = m.start()
+    return cortes
+
+
 def _domina(n, v):
     """O bloco `n` (4.3) é pelo menos tão severo como o `v` (4.2): mesmo
     fenómeno, valor igual ou pior, LCA só se `v` também o era, área que
@@ -1873,10 +1922,12 @@ def _domina(n, v):
 
 
 def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=False,
-                _areas42=None):
+                _areas42=None, _modo475=False):
     # _modo42 / _areas42 (4.3, uso interno): leitura da 4.2 (só a partição da
     # 4.1), que regista a área de cada parte em _areas42 — a garantia de que
     # a leitura nova nunca é mais permissiva (ver "Janela a meio da linha").
+    # _modo475 (4.7.6, uso interno): leitura da 4.7.5 (sem os cortes por
+    # superfície a meio da linha), que é então a garantia em vez da da 4.2.
 
     text = normalize(text)
 
@@ -1970,7 +2021,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
     for i, l in enumerate(lines):
         spans = _spans_41(l)
         comb = None if len(spans) == 1 else l
-        itens42.extend((l[a:b].strip(), comb, k, i, (a, b), None, "")
+        itens42.extend((l[a:b].strip(), comb, k, i, (a, b), None, "", None)
                        for k, (a, b) in enumerate(spans))
 
     # Leitura da 4.3: qualquer janela "HH/HH" a meio da linha abre uma
@@ -1982,27 +2033,49 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
     # (4.3, decisão do Duarte a 28-out-2026) Linhas que cederam um "HH/HH SUP"
     # à seguinte: os blocos delas ficam janela_ambigua (leitura conservadora).
     linhas_cedidas = set()
+    # (4.7.6) Há superfícies a meio da linha que abrem uma parte nova
+    ha_cortes_sup = False
     if _modo42:
         itens = itens42
     else:
         itens = []
         for i, l in enumerate(lines):
             cortes = _cortes_janela(l)
-            lim = [0] + [c[0] for c in cortes] + [len(l)]
+            pos_j = [c[0] for c in cortes]
+            # (4.7.6) Superfície a meio da linha: parte nova sem janela própria.
+            # Cada item guarda ainda o texto da parte da 4.7.5 (entre janelas),
+            # para a verificação de "outra janela na mesma linha".
+            pos_s = [] if _modo475 else _cortes_superficie(l, pos_j)
+            ha_cortes_sup = ha_cortes_sup or bool(pos_s)
+            janela_de = dict(zip(pos_j, (c[1:] for c in cortes)))
+            lim = [0] + sorted(pos_j + pos_s) + [len(l)]
+            lim_j = [0] + pos_j + [len(l)]
             for k in range(len(lim) - 1):
                 a, b = lim[k], lim[k + 1]
                 if l[a:b].strip():
+                    pj = None
+                    if pos_s:
+                        aj = max(x for x in lim_j[:-1] if x <= a)
+                        pj = l[aj:min(x for x in lim_j[1:] if x > aj)].strip()
                     itens.append([l[a:b].strip(), None, k, i, (a, b),
-                                  cortes[k - 1][1:] if k else None, ""])
+                                  janela_de.get(a) if k else None, "", pj])
         for j in range(len(itens) - 1):
             it, nx = itens[j], itens[j + 1]
             if (it[2] >= 1 and _JANELA_SUP_RE.fullmatch(it[0]) and nx[2] == 0
                     and nx[3] == it[3] + 1 and _qual_ini.match(nx[0])):
                 nx[0], nx[5], nx[6] = f"{it[0]} {nx[0]}", it[5], it[0]
+                if nx[7] is not None:
+                    nx[7] = f"{it[0]} {nx[7]}"
                 it[0] = ""
                 linhas_cedidas.add(it[3])
         itens = [tuple(it) for it in itens if it[0]]
-        if [(it[3], it[4], it[6]) for it in itens] != [(it[3], it[4], "") for it in itens42] \
+        if ha_cortes_sup:
+            # (4.7.6) A garantia é a leitura da 4.7.5 (que contém a da 4.2):
+            # cada parte é unida com a área das partes da 4.7.5 de onde vêm os
+            # seus valores, e um bloco da 4.7.5 sem bloco novo que o domine
+            # entra tal como a 4.7.5 o lia.
+            blocos42 = parse_gamet(text, _modo475=True, _areas42=areas42)[0]
+        elif [(it[3], it[4], it[6]) for it in itens] != [(it[3], it[4], "") for it in itens42] \
                 or any(it[1] for it in itens42):
             # Há linhas lidas de outra forma: a leitura da 4.2, para a garantia
             blocos42 = parse_gamet(text, _modo42=True, _areas42=areas42)[0]
@@ -2107,7 +2180,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
                 b.janela_ambigua = True
             current_ambigua = True
 
-    for raw_line, combinada, k_parte, n_linha, span, janela_corte, prefixo in itens:
+    for raw_line, combinada, k_parte, n_linha, span, janela_corte, prefixo, parte475 in itens:
 
         _fim_item()
         if item_atual is not None and item_atual["i"] != n_linha:
@@ -2167,6 +2240,12 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
             campo_txt = line[:len(line) - len(content)].strip().rstrip(":").strip()
         else:
             content = line
+        # (4.7.6) Texto da parte da 4.7.5 (sem o nome do campo), para os avisos
+        # de área: iguais aos da 4.7.5 numa linha cortada por uma superfície.
+        content475 = content
+        if parte475 is not None:
+            content475 = parte475[len(campo_txt):].lstrip().lstrip(":").strip() \
+                if new_state and parte475.startswith(campo_txt) else parte475
 
         if state == "IDLE":
             continue
@@ -2198,7 +2277,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
             # Cardinal solto antes de BTN (3.5): área alargada, com aviso
             if alargadas is not None:
                 for leitura in lidas:
-                    alargadas.append((f"{campo_txt}: {content}", leitura))
+                    alargadas.append((f"{campo_txt}: {content475}", leitura))
         elif (_AREA_INI_RE.match(content) or _DIAGONAL_RE.search(content)
               or _CARDINAL_BTN_RE.search(content) or _btn_degenerado(content)):
             # Subentrada com ar de qualificador geográfico, mas sem área
@@ -2211,7 +2290,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
             # dois limites iguais (4.5.2), em qualquer posição, também.
             current_polygon = FIR_POLYGON
             if sem_area is not None and not _ENTIRE_FIR_RE.match(content):
-                sem_area.append(f"{campo_txt}: {content}")
+                sem_area.append(f"{campo_txt}: {content475}")
         elif not new_state and _JANELA_SUP_RE.match(content):
             # "11/15 MAR AND COT …" (4.1): subentrada nova, só com a
             # superfície, em TODA a FIR — leitura conservadora, que contém a
@@ -2335,8 +2414,12 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
         # (4.2) Outra janela na mesma linha, que não a do bloco: a hora a que
         # cada valor se aplica fica ambígua (só conta para o resto do período;
         # a decisão principal não usa janelas).
+        # (4.7.6) Numa parte cortada por uma superfície, o texto da parte da
+        # 4.7.5 (entre janelas): o que vem antes da superfície não deixa de
+        # ser ambíguo por a outra janela ter ficado na parte seguinte.
         if any(f"{int(x):02d}–{int(y):02d}Z" != window
-               for x, y in re.findall(r"(?:^|\s)(\d{2})/(\d{2})(?=\s|$)", content)):
+               for x, y in re.findall(r"(?:^|\s)(\d{2})/(\d{2})(?=\s|$)",
+                                      content if parte475 is None else parte475)):
             current_ambigua = True
         ambigua = current_ambigua
 
