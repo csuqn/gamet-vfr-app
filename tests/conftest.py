@@ -316,3 +316,19 @@ def motivos_sem_parcial_473(motivos):
 # prefixo, por ordem alfabética. O prefixo é verificado em test_v474.py.
 def notas_sem_parcial_474(notas):
     return motivos_sem_parcial_473(notas)
+
+
+# 4.7.5: "SFC WIND:" na Secção I passou a ser o mesmo campo que "SFC WSPD:"
+# (até à 4.7.4 era ignorado em silêncio; GAMETs reais 081500 e 082100 de
+# 8-nov-2026). Os testes que comparam o arquivo por igualdade com motores fixos
+# anteriores verificam OUTRAS mudanças: dão aos dois motores o texto com o nome
+# antigo, que todos lêem desde a 1.4. Que a 4.7.5 lê os dois nomes da mesma
+# forma (também no arquivo) e nunca fica mais permissiva do que a 4.7.4 é
+# verificado em test_v475.py.
+_SFC_WIND_475_RE = re.compile(r"\bSFC(\s+)WIND\b(?!/)", re.IGNORECASE)
+
+
+def sfc_wind_475(texto):
+    partes = re.split(r"(SECN\s+II)", texto, maxsplit=1, flags=re.IGNORECASE)
+    partes[0] = _SFC_WIND_475_RE.sub(r"SFC\1WSPD", partes[0])
+    return "".join(partes)

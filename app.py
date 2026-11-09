@@ -29,7 +29,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "4.7.4"
+APP_VERSION = "4.7.5"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -1759,7 +1759,7 @@ _SUP_SEQ = r"(?:MAR|LAN|COT)\b(?:\s+(?:AND\s+)?(?:MAR|LAN|COT)\b)*+"
 _JANELA_SUP_RE = re.compile(r"(\d{2})/(\d{2})\s+" + _SUP_SEQ)
 _JANELA_SUP_MEIO_RE = re.compile(r"(?<=\w)\s+(?=(\d{2})/(\d{2})\s+" + _SUP_SEQ + r")")
 _CAMPO_INI_RE = re.compile(
-    r"(?:SFC\s+VIS|SIG\s+VIS|VIS|SIG\s+CLD|CLD|SIGWX|TURB|ICE|MT\s+OBSC|SFC\s+WSPD|MTW|VA)\s*:?\s*")
+    r"(?:SFC\s+VIS|SIG\s+VIS|VIS|SIG\s+CLD|CLD|SIGWX|TURB|ICE|MT\s+OBSC|SFC\s+(?:WSPD|WIND)|MTW|VA)\s*:?\s*")
 # Depois da superfície vem um qualificador geográfico ou outra janela: não se
 # parte (fica como na 4.0).
 _DEPOIS_SUP_QUAL_RE = re.compile(
@@ -1813,7 +1813,7 @@ def _spans_41(linha):
 _JANELA_MEIO_RE = re.compile(r"(?<=\s)(\d{2})/(\d{2})(?=\s|$)")
 _NAO_JANELA_RE = re.compile(r"\s*(?:HFT|HTF|FT|KT|KMH|MPS|KM|M|HPA|AGL|AMSL|NM|FL)\b")
 _CAMPO_LINHA_RE = re.compile(
-    r"(?:SFC\s+VIS|SIG\s+VIS|VIS|SIG\s+CLD|CLD|SIGWX|TURB|ICE|MT\s+OBSC|SFC\s+WSPD|MTW|VA)\b\s*:?")
+    r"(?:SFC\s+VIS|SIG\s+VIS|VIS|SIG\s+CLD|CLD|SIGWX|TURB|ICE|MT\s+OBSC|SFC\s+(?:WSPD|WIND)|MTW|VA)\b\s*:?")
 # Palavras que não são conteúdo do campo: área, superfície, LCA, janela. Uma
 # janela que só tem isto antes ("N OF N4000 11/15 BKN …", "LCA 09/11 …") é a
 # da própria subentrada e não a parte.
@@ -1897,7 +1897,10 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
     # Campos do modelo OACI (Anexo 3) que até à 1.3 eram ignorados:
     # vento generalizado à superfície e onda de montanha. "MTW" só abre
     # campo com dois pontos — "SEV MTW" dentro de TURB não é um campo.
-    secn1 = re.sub(r"(\bSFC\s+WSPD\b\s*:?)", r"\n\1", secn1)
+    # "SFC WIND" é o nome do Anexo 3 (GAMETs reais 081500 e 082100 de
+    # 8-nov-2026): o mesmo campo que "SFC WSPD" (4.7.5). Até à 4.7.4 era
+    # ignorado em silêncio, ou colado ao campo anterior.
+    secn1 = re.sub(r"(\bSFC\s+(?:WSPD|WIND)\b\s*:?)", r"\n\1", secn1)
     secn1 = re.sub(r"(\bMTW\s*:)", r"\n\1", secn1)
     secn1 = re.sub(r"(\bVA\b\s*:?)", r"\n\1", secn1)
     secn1 = re.sub(r"(SIGMET\s+APPLICABLE)", r"\n\1", secn1)
@@ -2137,7 +2140,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
             new_state = "ICE"
         elif re.match(r"MT\s+OBSC", line):
             new_state = "MT_OBSC"
-        elif re.match(r"SFC\s+WSPD", line):
+        elif re.match(r"SFC\s+(?:WSPD|WIND)\b", line):
             new_state = "WSPD"
         elif re.match(r"MTW\s*:", line):
             new_state = "MTW"
@@ -2157,7 +2160,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
             current_ambigua = False
             # Remover a keyword da linha para processar só o conteúdo
             content = re.sub(
-                r"^(SFC\s+VIS\s*:?|SIG\s+VIS\s*:?|VIS\s*:|SIG\s+CLD\s*:?|CLD\s*:|SIGWX\s*:?|TURB\s*:?|ICE\s*:?|MT\s+OBSC\s*:?|SFC\s+WSPD\s*:?|MTW\s*:|VA\s*:?)\s*",
+                r"^(SFC\s+VIS\s*:?|SIG\s+VIS\s*:?|VIS\s*:|SIG\s+CLD\s*:?|CLD\s*:|SIGWX\s*:?|TURB\s*:?|ICE\s*:?|MT\s+OBSC\s*:?|SFC\s+(?:WSPD|WIND)\s*:?|MTW\s*:|VA\s*:?)\s*",
                 "", line
             ).strip()
             # Nome do campo, para o aviso de área não reconhecida (3.4)
@@ -4572,7 +4575,7 @@ def generate_pdf(regions, gamet_text, fzlvl_min, qnh_min, validity_label) -> byt
 # janelas, AGL/AMSL) e só se devolve o que tem base < 500 ft AGL.
 _NUVEM_BAIXA_FT = 500
 _SECN2_CLD_RE = re.compile(
-    r"(?:\bSIG\s+)?\bCLD\s*:(.*?)(?=\b(?:WIND/T|FZLVL|MNM\s+QNH|PSYS|SFC\s+VIS|SFC\s+WSPD"
+    r"(?:\bSIG\s+)?\bCLD\s*:(.*?)(?=\b(?:WIND/T|FZLVL|MNM\s+QNH|PSYS|SFC\s+VIS|SFC\s+(?:WSPD|WIND)"
     r"|SIGWX|TURB|ICE|MTW|SEA|VA|MT\s+OBSC)\b\s*:?|\bMNM\b|=|$)", re.DOTALL)
 
 
