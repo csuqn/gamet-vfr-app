@@ -332,3 +332,30 @@ def sfc_wind_475(texto):
     partes = re.split(r"(SECN\s+II)", texto, maxsplit=1, flags=re.IGNORECASE)
     partes[0] = _SFC_WIND_475_RE.sub(r"SFC\1WSPD", partes[0])
     return "".join(partes)
+
+
+# 4.7.6: uma superfície (MAR/LAN/COT) a meio da linha, depois de conteúdo do
+# campo e seguida de mais conteúdo, abre uma parte nova (GAMET real 081500/
+# 082100 de 8-nov-2026: "LCA BKN 006-008/012HFT AGL MAR AND COT ISOL/EMBD
+# TCU/CB …" — o LCA BKN 006 deixa de ficar só no mar e na costa). Os testes que
+# comparam o arquivo por igualdade com motores fixos anteriores verificam
+# OUTRAS mudanças: saltam os GAMETs que a 4.7.6 lê de outra forma (no arquivo a
+# 9-nov-2026, só o 081500). Esses são verificados contra a 4.7.5 em
+# test_v476.py (nunca mais permissivo, nenhum bloco com menos área).
+def superficie_476(eng, texto):
+    """True se a 4.7.6 (`eng`) lê o GAMET de outra forma que a 4.7.5 — algum
+    bloco da Secção I ou da nota da Secção II muda com os cortes por superfície."""
+    if not hasattr(eng, "_cortes_superficie"):
+        return False
+
+    def assin(t, **kw):
+        return sorted((b.phenomenon, str(b.value), b.qualifier, b.surface, b.window,
+                       b.janela_ambigua, round(b.polygon.area, 9))
+                      for b in eng.parse_gamet(t, **kw)[0])
+    if assin(texto) != assin(texto, _modo475=True):
+        return True
+    conteudo, _ = eng.nuvens_baixas_secn2(texto)
+    if conteudo:
+        t2 = f"SECN I SIG CLD:{conteudo} SECN II"
+        return assin(t2) != assin(t2, _modo475=True)
+    return False

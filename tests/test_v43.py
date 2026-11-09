@@ -861,6 +861,8 @@ def test_arquivo_igual_a_4_2(eng, eng42):
     lidas_24 = 0
     for p in fich:
         t = conftest.sfc_wind_475(p.read_text(encoding="utf-8").strip())  # 4.7.5
+        if conftest.superficie_476(eng, t):
+            continue  # 4.7.6: verificado em test_v476.py
         novo, antigo = _comparar(eng, eng42, t)
         assert novo == antigo, p.name
         bn, bv = eng.parse_gamet(t)[0], eng42.parse_gamet(t)[0]

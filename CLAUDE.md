@@ -108,6 +108,39 @@ Três pormenores que já causaram erros reais:
   a conhecer `WIND` e `ddd/ffKT`. Arquivo a 9-nov-2026 (104 GAMETs, com e sem
   `--indice`): 0 mais permissivas, 0 mais severas. O AIRMET já lia `SFC WIND`
   (4.0): igual.
+- **Superfície a meio da linha abre parte nova** (4.7.6; GAMET real
+  081500/082100 de 8-nov-2026: `SIG CLD:LCA BKN 006-008/012HFT AGL MAR AND COT
+  ISOL/EMBD TCU/CB 020-035/XXXHFT AGL`). Até à 4.7.5 só uma janela `HH/HH` abria
+  parte a meio da linha; a superfície recortava a linha inteira e o `LCA BKN
+  006` ficava só em MAR∪COT (0,45 da FIR) — com uma base < 500 ft o interior
+  ficava GO (**optimista**; no GAMET real 600 ft, nenhuma decisão muda).
+  `_cortes_superficie` parte a linha (dentro de cada parte de `_cortes_janela`)
+  antes de `MAR|LAN|COT [[AND] …]` que vem **depois de conteúdo do campo** (um
+  termo que não é área, superfície, LCA, janela nem só pontuação — `BTN N4050 ~
+  N3840 MAR …` não parte) e é **seguida de mais conteúdo**. Não parte com a
+  superfície no início, logo a seguir à janela/área/LCA (`LCA MAR BKN …`), no fim
+  da linha, seguida de janela ou qualificador, nem se o resto da parte tem algo
+  com ar de área (`_AREA_ALGURES_RE`: `OF`, `BTN`, `WI`, `LINE`, coordenadas,
+  `NM`, diagonais) — fica como na 4.7.5. A parte antes fica com a área da
+  subentrada; a parte depois com a superfície (a área da subentrada ∩
+  superfície), a mesma janela, sem LCA, e **não abre subentrada** (o aviso
+  "Campo não interpretado" continua por subentrada). A verificação de "outra
+  janela na mesma linha" (`janela_ambigua`) e os textos dos avisos "Área não
+  reconhecida"/"Área alargada" usam o texto da parte da 4.7.5. Garantia como na
+  4.3: com cortes por superfície, `parse_gamet(_modo475=True)` corre a leitura da
+  4.7.5 e é ela a referência (em vez da da 4.2, que já contém): cada parte é
+  unida com a área das partes da 4.7.5 de onde vêm os valores, e um bloco da
+  4.7.5 sem bloco novo que o domine (`_domina`) entra tal como era, com
+  `janela_ambigua`. Uma parte nova sem fenómeno (`… MAR AND COT TCU`) deixa os
+  blocos da linha `janela_ambigua` (regra da 4.3; só o resto do período, mais
+  severo). Na Secção II (`nuvens_baixas_secn2`) vale o mesmo. O AIRMET sintético
+  não muda (as superfícies saem do valor). Contra a 4.7.5
+  (`tests/referencia/app_4_7_5.py`, `test_v476.py`): arquivo a 9-nov-2026 (105
+  GAMETs, com e sem `--indice`): 0 mais permissivas, 0 mais severas; só muda o
+  081500 (a base 600 ft passa a toda a FIR). Os testes do arquivo contra a
+  4.1/4.2/4.7.2/4.7.3 saltam os GAMETs que a 4.7.6 lê de outra forma
+  (`conftest.superficie_476`); o `test_v475.py` compara-os com a leitura
+  `_modo475` (igual à 4.7.5, verificado no arquivo e em linhas geradas).
 - **MT OBSC e VA: um bloco por subentrada** (3.10). Até à 3.9 só a linha que
   abre o campo gerava bloco: em `MT OBSC:N OF N4100 LAN S OF N3800 LAN` o S de
   N3800 ficava fora da decisão. Cada subentrada gera agora o seu, com a sua
@@ -573,7 +606,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-2208 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2179 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
+2248 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 40 do `test_v476.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2219 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -799,6 +832,20 @@ python3 -m pytest
   testes do arquivo contra a 4.1/4.2/4.7.2/4.7.3 dão aos dois motores o texto
   com `SFC WSPD` no lugar de `SFC WIND` (`conftest.sfc_wind_475`; na 4.7.5 a
   análise é igual com os dois nomes, verificado no arquivo)
+- `tests/test_v476.py` — superfície a meio da linha (GAMET real 081500: BASE_AGL
+  600 LCA em toda a FIR, CB e a base de 2000 ft em MAR∪COT, sem "Campo não
+  interpretado", 52 pontos e avisos iguais à 4.7.5; variante `BKN 002` →
+  interior NO-GO, na 4.7.5 GO; VIS LCA; área da subentrada; casos iguais à 4.7.5
+  — superfície no início, `LCA MAR`, no fim, depois da área/janela, janela da
+  4.3, área ilegível com `~`, `WI`/diagonal/`NM` depois da superfície; janela da
+  linha nas duas partes; outra janela no fim continua ambígua; Secção II; AIRMET
+  igual; `_modo475` = a 4.7.5 no arquivo e em linhas geradas) contra o motor da
+  **4.7.5** (`tests/referencia/app_4_7_5.py`, cópia fixa do `app.py` do main
+  607150c; não editar): todo o arquivo (manual a 3 horas e `arquivo_hist`) e 300
+  linhas geradas, nos 52 aeródromos e numa grelha de 0,3° nunca mais
+  permissivo (principal e resto), nenhum bloco da 4.7.5 sem bloco que o domine,
+  nenhum aviso "Campo não interpretado" novo, "Área não reconhecida" igual.
+  Outras sementes: `GAMET_SEMENTE=n GAMET_CASOS=400`
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva

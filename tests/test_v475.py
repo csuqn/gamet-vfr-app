@@ -430,7 +430,10 @@ def test_arquivo_so_mudam_blocos_wspd(eng, eng474):
         if not f.exists():
             continue
         texto = f.read_text(encoding="utf-8")
-        bn, *_ = eng.parse_gamet(texto)
+        # 4.7.6: superfície a meio da linha (GAMET 081500), verificada contra a
+        # 4.7.5 em test_v476.py: aqui a leitura da 4.7.5 do mesmo motor
+        kw = {"_modo475": True} if conftest.superficie_476(eng, texto) else {}
+        bn, *_ = eng.parse_gamet(texto, **kw)
         bv, *_ = eng474.parse_gamet(texto)
         resto_n = [b for b in bn if b.phenomenon != "WSPD"]
         resto_v = [b for b in bv if b.phenomenon != "WSPD"]
