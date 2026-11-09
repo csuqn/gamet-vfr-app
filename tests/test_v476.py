@@ -368,21 +368,41 @@ def _arquivo():
 
 def test_arquivo_manual_contra_4_7_5(eng, eng475):
     indice = _arquivo()
-    n = mudaram = cortados = 0
+    n = mudaram = 0
     for entrada in indice.get("gamets", []):
         f = DADOS / entrada["ficheiro"]
         if not f.exists():
             continue
         texto = f.read_text(encoding="utf-8")
         mudaram += _comparar(eng, eng475, texto, f.name, grelha=True)
-        cortados += bool(_cortes(eng, texto.split("SECN II")[0]))
         ini = eng._iso_utc(entrada.get("inicio"))
         if ini:
             for h in (1, 3.5, 5.5):
                 _resto_nao_menos_severo(eng, eng475, texto, ini + timedelta(hours=h), f.name)
         n += 1
     assert n > 50
-    assert cortados >= 1          # o GAMET real 081500, pelo menos
+
+
+# GAMETs do arquivo que a 4.7.6 lê de outra forma que a 4.7.5 (e que, por isso,
+# `conftest.superficie_476` tira das comparações por igualdade com motores
+# antigos). Conjunto fixo (revisor do #44): um erro largo em
+# `_cortes_superficie` faria saltar GAMETs em silêncio. Se aparecer um GAMET
+# novo com uma superfície a meio da linha, este teste falha de propósito:
+# confirma a leitura e acrescenta-o aqui.
+LIDOS_DE_OUTRA_FORMA = {
+    "20261015T1450Z_151500-152100_68a0284195.txt",   # Secção II: `… AGL LAN FEW/SCT AC/AS …`
+    "20261108T1451Z_081500-082100_73bc1f4fc4.txt",   # SIG CLD: `… AGL MAR AND COT ISOL/EMBD TCU/CB …`
+}
+
+
+def test_arquivo_gamets_lidos_de_outra_forma(eng):
+    if not (DADOS / "indice.json").exists():
+        pytest.skip("sem dados/")
+    lidos = {p.name for p in sorted((DADOS / "gamets").rglob("*.txt"))
+             if conftest.superficie_476(eng, p.read_text(encoding="utf-8"))}
+    assert lidos == LIDOS_DE_OUTRA_FORMA, (
+        f"novos: {sorted(lidos - LIDOS_DE_OUTRA_FORMA)}; "
+        f"em falta: {sorted(LIDOS_DE_OUTRA_FORMA - lidos)}")
 
 
 def test_arquivo_hist_contra_4_7_5(eng, eng475):

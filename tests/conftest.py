@@ -344,7 +344,10 @@ def sfc_wind_475(texto):
 # test_v476.py (nunca mais permissivo, nenhum bloco com menos área).
 def superficie_476(eng, texto):
     """True se a 4.7.6 (`eng`) lê o GAMET de outra forma que a 4.7.5 — algum
-    bloco da Secção I ou da nota da Secção II muda com os cortes por superfície."""
+    bloco da Secção I ou da nota da Secção II muda com os cortes por superfície.
+    No arquivo a 9-nov-2026 são 2: o 081500 de 8-nov (SIG CLD) e o 151500 de
+    15-out (Secção II); o conjunto é fixo em
+    `test_v476.test_arquivo_gamets_lidos_de_outra_forma`."""
     if not hasattr(eng, "_cortes_superficie"):
         return False
 

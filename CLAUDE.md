@@ -123,7 +123,10 @@ Três pormenores que já causaram erros reais:
   com ar de área (`_AREA_ALGURES_RE`: `OF`, `BTN`, `WI`, `LINE`, coordenadas,
   `NM`, diagonais) — fica como na 4.7.5. A parte antes fica com a área da
   subentrada; a parte depois com a superfície (a área da subentrada ∩
-  superfície), a mesma janela, sem LCA, e **não abre subentrada** (o aviso
+  superfície) — **leitura A, confirmada pelo Duarte a 9-nov-2026**: a superfície
+  qualifica o que vem a seguir, como no resto do GAMET (`SIGWX:17/21 MAR AND COT
+  ISOL/EMBD TS` no mesmo boletim; o CB fica onde está a TS); pôr também o CB em
+  toda a FIR só cobriria uma leitura sem apoio no formato —, a mesma janela, sem LCA, e **não abre subentrada** (o aviso
   "Campo não interpretado" continua por subentrada). A verificação de "outra
   janela na mesma linha" (`janela_ambigua`) e os textos dos avisos "Área não
   reconhecida"/"Área alargada" usam o texto da parte da 4.7.5. Garantia como na
@@ -139,7 +142,10 @@ Três pormenores que já causaram erros reais:
   GAMETs, com e sem `--indice`): 0 mais permissivas, 0 mais severas; só muda o
   081500 (a base 600 ft passa a toda a FIR). Os testes do arquivo contra a
   4.1/4.2/4.7.2/4.7.3 saltam os GAMETs que a 4.7.6 lê de outra forma
-  (`conftest.superficie_476`); o `test_v475.py` compara-os com a leitura
+  (`conftest.superficie_476`: no arquivo a 9-nov-2026 são exactamente 2, o 081500
+  e o 151500 de 15-out, Secção II `… AGL LAN FEW/SCT AC/AS …`, com decisões e nota
+  iguais — conjunto fixo em `test_arquivo_gamets_lidos_de_outra_forma`, que falha
+  se aparecer outro, para se confirmar a leitura); o `test_v475.py` compara-os com a leitura
   `_modo475` (igual à 4.7.5, verificado no arquivo e em linhas geradas).
 - **MT OBSC e VA: um bloco por subentrada** (3.10). Até à 3.9 só a linha que
   abre o campo gerava bloco: em `MT OBSC:N OF N4100 LAN S OF N3800 LAN` o S de
@@ -606,7 +612,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-2248 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 40 do `test_v476.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2219 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
+2249 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 41 do `test_v476.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2220 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
