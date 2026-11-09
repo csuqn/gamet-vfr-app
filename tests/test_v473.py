@@ -236,7 +236,7 @@ def test_arquivo_manual_contra_4_7_2(eng, eng472):
         f = DADOS / entrada["ficheiro"]
         if not f.exists():
             continue
-        texto = f.read_text(encoding="utf-8")
+        texto = conftest.sfc_wind_475(f.read_text(encoding="utf-8"))  # 4.7.5
         ini = eng._iso_utc(entrada.get("inicio"))
         kw = {"agora": ini + timedelta(hours=3, minutes=30)} if ini else {}
         _comparar(eng, eng472, texto, f.name, **kw)
@@ -251,7 +251,7 @@ def test_arquivo_hist_contra_4_7_2(eng, eng472):
         f = DADOS / entrada["ficheiro"]
         if not f.exists():
             continue
-        texto = f.read_text(encoding="utf-8")
+        texto = conftest.sfc_wind_475(f.read_text(encoding="utf-8"))  # 4.7.5
         ini = eng._iso_utc(entrada.get("inicio"))
         fim = eng._iso_utc(entrada.get("fim"))
         if not ini or not fim:

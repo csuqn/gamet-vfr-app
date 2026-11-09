@@ -65,7 +65,7 @@ secções:
 - **Secção I — fenómenos significativos:** visibilidade à superfície
   (`SFC VIS`), nuvens significativas (`SIG CLD`), trovoada e tempo severo
   (`SIGWX`), turbulência (`TURB`), gelo (`ICE`), onda de montanha (`MTW`),
-  vento generalizado à superfície (`SFC WSPD`), montanhas obscurecidas
+  vento generalizado à superfície (`SFC WSPD` ou `SFC WIND`), montanhas obscurecidas
   (`MT OBSC`), cinzas vulcânicas (`VA`) e os SIGMET aplicáveis.
 - **Secção II — informação geral:** sistemas de pressão, nebulosidade,
   vento e temperatura por níveis em seis estações, nível de congelação
@@ -193,7 +193,7 @@ Em cada zona, a app aplica estas regras. Fica a pior decisão que se aplicar.
 | Turbulência ou gelo moderados | informativo | Mostrado, mas não muda a decisão |
 | Onda de montanha (`MTW`) severa | NO-GO | Risco severo |
 | Onda de montanha (`MTW`) moderada | MARGINAL | Descendentes junto ao relevo que podem exceder a razão de subida de uma aeronave com pouca potência |
-| Vento generalizado à superfície (`SFC WSPD`) ≥ 30 kt | NO-GO | Fora dos limites de qualquer ultraleve |
+| Vento generalizado à superfície (`SFC WSPD` / `SFC WIND`) ≥ 30 kt | NO-GO | Fora dos limites de qualquer ultraleve |
 | Linha de borrasca, chuva ou chuvisco que gela, tempestade de poeira ou areia, granizo, nuvem funil (`SQL`, `FZRA`, `FZDZ`, `DS`, `SS`, `GR`, `FC`) | NO-GO | Fenómenos severos |
 | Montanhas obscurecidas (`MT OBSC`) | NO-GO | Risco de voo controlado contra o terreno |
 | Cinzas vulcânicas (`VA`) | NO-GO | — |
@@ -273,7 +273,7 @@ Algarve não afecta Lisboa.
 
 ## 10. Qualidade e testes
 
-- **2171 testes automáticos** cobrem a leitura do texto, a geometria, as
+- **2208 testes automáticos** cobrem a leitura do texto, a geometria, as
   decisões, os dados aeronáuticos e a app completa. Cada erro alguma vez
   encontrado tem um teste que impede que volte a aparecer.
 - **Verificação cruzada:** em centenas de GAMETs gerados, a decisão de cada
@@ -293,7 +293,7 @@ Algarve não afecta Lisboa.
 pip install -r requirements.txt -r requirements-dev.txt
 streamlit run app.py               # a app principal (Streamlit)
 cd nicegui_app && python main.py   # a versão de reserva (NiceGUI), http://localhost:8080
-python3 -m pytest                  # os testes (2171)
+python3 -m pytest                  # os testes (2208)
 ```
 
 | Ficheiro / pasta | Conteúdo |

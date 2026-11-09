@@ -94,6 +94,20 @@ Três pormenores que já causaram erros reais:
   LPSE, LP66). Arquivo a 6-nov-2026 (92 GAMETs, `--indice`): 0 decisões mais
   permissivas, 0 mais severas. Os testes do arquivo contra a 4.1/4.2/4.4/4.5.2
   dão ao motor antigo a expressão nova (`conftest.cld_base_472`).
+- **`SFC WIND:` é o mesmo campo que `SFC WSPD:`** (4.7.5; nome do Anexo 3,
+  GAMETs reais 081500/082100 e 082100/090300 de 8-nov-2026: `SFC WIND:N OF
+  N3900 AND W OF W00935 150/30KT`). Até à 4.7.4 só `SFC WSPD` abria campo: logo
+  depois de `SECN I` o vento era ignorado em silêncio (sem bloco nem "Campo não
+  interpretado"), e depois de outro campo ficava colado a ele como continuação
+  (a área do vento recortava esse campo). Agora `SFC\s+(?:WSPD|WIND)` na quebra
+  injectada, na máquina de estados, em `_CAMPO_INI_RE`/`_CAMPO_LINHA_RE` e nos
+  campos que terminam o CLD da Secção II. A direcção (`150/`) não é velocidade;
+  com rajada (`250/35G45KT`) fica o valor mais alto, como no `SFC WSPD`.
+  Limiar inalterado (≥ 30 kt). Nos dois GAMETs reais o bloco é só uma fatia de
+  mar e nenhum dos 52 pontos muda (já eram NO-GO). `scripts/analisar.py` passa
+  a conhecer `WIND` e `ddd/ffKT`. Arquivo a 9-nov-2026 (104 GAMETs, com e sem
+  `--indice`): 0 mais permissivas, 0 mais severas. O AIRMET já lia `SFC WIND`
+  (4.0): igual.
 - **MT OBSC e VA: um bloco por subentrada** (3.10). Até à 3.9 só a linha que
   abre o campo gerava bloco: em `MT OBSC:N OF N4100 LAN S OF N3800 LAN` o S de
   N3800 ficava fora da decisão. Cada subentrada gera agora o seu, com a sua
@@ -559,7 +573,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-2171 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2142 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
+2208 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2179 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -773,6 +787,18 @@ python3 -m pytest
   (`tests/referencia/app_4_7_3.py`, cópia fixa do `app.py` do main 65374dd; não
   editar): todo o arquivo (manual e `arquivo_hist`) igual excepto o prefixo das
   notas; oráculo de notas plenas por ponto
+- `tests/test_v475.py` — `SFC WIND:` como `SFC WSPD:` (GAMETs reais 081500 e
+  082100 de 8-nov: bloco WSPD 30 na área `N OF … AND W OF …`, só mar, sem
+  "Campo não interpretado", 52 pontos iguais à 4.7.4, `analisar.py` sem
+  "Palavras desconhecidas"; sozinho em terra → NO-GO na área e GO fora;
+  `150/30KT`, `30KT`, rajada, 25 kt → GO; depois de outro campo sem o recortar;
+  Secção II; AIRMET igual) contra o motor da **4.7.4**
+  (`tests/referencia/app_4_7_4.py`, cópia fixa do `app.py` do main 9e46f66; não
+  editar): todo o arquivo (manual e `arquivo_hist`) igual nos GAMETs sem `SFC
+  WIND`, nos outros nunca mais permissivo; só se acrescentam blocos WSPD. Os
+  testes do arquivo contra a 4.1/4.2/4.7.2/4.7.3 dão aos dois motores o texto
+  com `SFC WSPD` no lugar de `SFC WIND` (`conftest.sfc_wind_475`; na 4.7.5 a
+  análise é igual com os dois nomes, verificado no arquivo)
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva

@@ -860,7 +860,7 @@ def test_arquivo_igual_a_4_2(eng, eng42):
                        round(b.polygon.area, 9)) for b in bl]
     lidas_24 = 0
     for p in fich:
-        t = p.read_text(encoding="utf-8").strip()
+        t = conftest.sfc_wind_475(p.read_text(encoding="utf-8").strip())  # 4.7.5
         novo, antigo = _comparar(eng, eng42, t)
         assert novo == antigo, p.name
         bn, bv = eng.parse_gamet(t)[0], eng42.parse_gamet(t)[0]
@@ -882,7 +882,7 @@ def test_arquivo_analise_completa_e_resto(eng, eng42):
         json.loads(INDICE.read_text(encoding="utf-8")) if INDICE.exists() else None))  # 4.5, 4.6
     entradas = {e["ficheiro"]: e for e in (indice or {}).get("gamets", [])}
     for f in fich:
-        texto = f.read_text(encoding="utf-8")
+        texto = conftest.sfc_wind_475(f.read_text(encoding="utf-8"))  # 4.7.5
         m = re.match(r"(\d{8})T", f.name)
         if not m:
             continue

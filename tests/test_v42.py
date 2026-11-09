@@ -356,7 +356,7 @@ def test_arquivo_principal_igual_a_41_e_resto_nunca_mais_severo(eng, eng41):
     entradas = {e["ficheiro"]: e for e in (indice or {}).get("gamets", [])}
     com_resto = 0
     for f in ficheiros:
-        texto = f.read_text(encoding="utf-8")
+        texto = conftest.sfc_wind_475(f.read_text(encoding="utf-8"))  # 4.7.5
         # O dia/mês vem do nome do ficheiro (AAAAMMDDTHHMMZ_…), como na recolha
         m = re.match(r"(\d{8})T", f.name)
         if not m:
