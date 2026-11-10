@@ -254,10 +254,10 @@ Algarve não afecta Lisboa.
   continua a ser a pior de todo o período.
 - **Os limiares de decisão** foram definidos pelo autor para ultraleves e
   aviação geral VFR; não são uma norma oficial.
-- **Áreas que a app não sabe ler com segurança** (diagonais como `NW OF
-  W00800` ou `NE OF LINE …`, coordenadas só com graus como `N38`, uma linha
-  quase paralela à direcção indicada) são aplicadas a **toda a FIR**, com um
-  aviso "Área não reconhecida".
+- **Áreas do GAMET que a app não sabe ler com segurança** (diagonais como
+  `NW OF W00800` ou `NE OF LINE …`, coordenadas só com graus como `N38`, uma
+  linha quase paralela à direcção indicada) são aplicadas a **toda a FIR**,
+  com um aviso "Área não reconhecida".
 - **Estuários** (Tejo, Minho) contam como terra para efeitos de `MAR`/`LAN`.
 - **A faixa costeira** (`COT`) usa 10 km para cada lado da costa; a OACI não
   fixa uma largura.
