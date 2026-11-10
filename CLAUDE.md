@@ -299,18 +299,30 @@ Três pormenores que já causaram erros reais:
   fora da FIR) ou sem nada da superfície da linha — nunca descartada em
   silêncio. `LINE` em qualquer posição de uma linha sem área legível
   (`_LINE_RE`, como as diagonais) dá toda a FIR + aviso, nunca a área da
-  subentrada anterior. No GAMET real: os 10 pontos do sul → GO, os outros 42
+  subentrada anterior. **`EXC`/`OR` na mesma linha** (revisor do PR #45:
+  `ENTIRE FIR EXC N OF LINE …` lia-se "a N da linha", sem aviso) → a linha fica
+  como na 4.7.6 (toda a FIR), sempre com aviso (também depois de `ENTIRE FIR`),
+  e a quebra não separa `EXC`/`OR` da linha que vem a seguir; EXC/OR sem `LINE`
+  não mudam (a tratar à parte). No GAMET real: os 10 pontos do sul → GO, os outros 42
   NO-GO iguais, sem avisos de área, o `N OF N3845 ISOL/EMBD TCU/CB` continua
   subentrada própria; `scripts/analisar.py` deixa de dar "Palavras
   desconhecidas: LINE" (`LINE` no vocabulário; uma linha ilegível dá "Área não
-  reconhecida"). **Secção II** (`nuvens_baixas_secn2`, mesma máquina): o
-  `AS/AC 060…HFT AMSL` que vem a seguir a `S OF LINE … FEW/SCT SC/CU …` no
-  091500 fica nessa subentrada (continuação, a regra de sempre, como depois de
-  `S OF N3800`) e a nota "Nuvens baixas" (LPBG/LPSE/LP66, que vinha de toda a
-  FIR) deixa de aparecer — **a confirmar com o Duarte** (leitura ambígua; só
-  informativa); no 270900 (`N OF LINE N3900 W01200 - N4200 W00800 SCT/BKN
-  AS/AC`) a nota sai porque a área escrita não chega a LPSE (a 4.7.6 não partia
-  a linha e dava-lhe o `W OF W00715` anterior). Contra a 4.7.6
+  reconhecida"). **Secção II** (`nuvens_baixas_secn2`, mesma máquina) **com
+  garantia** (revisor do PR #45): com `LINE` no campo, cada base fica com a área
+  da 4.8 unida com a que a 4.7.6 dava à mesma base (fenómeno e valor; uma base
+  da 4.7.6 sem igual na 4.8 entra como era) — a leitura da 4.7.6 é
+  `parse_gamet(_modo476=True)` (sem a quebra, a junção e a área das linhas;
+  `extract_polygon(…, linhas=False)`), igual ao motor da 4.7.6 no arquivo e em
+  linhas geradas. Vale para as subentradas abertas pela linha ou que herdam a
+  área dela (`MetBlock.linha`) e também para as outras do campo, que a quebra
+  pode ler de outra forma (`… MAR BKN SC 004… W OF LINE … MAR AND COT …`: na
+  4.7.6 o BKN 004 ficava em COT∪MAR). No 091500 o `AS/AC 060…HFT AMSL` depois
+  de `S OF LINE … FEW/SCT SC/CU …` (ambíguo: o IPMA qualifica o AS/AC quando o
+  quer numa área própria) mantém a nota em LPBG/LPSE/LP66; no 270900 a nota de
+  LPSE fica (a área escrita, a N da linha, não chega a Seia). No arquivo a nota
+  tem os mesmos pontos da 4.7.6 em todos os GAMETs; só sai a linha "área não
+  reconhecida" no 170300, 202100 e 091500. A Secção I não tem esta garantia.
+  Contra a 4.7.6
   (`tests/referencia/app_4_7_6.py`, `test_v48.py`): arquivo a 10-nov-2026 (108
   GAMETs, `comparar_versoes.py` com e sem `--indice`): 10 mais permissivas (os
   10 pontos do sul no 091500, todos fora do semiplano), 0 mais severas; sem
@@ -656,7 +668,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-2300 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 41 do `test_v476.py` + 51 do `test_v48.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2271 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
+2314 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 41 do `test_v476.py` + 65 do `test_v48.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2285 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -905,17 +917,22 @@ python3 -m pytest
   na dúvida toda a FIR + aviso — um ponto, degenerada, quase paralela, só
   graus, coordenada ilegível, diagonal, ponto por ler, `LINE` sem `D OF`,
   intersecção vazia, fora da FIR, sem superfície —, nunca mais permissivo do
-  que a 4.7.6; Secção II: 091500 sem nota, nota só do lado da linha, 270900;
+  que a 4.7.6; Secção II: 091500 com a nota LPBG/LPSE/LP66, garantia da 4.7.6, 270900 com LPSE;
   propriedade: em linhas aleatórias, dentro da área ⇔ do lado D, com o lado
   calculado à parte por um raio contra a linha prolongada) e contra o motor da
   **4.7.6** (`tests/referencia/app_4_7_6.py`, cópia fixa do `app.py` do main
   c3712a5; não editar): todo o arquivo (manual com grelha de 0,3° e
   `arquivo_hist`) igual nos GAMETs sem `LINE` na Secção I (avisos e nota iguais
-  sem `LINE`; só a nota da Secção II muda com `LINE` só aí), e nos outros mais
+  sem `LINE`; só a nota da Secção II muda com `LINE` só aí, e nunca perde
+  pontos), e nos outros mais
   permissivo só com testemunha geométrica (o bloco da 4.7.6 que cobria o ponto
   passou para uma parte com uma linha de cujo lado D o ponto não está, ou fora
   dos outros qualificadores/superfície dessa parte; em cima da linha é
-  fronteira); 300 linhas geradas (um quarto sem `LINE`: blocos iguais). Outras
+  fronteira); 300 linhas geradas (um quarto sem `LINE`: blocos iguais). Revisão
+  do PR #45: `EXC`/`OR` antes e depois da linha (toda a FIR + aviso, nunca mais
+  permissivo do que a 4.7.6, cada bloco da 4.7.6 dominado; sem `LINE`
+  iguais); `_modo476` = motor da 4.7.6 (arquivo, CLD da Secção II, geradas);
+  nota da Secção II nunca perde pontos (arquivo e 100 campos gerados). Outras
   sementes: `GAMET_SEMENTE=n GAMET_CASOS=400`
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):

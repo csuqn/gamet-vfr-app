@@ -175,13 +175,8 @@ def test_sem_avisos_falsos(eng, eng40):
     assert eng.subentradas_sem_area(G270900) == []
     assert eng.subentradas_alargadas(G270900) == []
     # A Secção II deste GAMET não tem "HH/HH" + superfície: a nota (AS/AC
-    # AMSL contra o MEF, 3.8) ficava igual à da 4.0. Desde a 4.8 o "N OF LINE
-    # N3900 W01200 - N4200 W00800" que vem antes do AS/AC é lido (a nota sai:
-    # a área não chega a LPSE; test_v48.test_seccao_ii_270900_as_ac_so_a_norte_
-    # da_linha); sem a linha, continua igual à da 4.0.
-    sem_linha = G270900.replace(" N OF LINE N3900 W01200 - N4200 W00800", "")
-    assert sem_linha != G270900
-    assert eng.nuvens_baixas_secn2(sem_linha) == eng40.nuvens_baixas_secn2(sem_linha)
+    # AMSL contra o MEF, 3.8) fica igual à da 4.0
+    assert eng.nuvens_baixas_secn2(G270900) == eng40.nuvens_baixas_secn2(G270900)
 
 
 def test_contra_40_no_gamet_real(eng, eng40):

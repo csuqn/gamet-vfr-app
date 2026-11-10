@@ -376,50 +376,67 @@ def test_linha_ilegivel_depois_de_valores_nao_herda_area(eng):
 
 # ------------------------------------------------------------- Secção II
 
-def test_seccao_ii_gamet_real_091500(eng):
+def test_seccao_ii_gamet_real_091500(eng, eng476):
+    """A leitura da Secção II separa N e S da linha; a nota tem a garantia da
+    4.7.6 (revisor do PR #45): o AS/AC 6000 ft AMSL que vem depois de "S OF
+    LINE … FEW/SCT SC/CU" pode valer para toda a FIR — a nota mantém
+    LPBG/LPSE/LP66, agora sem a linha "área não reconhecida"."""
     conteudo, nuvens = eng.nuvens_baixas_secn2(G091500)
     assert conteudo.startswith("N OF LINE")
-    # SC/CU a 1200 ft dos dois lados, AS/AC a 6000 ft AMSL na subentrada S OF
-    # LINE (continuação, a regra de sempre): sem nota "Nuvens baixas"
-    assert nuvens == []
+    assert nuvens == [(6000, "AMSL", "", "", ["Bragança (LPBG)", "Seia (LPSE)",
+                                               "Cabeço da Vaca (LP66)"], True, False)]
+    assert [n[:5] for n in nuvens] == [n[:5] for n in eng476.nuvens_baixas_secn2(G091500)[1]]
+    aviso = eng._aviso_nuvens_baixas(G091500)[1]
+    assert "LPBG, LPSE, LP66" in aviso and "área não reconhecida" not in aviso
+    # A leitura (sem a garantia) continua a separar os lados da linha
     blocos, *_ = eng.parse_gamet(f"SECN I SIG CLD:{conteudo} SECN II")
     pts = [(-10.0, 38.0), (-6.5, 40.0)]
     b_n = [b for b in blocos if b.parte.startswith("SIG CLD:N OF")]
     b_s = [b for b in blocos if b.parte.startswith("S OF")]
     assert len(b_n) == 1 and len(b_s) == 2
+    assert all(b.linha for b in blocos)
     _verifica_lado(eng, b_n[0].polygon, "N", pts, passo=0.2)
     for b in b_s:
         _verifica_lado(eng, b.polygon, "S", pts, passo=0.2)
     assert not eng.subentradas_sem_area(f"SECN I SIG CLD:{conteudo} SECN II")
 
 
-def test_seccao_ii_nuvem_baixa_so_do_lado_da_linha(eng):
+def test_seccao_ii_nuvem_baixa_com_garantia(eng, eng476):
     t = _g("SFC VIS:2000M BR", secn2=f"N OF LINE {LINHA} BKN ST 003-008/010HFT AGL")
     _, nuvens = eng.nuvens_baixas_secn2(t)
     assert len(nuvens) == 1
     base, ref, _, _, pontos, lida, _ = nuvens[0]
     assert (base, ref, lida) == (300, "AGL", True)
     pts = [(-10.0, 38.0), (-6.5, 40.0)]
-    assert set(pontos) == {n for n, (la, lo) in eng.AERODROMES.items() if lado("N", pts, lo, la)}
-    assert not any(_icao(n) in SUL for n in pontos)
+    lado_n = {n for n, (la, lo) in eng.AERODROMES.items() if lado("N", pts, lo, la)}
+    # A 4.7.6 dava toda a FIR: a nota nunca tem menos pontos
+    assert set(pontos) >= lado_n
+    assert set(pontos) == set(eng476.nuvens_baixas_secn2(t)[1][0][4])
     # Decisão inalterada (a Secção II não entra na decisão)
     assert set(_decisoes(eng, t).values()) == {"MARGINAL"}
-    aviso = eng._aviso_nuvens_baixas(t)[1]
-    assert "área não reconhecida" not in aviso
+    assert "área não reconhecida" not in eng._aviso_nuvens_baixas(t)[1]
 
 
-def test_seccao_ii_270900_as_ac_so_a_norte_da_linha(eng, eng476):
+def test_seccao_ii_270900_garantia_repoe_lpse(eng, eng476):
     """GAMET real 270900/271500: "N OF LINE N3900 W01200 - N4200 W00800 SCT/BKN
     AS/AC 060-090/…HFT AMSL". A 4.7.6 não partia a linha (o AS/AC ficava com o
-    W OF W00715 da subentrada anterior e a nota dava LPSE); a 4.8 lê-o a N da
-    linha, que não chega a LPSE."""
+    W OF W00715 da subentrada anterior e a nota dava LPSE). A 4.8 lê-o a N da
+    linha, que não chega a LPSE, mas a nota une a área da 4.7.6: LPSE fica."""
     t = _g("SFC VIS:3000M BR", secn2="W OF W00715 SCT/BKN SC 012-030/040HFT AGL N OF LINE "
            "N3900 W01200 - N4200 W00800 SCT/BKN AS/AC 060-090/100-130HFT AMSL")
     assert [n[4] for n in eng476.nuvens_baixas_secn2(t)[1]] == [["Seia (LPSE)"]]
-    assert eng.nuvens_baixas_secn2(t)[1] == []
+    assert [n[4] for n in eng.nuvens_baixas_secn2(t)[1]] == [["Seia (LPSE)"]]
     blocos, *_ = eng.parse_gamet(f"SECN I SIG CLD:{eng.nuvens_baixas_secn2(t)[0]} SECN II")
     asac = _so(blocos, "BASE_AMSL", 6000)
+    assert asac.linha
     _verifica_lado(eng, asac.polygon, "N", [(-12.0, 39.0), (-8.0, 42.0)], passo=0.2)
+
+
+def test_seccao_ii_sem_linha_sem_garantia(eng):
+    """Sem LINE nada muda: nenhuma base vem de uma linha."""
+    t = _g("SFC VIS:3000M BR", secn2="W OF W00715 SCT ST 003/008HFT AGL")
+    blocos, *_ = eng.parse_gamet(f"SECN I SIG CLD:{eng.nuvens_baixas_secn2(t)[0]} SECN II")
+    assert not any(b.linha for b in blocos)
 
 
 # ------------------------------------------------------------- contra a 4.7.6
@@ -531,6 +548,17 @@ def _comparar(eng, eng476, texto, ctx, grelha=False, decisoes=None):
     return n
 
 
+def _nota_nunca_perde(eng, eng476, texto, ctx):
+    """Garantia da nota da Secção II (revisor do PR #45): cada base da nota da
+    4.7.6 está na da 4.8, com os mesmos pontos ou mais (a janela pode passar a
+    ser todo o período e o LCA cair: uma subentrada nova não herda a janela
+    nem o LCA da linha da 4.7.6 — mais conservador)."""
+    novo = eng.nuvens_baixas_secn2(texto)[1]
+    for base, ref, jan, _sup, pontos, _lida, lca in eng476.nuvens_baixas_secn2(texto)[1]:
+        assert any((n[0], n[1]) == (base, ref) and n[2] in ("", jan) and n[6] <= lca
+                   and set(n[4]) >= set(pontos) for n in novo), (ctx, base, ref, jan, pontos)
+
+
 def _arquivo():
     if not (DADOS / "indice.json").exists():
         pytest.skip("sem dados/")
@@ -581,6 +609,7 @@ def test_arquivo_manual_contra_4_7_6(eng, eng476):
             # Só a nota informativa da Secção II pode mudar
             assert _sem_nota_secn2(rn["avisos"]) == _sem_nota_secn2(rv["avisos"]), f.name
             assert rn["por_dec"] == rv["por_dec"], f.name
+        _nota_nunca_perde(eng, eng476, texto, f.name)
         n += 1
     assert n > 100
     # Só o 091500 (o único com LINE na Secção I): os 10 pontos do sul
@@ -710,3 +739,97 @@ def test_propriedade_lado_d_sempre_dentro(eng):
         _verifica_lado(eng, v.polygon, direc, pts, passo=0.25)
         lidas += 1
     assert lidas > 20
+
+
+# ------------------------------------------------------------- EXC / OR
+
+EXC_OR = [
+    f"SFC VIS:ENTIRE FIR EXC N OF LINE {LINHA} 0800M FG",
+    f"SFC VIS:N OF LINE {LINHA} EXC MAR 0800M FG",
+    f"SFC VIS:0800M FG EXC N OF LINE {LINHA}",
+    f"SFC VIS:N OF N4000 OR N OF LINE {LINHA} 0800M FG",
+    f"SFC VIS:N OF LINE {LINHA} OR S OF N3800 0800M FG",
+    f"SFC VIS:N OF LINE {LINHA} OR E OF W00800 0800M FG",
+    f"SFC VIS:2000M BR OR N OF LINE {LINHA} 0800M FG",
+    f"SIG CLD:BKN 008/015HFT AGL EXC S OF LINE {LINHA} BKN 002/006HFT AGL",
+    f"SIG CLD:S OF LINE {LINHA} OR W OF W00800 BKN 002/006HFT AGL",
+    f"SIG CLD:ENTIRE FIR EXC S OF LINE {LINHA} AND W OF W00800 BKN 002/006HFT AGL",
+]
+
+
+@pytest.mark.parametrize("corpo", EXC_OR)
+def test_exc_or_com_linha_como_na_4_7_6(eng, eng476, corpo):
+    """Revisor do PR #45: "ENTIRE FIR EXC N OF LINE …" não pode ler-se "a N da
+    linha". Com EXC ou OR a linha com LINE fica como na 4.7.6 (sem área
+    legível: toda a FIR), com aviso; nunca mais permissivo do que a 4.7.6."""
+    t = _g(corpo)
+    pts = _pontos(eng, grelha=True)
+    novo, antigo = _decisoes(eng, t, pts), _decisoes(eng476, t, pts)
+    for k in novo:
+        assert GRAV[novo[k]] >= GRAV[antigo[k]], (corpo, k)
+    bn, bv = eng.parse_gamet(t)[0], eng476.parse_gamet(t)[0]
+    for v in bv:
+        assert any(eng._domina(n, v) for n in bn), (corpo, v.phenomenon, v.value)
+    assert not any(b.linha for b in bn)
+    # A linha com LINE e EXC/OR tem o aviso "Área não reconhecida"
+    sem = eng.subentradas_sem_area(t)
+    assert any("LINE" in x and re.search(r"\b(?:EXC|OR)\b", x) for x in sem), sem
+    assert set(eng476.subentradas_sem_area(t)) <= set(sem)
+
+
+def test_exc_or_sem_linha_inalterados(eng, eng476):
+    for corpo in ("SFC VIS:ENTIRE FIR EXC N OF N4000 0800M FG",
+                  "SFC VIS:N OF N4000 OR S OF N3800 0800M FG",
+                  "SIG CLD:BKN 002/006HFT AGL EXC MAR"):
+        t = _g(corpo)
+        assert _assin(eng.parse_gamet(t)[0]) == _assin(eng476.parse_gamet(t)[0]), corpo
+        assert eng.subentradas_sem_area(t) == eng476.subentradas_sem_area(t), corpo
+
+
+# ------------------------------------------------------------- leitura da 4.7.6
+
+def test_modo476_e_a_leitura_da_4_7_6(eng, eng476):
+    """A leitura interna `_modo476=True` (garantia da nota da Secção II) dá os
+    mesmos blocos que o motor da 4.7.6: arquivo (Secção I e o CLD da Secção II),
+    linhas geradas e os casos EXC/OR."""
+    textos = []
+    if (DADOS / "gamets").exists():
+        for p in sorted((DADOS / "gamets").rglob("*.txt")):
+            t = p.read_text(encoding="utf-8")
+            textos.append(t)
+            conteudo, _ = eng.nuvens_baixas_secn2(t)
+            if conteudo:
+                textos.append(f"SECN I SIG CLD:{conteudo} SECN II")
+    rng = random.Random(4761)
+    textos += [_g(_corpo_gerado(rng)) for _ in range(150)]
+    textos += [_g(c) for c in EXC_OR + DUVIDA]
+    for t in textos:
+        a = eng.parse_gamet(t, _modo476=True)[0]
+        b = eng476.parse_gamet(t)[0]
+        assert _assin(a) == _assin(b), t[:200]
+        assert all(x.polygon.symmetric_difference(y.polygon).area < 1e-12
+                   for x, y in zip(a, b)), t[:200]
+        sa, sb = [], []
+        eng.parse_gamet(t, sa, _modo476=True)
+        eng476.parse_gamet(t, sb)
+        assert sa == sb, t[:200]
+
+
+# ------------------------------------------------------------- nota: geradas
+
+def test_seccao_ii_geradas_nota_nunca_perde(eng, eng476):
+    rng = random.Random(int(os.environ.get("GAMET_SEMENTE", "48")) + 2)
+    bases = ["SCT ST 003-008/010HFT AGL", "BKN SC 004/012HFT AGL", "SCT/BKN AS/AC 060-090/100HFT AMSL",
+             "FEW/SCT SC/CU 012-030/040HFT AGL", "BKN ST 002/006HFT AGL"]
+    com_nota = 0
+    for _ in range(int(os.environ.get("GAMET_CASOS", "300")) // 3):
+        subs = []
+        for _ in range(rng.choice([1, 2, 3])):
+            area = rng.choice([_linha_gerada(rng), _linha_gerada(rng), rng.choice(QUALS), ""])
+            sup = rng.choice(["", "", f" {rng.choice(SUPS)}"])
+            vals = " ".join(rng.choice(bases) for _ in range(rng.choice([1, 2])))
+            subs.append(f"{rng.choice(['', '', '16/18 '])}{area}{sup} {vals}".strip())
+        t = _g("SFC VIS:3000M BR", secn2=" ".join(subs))
+        _nota_nunca_perde(eng, eng476, t, subs)
+        com_nota += bool(eng.nuvens_baixas_secn2(t)[1])
+    assert com_nota > 10

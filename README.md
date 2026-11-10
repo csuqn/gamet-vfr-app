@@ -256,8 +256,8 @@ Algarve não afecta Lisboa.
   aviação geral VFR; não são uma norma oficial.
 - **Áreas do GAMET que a app não sabe ler com segurança** (diagonais como
   `NW OF W00800` ou `NE OF LINE …`, coordenadas só com graus como `N38`, uma
-  linha quase paralela à direcção indicada) são aplicadas a **toda a FIR**,
-  com um aviso "Área não reconhecida".
+  linha quase paralela à direcção indicada, ou uma linha com `EXC`/`OR`) são
+  aplicadas a **toda a FIR**, com um aviso "Área não reconhecida".
 - **Estuários** (Tejo, Minho) contam como terra para efeitos de `MAR`/`LAN`.
 - **A faixa costeira** (`COT`) usa 10 km para cada lado da costa; a OACI não
   fixa uma largura.
@@ -278,7 +278,7 @@ Algarve não afecta Lisboa.
 
 ## 10. Qualidade e testes
 
-- **2300 testes automáticos** cobrem a leitura do texto, a geometria, as
+- **2314 testes automáticos** cobrem a leitura do texto, a geometria, as
   decisões, os dados aeronáuticos e a app completa. Cada erro alguma vez
   encontrado tem um teste que impede que volte a aparecer.
 - **Verificação cruzada:** em centenas de GAMETs gerados, a decisão de cada
@@ -298,7 +298,7 @@ Algarve não afecta Lisboa.
 pip install -r requirements.txt -r requirements-dev.txt
 streamlit run app.py               # a app principal (Streamlit)
 cd nicegui_app && python main.py   # a versão de reserva (NiceGUI), http://localhost:8080
-python3 -m pytest                  # os testes (2300)
+python3 -m pytest                  # os testes (2314)
 ```
 
 | Ficheiro / pasta | Conteúdo |
