@@ -396,6 +396,8 @@ def test_arquivo_manual_contra_4_7_4(eng, eng474):
         f = DADOS / entrada["ficheiro"]
         if not f.exists():
             continue
+        if conftest.linha_48(f.read_text(encoding="utf-8")):
+            continue  # 4.8: "D OF LINE" no GAMET, verificado em test_v48.py
         ini = eng._iso_utc(entrada.get("inicio"))
         kw = {"agora": ini + timedelta(hours=3, minutes=30)} if ini else {}
         mudam += _comparar(eng, eng474, f.read_text(encoding="utf-8"), f.name, **kw)
@@ -411,6 +413,8 @@ def test_arquivo_hist_contra_4_7_4(eng, eng474):
         f = DADOS / entrada["ficheiro"]
         if not f.exists():
             continue
+        if conftest.linha_48(f.read_text(encoding="utf-8")):
+            continue  # 4.8: "D OF LINE" no GAMET, verificado em test_v48.py
         ini, fim = eng._iso_utc(entrada.get("inicio")), eng._iso_utc(entrada.get("fim"))
         if not ini or not fim:
             continue
@@ -430,6 +434,8 @@ def test_arquivo_so_mudam_blocos_wspd(eng, eng474):
         if not f.exists():
             continue
         texto = f.read_text(encoding="utf-8")
+        if conftest.linha_48(texto):
+            continue  # 4.8: "D OF LINE" no GAMET, verificado em test_v48.py
         # 4.7.6: superfície a meio da linha (GAMET 081500), verificada contra a
         # 4.7.5 em test_v476.py: aqui a leitura da 4.7.5 do mesmo motor
         kw = {"_modo475": True} if conftest.superficie_476(eng, texto) else {}

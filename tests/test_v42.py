@@ -359,6 +359,8 @@ def test_arquivo_principal_igual_a_41_e_resto_nunca_mais_severo(eng, eng41):
         texto = conftest.sfc_wind_475(f.read_text(encoding="utf-8"))  # 4.7.5
         if conftest.superficie_476(eng, texto):
             continue  # 4.7.6: verificado em test_v476.py
+        if conftest.linha_48(texto):
+            continue  # 4.8: "D OF LINE" no GAMET, verificado em test_v48.py
         # O dia/mês vem do nome do ficheiro (AAAAMMDDTHHMMZ_…), como na recolha
         m = re.match(r"(\d{8})T", f.name)
         if not m:

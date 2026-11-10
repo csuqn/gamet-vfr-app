@@ -239,6 +239,8 @@ def test_arquivo_manual_contra_4_7_2(eng, eng472):
         texto = conftest.sfc_wind_475(f.read_text(encoding="utf-8"))  # 4.7.5
         if conftest.superficie_476(eng, texto):
             continue  # 4.7.6: verificado em test_v476.py
+        if conftest.linha_48(texto):
+            continue  # 4.8: "D OF LINE" no GAMET, verificado em test_v48.py
         ini = eng._iso_utc(entrada.get("inicio"))
         kw = {"agora": ini + timedelta(hours=3, minutes=30)} if ini else {}
         _comparar(eng, eng472, texto, f.name, **kw)
@@ -256,6 +258,8 @@ def test_arquivo_hist_contra_4_7_2(eng, eng472):
         texto = conftest.sfc_wind_475(f.read_text(encoding="utf-8"))  # 4.7.5
         if conftest.superficie_476(eng, texto):
             continue  # 4.7.6: verificado em test_v476.py
+        if conftest.linha_48(texto):
+            continue  # 4.8: "D OF LINE" no GAMET, verificado em test_v48.py
         ini = eng._iso_utc(entrada.get("inicio"))
         fim = eng._iso_utc(entrada.get("fim"))
         if not ini or not fim:

@@ -21,7 +21,7 @@ from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
 from shapely.geometry import box, Polygon, MultiPolygon, Point, LineString
 from shapely.ops import unary_union, polygonize
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 
@@ -29,7 +29,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "4.7.6"
+APP_VERSION = "4.8"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -1032,6 +1032,10 @@ class MetBlock:
     janela_ambigua: bool = False
     # (4.3) Texto da parte da linha que gerou o bloco (diagnóstico e testes)
     parte: str = ""
+    # (4.8) A área vem de um "D OF LINE …" (a subentrada abre com a linha ou
+    # herda a área dela). Usado pela garantia da nota da Secção II. Fora do
+    # repr e da igualdade: os blocos comparam-se como até à 4.7.6.
+    linha: bool = field(default=False, repr=False, compare=False)
 
 # -------------------------------------------------
 # NORMALIZE
@@ -1261,6 +1265,10 @@ def _btn_degenerado(line, graus=False):
 # não tinham fronteira de palavra e "NW OF W00800" era lido como
 # "W OF W00800".
 _DIAGONAL_RE = re.compile(r"\b[NSEW]{2,3}\s+OF\b")
+# "LINE" em qualquer posição (4.8): se a linha não ficou com área legível
+# (extract_polygon → None), é uma área ilegível — toda a FIR + aviso, como as
+# diagonais —, e nunca a continuação da subentrada anterior.
+_LINE_RE = re.compile(r"\bLINE\b")
 
 # Cardinal simples solto imediatamente antes de BTN ("S BTN N3720 - N3800",
 # GAMET real 182100/190300; 3.5, opção (b) do Duarte a 19-out-2026). Lê-se
@@ -1272,7 +1280,62 @@ _DIAGONAL_RE = re.compile(r"\b[NSEW]{2,3}\s+OF\b")
 # LP78, mas não em Faro, Portimão e Lagos).
 _CARDINAL_BTN_RE = re.compile(r"\b[NSEW]\s+BTN\b")
 
-def extract_polygon(line, leituras=None, base=None, graus=False):
+# "D OF LINE p1 - p2 [- …]" no GAMET (4.8, pedido do Duarte a 10-nov-2026;
+# GAMET real 091500/092100 de 9-nov-2026: "SFC VIS:N OF LINE N3800 W01000 -
+# N4000 W00630 LCA 1200-5000M"). Até à 4.7.6 a subentrada ficava sem área
+# (toda a FIR + aviso, regra da 3.4). É o semiplano do lado D da linha,
+# prolongada pelos troços das pontas — a geometria dos SIGMET/AIRMET desde a
+# 4.5 (_semiplano_linha) —, recortado à FIR e intersectado com os outros
+# qualificadores da linha (sem margem). Só cardinais simples (as diagonais
+# continuam ilegíveis, como "NW OF W00800") e coordenadas com minutos
+# ("N3800 W01000"; só com graus continuam ilegíveis no GAMET, como "S OF
+# N38"). Na dúvida, a linha fica sem área legível (toda a FIR + aviso): "LINE"
+# que não é "D OF LINE" com 2+ pontos legíveis, ponto a seguir à linha que não
+# foi lido, linha degenerada ou quase paralela à direcção (< 20°), ou
+# intersecção vazia dentro da FIR.
+_COORD_GAMET_TXT = r"N\d{4}\s*[WE]\d{5}"
+_LINHA_GAMET_RE = re.compile(
+    rf"\b([NSEW])\s+OF\s+LINE\s+((?:{_COORD_GAMET_TXT}\s*-\s*)+{_COORD_GAMET_TXT})(?![\dA-Z])")
+# Texto de uma linha (também com graus ou diagonal), para a junção por AND e
+# as quebras injectadas em parse_gamet.
+_LINHA_TXT = (r"\b[NSEW]{1,3}\s+OF\s+LINE\s+(?:[NS]\d{2,4}\s*[EW]\d{3,5}\s*-\s*)+"
+              r"[NS]\d{2,4}\s*[EW]\d{3,5}(?![\dA-Z])")
+
+
+def _semiplanos_gamet(line, base=None):
+    """
+    Semiplanos dos "D OF LINE …" da linha (4.8), já recortados a `base` (a
+    FIR por omissão). Devolve (lista de semiplanos, resto da linha sem as
+    linhas lidas), ou (None, line) se há um "LINE" que não se lê com
+    segurança — a linha fica então sem área legível.
+    """
+    if not re.search(r"\bLINE\b", line):
+        return [], line
+    # EXC / OR na mesma linha (revisor do PR #45): "ENTIRE FIR EXC N OF LINE …"
+    # não é "a N da linha" — fica como na 4.7.6 (toda a FIR), com aviso.
+    if re.search(r"\b(?:EXC|OR)\b", line):
+        return None, line
+    fir = FIR_POLYGON if base is None else base
+    semis = []
+    for m in _LINHA_GAMET_RE.finditer(line):
+        # Mais um ponto a seguir que não foi lido ("… - N41 W006", "… N4100
+        # W00600" sem hífen): a linha não está toda lida.
+        if re.match(r"\s*(?:-|[NS]\d{2}|[EW]\d{3})", line[m.end():]):
+            return None, line
+        pts = [_coord(c) for c in _COORD_RE.findall(m.group(2))]
+        if len(pts) != len(re.findall(_COORD_GAMET_TXT, m.group(2))):
+            return None, line
+        sp = _semiplano_linha(m.group(1), pts)
+        if sp is None:
+            return None, line
+        semis.append(_clean_poly(fir.intersection(sp)))
+    resto = _LINHA_GAMET_RE.sub(" ", line)
+    if not semis or re.search(r"\bLINE\b", resto):
+        return None, line
+    return semis, resto
+
+
+def extract_polygon(line, leituras=None, base=None, graus=False, linhas=True):
     """
     Área dos qualificadores geográficos da linha, recortada à FIR, ou None
     se não houver nenhum legível. `leituras` (lista, opcional) recebe a
@@ -1280,12 +1343,19 @@ def extract_polygon(line, leituras=None, base=None, graus=False):
     aviso. `base` (4.5.1, só SIGMET/AIRMET): recorta a esse polígono em vez
     da FIR — o semiplano do boletim, para a margem e o MOV partirem dele.
     `graus=True` (só SIGMET/AIRMET, 4.6) aceita também coordenadas só com
-    graus ("S OF N33" = 33°00').
+    graus ("S OF N33" = 33°00'). `linhas=False` (4.8, uso interno): sem os
+    "D OF LINE …" do GAMET — a leitura da 4.7.6 (garantia da Secção II).
     """
     lat_q = _LAT_Q_GRAUS if graus else _LAT_Q
     lon_q = _LON_Q_GRAUS if graus else _LON_Q
     if _DIAGONAL_RE.search(line) or _btn_degenerado(line, graus=graus):
         return None
+    # "D OF LINE …" (4.8, só no GAMET): lidos à parte e intersectados no fim
+    semis = []
+    if not graus and linhas:
+        semis, line = _semiplanos_gamet(line, base)
+        if semis is None:
+            return None
     fir = FIR_POLYGON if base is None else base
     x0, y0, x1, y1 = fir.bounds
     poly = fir
@@ -1345,7 +1415,8 @@ def extract_polygon(line, leituras=None, base=None, graus=False):
     # (abaixo), e a união da 3.4 podia ser maior do que a leitura nova.
     antiga = None
     if cardinais_lidos:
-        antiga = extract_polygon(re.sub(r"\b[NSEW]\s+(BTN\b)", r"\1", line), base=base, graus=graus)
+        antiga = extract_polygon(re.sub(r"\b[NSEW]\s+(BTN\b)", r"\1", line), base=base, graus=graus,
+                                 linhas=linhas)
 
     # N OF N\d\d\d\d
     for m in re.findall(r"\bN\s+OF\s+" + lat_q, line):
@@ -1382,6 +1453,21 @@ def extract_polygon(line, leituras=None, base=None, graus=False):
         poly = _clean_poly(unary_union([p for p in partes if not p.is_empty]))
     if antiga is not None:
         poly = _clean_poly(unary_union([poly, antiga]))
+    if semis:
+        # (4.8) Os semiplanos das linhas, intersectados com o resto da área.
+        # Intersecção vazia → sem área legível (toda a FIR + aviso), nunca
+        # descartada nem trocada pela união.
+        for sp in semis:
+            poly = _clean_poly(poly.intersection(sp))
+        if poly.is_empty:
+            return None
+        # O mesmo se a superfície da linha (MAR/LAN/COT) não tiver nada nessa
+        # área: o fenómeno seria descartado em silêncio.
+        sup = "/".join(s for s in ("COT", "LAN", "MAR") if re.search(rf"\b{s}\b", line))
+        sp_l = surface_polygon(sup) if sup else None
+        if sp_l is not None and _clean_poly(poly.intersection(sp_l)).is_empty:
+            return None
+        geo_found = True
 
     if geo_found and leituras is not None:
         leituras.extend(lidas)
@@ -1922,12 +2008,16 @@ def _domina(n, v):
 
 
 def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=False,
-                _areas42=None, _modo475=False):
+                _areas42=None, _modo475=False, _modo476=False):
     # _modo42 / _areas42 (4.3, uso interno): leitura da 4.2 (só a partição da
     # 4.1), que regista a área de cada parte em _areas42 — a garantia de que
     # a leitura nova nunca é mais permissiva (ver "Janela a meio da linha").
     # _modo475 (4.7.6, uso interno): leitura da 4.7.5 (sem os cortes por
     # superfície a meio da linha), que é então a garantia em vez da da 4.2.
+    # _modo476 (4.8, uso interno): leitura da 4.7.6 (sem "D OF LINE …": sem a
+    # quebra, a junção e a área das linhas), para a garantia da Secção II.
+    # Função que procura "LINE" (nada na leitura da 4.7.6)
+    _lr = (lambda x: None) if _modo476 else _LINE_RE.search
 
     text = normalize(text)
 
@@ -1973,14 +2063,28 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
     # quebra antes do cardinal seguinte ("… SW OF W00800 AND N OF N3840 …")
     # deixava o fenómeno só com a área do cardinal (mais permissivo). Juntas,
     # a linha tem uma diagonal → toda a FIR + aviso.
-    secn1 = re.sub(
-        r"((?:\b[NSEW]{1,3}\s+OF\s+[NWE]\d{4,5}|BTN\s+[NWE]\d{4,5}" + _BTN_SEP + r"[NWE]\d{4,5}))"
-        r"\s+(?:AND\s+)?(?=(?:\b[NSEW]{1,3}\s+OF\s+[NWE]\d{4,5}|BTN\s+[NWE]\d{4,5}))",
-        r"\1 && ", secn1)
+    # "D OF LINE …" (4.8) entra na junção como os outros qualificadores, com
+    # a linha toda (os pontos "- N4000 W00630" são dela).
+    if _modo476:
+        secn1 = re.sub(
+            r"((?:\b[NSEW]{1,3}\s+OF\s+[NWE]\d{4,5}|BTN\s+[NWE]\d{4,5}" + _BTN_SEP + r"[NWE]\d{4,5}))"
+            r"\s+(?:AND\s+)?(?=(?:\b[NSEW]{1,3}\s+OF\s+[NWE]\d{4,5}|BTN\s+[NWE]\d{4,5}))",
+            r"\1 && ", secn1)
+    else:
+        secn1 = re.sub(
+            r"((?:" + _LINHA_TXT + r"|\b[NSEW]{1,3}\s+OF\s+[NWE]\d{4,5}|BTN\s+[NWE]\d{4,5}" + _BTN_SEP
+            + r"[NWE]\d{4,5}))"
+            r"\s+(?:AND\s+)?(?=(?:\b[NSEW]{1,3}\s+OF\s+(?:[NWE]\d{4,5}|LINE\b)|BTN\s+[NWE]\d{4,5}))",
+            r"\1 && ", secn1)
     secn1 = re.sub(r"(\w)\s+(N\s+OF\s+N\d{4})", r"\1\n\2", secn1)
     secn1 = re.sub(r"(\w)\s+(S\s+OF\s+N\d{4})", r"\1\n\2", secn1)
     secn1 = re.sub(r"(\w)\s+(E\s+OF\s+[WE]\d{4,5})", r"\1\n\2", secn1)
     secn1 = re.sub(r"(\w)\s+(W\s+OF\s+[WE]\d{4,5})", r"\1\n\2", secn1)
+    # "N OF LINE …" (4.8) abre subentrada como "N OF N…" (só cardinais
+    # simples, como acima). Depois de EXC ou OR não ("ENTIRE FIR EXC N OF
+    # LINE …": a linha fica inteira, sem área legível, como na 4.7.6).
+    if not _modo476:
+        secn1 = re.sub(r"(\w)(?<!\bEXC)(?<!\bOR)\s+([NSEW]\s+OF\s+LINE\b)", r"\1\n\2", secn1)
     # Um cardinal solto antes do BTN ("S BTN N3720 - N3800", 3.5) fica com
     # ele na mesma linha — até à 3.4 a quebra separava-os, e o "S" (e a
     # janela "23/03" antes dele) perdia-se. A quebra vai para antes do
@@ -2005,7 +2109,10 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
     # deixava-a no fim da linha anterior e a subentrada herdava a janela da
     # anterior (GAMET real 160900/161500: CB das 12–15Z mostrado como
     # "apenas 09–11Z"). Passa para o início da linha a que pertence.
-    _qual_ini = re.compile(r"(?:[NSEW]\s+OF\s+[NWE]\d{4,5}|(?:[NSEW]\s+)?BTN\s+[NWE]\d{4,5})")
+    # (4.8) Também "N OF LINE …".
+    _qual_ini = re.compile(
+        r"(?:[NSEW]\s+OF\s+(?:[NWE]\d{4,5}" + ("" if _modo476 else r"|LINE\b")
+        + r")|(?:[NSEW]\s+)?BTN\s+[NWE]\d{4,5})")
     for i in range(len(lines) - 1):
         mj = re.search(r"(?<=[\s:])(\d{2}/\d{2})$", lines[i])
         if mj and _qual_ini.match(lines[i + 1]):
@@ -2074,11 +2181,13 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
             # cada parte é unida com a área das partes da 4.7.5 de onde vêm os
             # seus valores, e um bloco da 4.7.5 sem bloco novo que o domine
             # entra tal como a 4.7.5 o lia.
-            blocos42 = parse_gamet(text, _modo475=True, _areas42=areas42)[0]
+            blocos42 = parse_gamet(text, _modo475=True, _areas42=areas42,
+                                   _modo476=_modo476)[0]
         elif [(it[3], it[4], it[6]) for it in itens] != [(it[3], it[4], "") for it in itens42] \
                 or any(it[1] for it in itens42):
             # Há linhas lidas de outra forma: a leitura da 4.2, para a garantia
-            blocos42 = parse_gamet(text, _modo42=True, _areas42=areas42)[0]
+            blocos42 = parse_gamet(text, _modo42=True, _areas42=areas42,
+                                   _modo476=_modo476)[0]
         else:
             itens = itens42         # igual à 4.2, sem custo
 
@@ -2086,6 +2195,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
     blocks = []
     current_polygon = FIR_POLYGON
     current_window  = ""
+    current_linha   = False        # (4.8) ver MetBlock.linha
     current_ambigua = False        # (4.2) ver MetBlock.janela_ambigua
     campo_txt       = ""
 
@@ -2124,9 +2234,10 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
     def _area_40(comb, conteudo_c, antes):
         """Área que a 4.0 dava à linha inteira (antes da partição por
         "HH/HH MAR|LAN|COT"), e a sua superfície; None se vazia."""
-        p = extract_polygon(comb)
+        p = extract_polygon(comb, linhas=not _modo476)
         if p is None:
             p = (FIR_POLYGON if (_AREA_INI_RE.match(conteudo_c) or _DIAGONAL_RE.search(conteudo_c)
+                                 or _lr(conteudo_c)
                                  or _CARDINAL_BTN_RE.search(conteudo_c)
                                  or _btn_degenerado(conteudo_c)) else antes)
         if p is None or p.is_empty:
@@ -2158,6 +2269,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
         item_atual["nb"] = len(blocks) - item_atual["n0"]
         for b in blocks[item_atual["n0"]:]:
             b.parte = item_atual["txt"]
+            b.linha = item_atual.get("linha", False)
 
     def _fim_linha(i):
         nonlocal current_ambigua
@@ -2229,6 +2341,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
         if new_state:
             state = new_state
             current_polygon = FIR_POLYGON  # reset geo ao mudar de campo
+            current_linha = False
             current_window = ""            # reset janela temporal
             current_ambigua = False
             # Remover a keyword da linha para processar só o conteúdo
@@ -2271,14 +2384,17 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
         # a cobrir a FIR inteira, transformando área nula em cobertura
         # total. Marca-se a área como vazia e o bloco é descartado.
         lidas = []
-        new_poly = extract_polygon(line, lidas)
+        new_poly = extract_polygon(line, lidas, linhas=not _modo476)
         if new_poly is not None:
             current_polygon = new_poly
+            # (4.8) Área de um "D OF LINE …" (lido: senão new_poly seria None)
+            current_linha = bool(_lr(line))
             # Cardinal solto antes de BTN (3.5): área alargada, com aviso
             if alargadas is not None:
                 for leitura in lidas:
                     alargadas.append((f"{campo_txt}: {content475}", leitura))
         elif (_AREA_INI_RE.match(content) or _DIAGONAL_RE.search(content)
+              or _lr(content)
               or _CARDINAL_BTN_RE.search(content) or _btn_degenerado(content)):
             # Subentrada com ar de qualificador geográfico, mas sem área
             # legível (3.4, pedido do Duarte): vale para toda a FIR e fica
@@ -2289,18 +2405,23 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
             # "ENTIRE FIR" é toda a FIR lida e não gera aviso. Um BTN com os
             # dois limites iguais (4.5.2), em qualquer posição, também.
             current_polygon = FIR_POLYGON
-            if sem_area is not None and not _ENTIRE_FIR_RE.match(content):
+            current_linha = False
+            # (4.8) "ENTIRE FIR EXC N OF LINE …": com LINE avisa sempre
+            if sem_area is not None and (not _ENTIRE_FIR_RE.match(content) or _lr(content)):
                 sem_area.append(f"{campo_txt}: {content475}")
         elif not new_state and _JANELA_SUP_RE.match(content):
             # "11/15 MAR AND COT …" (4.1): subentrada nova, só com a
             # superfície, em TODA a FIR — leitura conservadora, que contém a
             # alternativa "área da subentrada anterior ∩ superfície".
             current_polygon = FIR_POLYGON
+            current_linha = False
         # (4.3) Parte de uma linha cortada por uma janela só com valores
         # ("09/11 MAR 0800M FG 13/15 2000M BR"): fica na área da subentrada que
         # a linha já tinha, com a superfície da parte anterior.
+        item_atual["linha"] = current_linha
         so_valores = (janela_corte is not None and not prefixo and new_poly is None
                       and not (_AREA_INI_RE.match(content) or _DIAGONAL_RE.search(content)
+                               or _lr(content)
                                or _CARDINAL_BTN_RE.search(content) or _btn_degenerado(content)
                                or _JANELA_SUP_RE.match(content)))
 
@@ -2309,6 +2430,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
         # cada parte cortada por uma janela a meio da linha.
         if new_state or sub is None or new_poly is not None or janela_corte is not None or (
                 _AREA_INI_RE.match(content) or _DIAGONAL_RE.search(content)
+                or _lr(content)
                 or _CARDINAL_BTN_RE.search(content) or _btn_degenerado(content)
                 or _JANELA_SUP_RE.match(content)):
             # (4.3, decisão do Duarte a 28-out-2026; revisor) Parte que abre
@@ -4680,7 +4802,33 @@ def nuvens_baixas_secn2(texto):
     conteudo = " ".join(m.group(1).split())
     cab = partes[0].split("SECN I", 1)[0]
     sem_area = []
-    blocos, *_ = parse_gamet(f"{cab} SECN I SIG CLD:{conteudo} SECN II", sem_area)
+    texto_cld = f"{cab} SECN I SIG CLD:{conteudo} SECN II"
+    blocos, *_ = parse_gamet(texto_cld, sem_area)
+    # (4.8, revisor do PR #45) Garantia da nota: com "LINE" no campo, cada
+    # base fica com a área da 4.8 unida com a que a 4.7.6 dava à mesma base
+    # (fenómeno e valor), e uma base da 4.7.6 sem nenhuma igual na 4.8 entra
+    # como a 4.7.6 a lia. Vale para as subentradas abertas por "D OF LINE …"
+    # (ou que herdam a área dela, MetBlock.linha) e também para as outras do
+    # campo, que a quebra antes da linha pode ler de outra forma (ex.: "… MAR
+    # BKN SC 004… W OF LINE … MAR AND COT …": na 4.7.6 o BKN 004 ficava em
+    # COT∪MAR). GAMET real 091500/092100: o "SCT/BKN AS/AC 060…HFT AMSL" depois
+    # de "S OF LINE … FEW/SCT SC/CU …" pode valer para toda a FIR — a nota
+    # mantém LPBG/LPSE/LP66. A Secção I não muda.
+    if _LINE_RE.search(conteudo):
+        antigos = [v for v in parse_gamet(texto_cld, _modo476=True)[0]
+                   if v.phenomenon in ("BASE_AGL", "BASE_AMSL")]
+        novos = []
+        for b in blocos:
+            iguais = [v for v in antigos if (v.phenomenon, v.value) == (b.phenomenon, b.value)]
+            if iguais:
+                sup = b.surface if all(v.surface == b.surface for v in iguais) else ""
+                b = MetBlock(b.phenomenon, _clean_poly(unary_union(
+                    [b.polygon] + [v.polygon for v in iguais])), b.value, b.qualifier,
+                    b.layer, sup, b.window, b.origem, b.janela_ambigua, b.parte, b.linha)
+            novos.append(b)
+        novos += [v for v in antigos if not any(
+            (b.phenomenon, b.value) == (v.phenomenon, v.value) for b in blocos)]
+        blocos = novos
     saida = []
     for b in blocos:
         if b.phenomenon not in ("BASE_AGL", "BASE_AMSL"):

@@ -261,6 +261,8 @@ def test_arquivo_contra_40(eng, eng40):
     assert fich
     for p in fich:
         t = p.read_text(encoding="utf-8").strip()
+        if conftest.linha_48(t):
+            continue  # 4.8: "D OF LINE" no GAMET, verificado em test_v48.py
         _comparar(eng, eng40, t)
         # Nenhum aviso "Campo não interpretado" novo
         if not eng40.campos_nao_interpretados(t):

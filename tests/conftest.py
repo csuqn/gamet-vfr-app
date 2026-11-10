@@ -362,3 +362,19 @@ def superficie_476(eng, texto):
         t2 = f"SECN I SIG CLD:{conteudo} SECN II"
         return assin(t2) != assin(t2, _modo475=True)
     return False
+
+
+# 4.8: "D OF LINE …" no GAMET (Secção I e nota da Secção II) passou a ser lido
+# como semiplano (até à 4.7.6: área não reconhecida → toda a FIR + aviso, ou,
+# sem quebra antes de "N OF LINE", a área da subentrada anterior). Os testes
+# que comparam o arquivo por igualdade com motores fixos anteriores verificam
+# OUTRAS mudanças: saltam os GAMETs com "LINE" (no arquivo a 10-nov-2026 são 6;
+# conjunto fixo em `test_v48.test_arquivo_gamets_com_linha`). Esses são
+# verificados contra a 4.7.6 em test_v48.py (sem LINE, tudo igual; mais
+# permissivo só fora do semiplano de uma linha).
+_LINE_48_RE = re.compile(r"\bLINE\b")
+
+
+def linha_48(texto):
+    """True se o GAMET tem "LINE" (a 4.8 pode lê-lo de outra forma)."""
+    return bool(_LINE_48_RE.search(texto.upper()))

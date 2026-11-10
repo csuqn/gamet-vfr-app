@@ -863,6 +863,8 @@ def test_arquivo_igual_a_4_2(eng, eng42):
         t = conftest.sfc_wind_475(p.read_text(encoding="utf-8").strip())  # 4.7.5
         if conftest.superficie_476(eng, t):
             continue  # 4.7.6: verificado em test_v476.py
+        if conftest.linha_48(t):
+            continue  # 4.8: "D OF LINE" no GAMET, verificado em test_v48.py
         novo, antigo = _comparar(eng, eng42, t)
         assert novo == antigo, p.name
         bn, bv = eng.parse_gamet(t)[0], eng42.parse_gamet(t)[0]
@@ -885,6 +887,8 @@ def test_arquivo_analise_completa_e_resto(eng, eng42):
     entradas = {e["ficheiro"]: e for e in (indice or {}).get("gamets", [])}
     for f in fich:
         texto = conftest.sfc_wind_475(f.read_text(encoding="utf-8"))  # 4.7.5
+        if conftest.linha_48(texto):
+            continue  # 4.8: "D OF LINE" no GAMET, verificado em test_v48.py
         m = re.match(r"(\d{8})T", f.name)
         if not m:
             continue
