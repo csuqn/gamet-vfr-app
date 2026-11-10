@@ -275,6 +275,48 @@ Três pormenores que já causaram erros reais:
   separar a diagonal do resto da área. Até à 3.3
   `NW OF W00800` era lido como `W OF W00800`. Toda a FIR contém qualquer
   meia-FIR, por isso nunca é mais permissivo.
+- **`D OF LINE p1 - p2 [- …]` no GAMET** (4.8, pedido do Duarte a 10-nov-2026;
+  GAMET real 091500/092100 de 9-nov-2026: `SFC VIS:N OF LINE N3800 W01000 -
+  N4000 W00630 LCA 1200-5000M` e o mesmo em `SIG CLD` com `LCA BKN 004`). Até à
+  4.7.6 a subentrada ficava sem área → toda a FIR + aviso (regra da 3.4): a VIS
+  1200 m e a base de 400 ft punham LPFR, LPBJ, LPFA, LPFC, LPPM, LP51, LP54,
+  LP58, LP59 e LP78 em MARGINAL, todos a sul da linha. Agora é o semiplano do
+  lado D da linha prolongada pelos troços das pontas — a geometria dos
+  SIGMET/AIRMET (`_semiplano_linha`, 4.5) —, recortado à FIR e intersectado com
+  os outros qualificadores da linha (com ou sem AND, antes ou depois) e com a
+  superfície, **sem margem** (`_semiplanos_gamet`, chamado por
+  `extract_polygon`). Só cardinais simples e coordenadas com minutos
+  (`N3800 W01000`). A quebra injectada antes de `[NSEW] OF LINE` abre
+  subentrada como `N OF N…`, a junção por AND conhece a linha toda
+  (`_LINHA_TXT`: os pontos `- N4000 W00630` são dela, não um `BTN … - …`) e a
+  janela no fim da linha anterior passa para ela (`_qual_ini`). **Na dúvida
+  fica como na 4.7.6** (toda a FIR + aviso "Área não reconhecida"): diagonal
+  (`NW OF LINE`; os boletins tratam-nas, mas no GAMET seguem a regra da 3.4),
+  coordenadas só com graus (`N38 W010`, como `S OF N38` no GAMET, 4.6),
+  `LINE` sem `D OF` ou com um só ponto, ponto a seguir à linha por ler (`… -
+  N41 W006`, ponto sem hífen), linha degenerada ou a menos de 20° da direcção,
+  intersecção vazia dentro da FIR (com os outros qualificadores, ou o semiplano
+  fora da FIR) ou sem nada da superfície da linha — nunca descartada em
+  silêncio. `LINE` em qualquer posição de uma linha sem área legível
+  (`_LINE_RE`, como as diagonais) dá toda a FIR + aviso, nunca a área da
+  subentrada anterior. No GAMET real: os 10 pontos do sul → GO, os outros 42
+  NO-GO iguais, sem avisos de área, o `N OF N3845 ISOL/EMBD TCU/CB` continua
+  subentrada própria; `scripts/analisar.py` deixa de dar "Palavras
+  desconhecidas: LINE" (`LINE` no vocabulário; uma linha ilegível dá "Área não
+  reconhecida"). **Secção II** (`nuvens_baixas_secn2`, mesma máquina): o
+  `AS/AC 060…HFT AMSL` que vem a seguir a `S OF LINE … FEW/SCT SC/CU …` no
+  091500 fica nessa subentrada (continuação, a regra de sempre, como depois de
+  `S OF N3800`) e a nota "Nuvens baixas" (LPBG/LPSE/LP66, que vinha de toda a
+  FIR) deixa de aparecer — **a confirmar com o Duarte** (leitura ambígua; só
+  informativa); no 270900 (`N OF LINE N3900 W01200 - N4200 W00800 SCT/BKN
+  AS/AC`) a nota sai porque a área escrita não chega a LPSE (a 4.7.6 não partia
+  a linha e dava-lhe o `W OF W00715` anterior). Contra a 4.7.6
+  (`tests/referencia/app_4_7_6.py`, `test_v48.py`): arquivo a 10-nov-2026 (108
+  GAMETs, `comparar_versoes.py` com e sem `--indice`): 10 mais permissivas (os
+  10 pontos do sul no 091500, todos fora do semiplano), 0 mais severas; sem
+  `LINE` tudo igual. Os testes do arquivo contra motores anteriores saltam os 6
+  GAMETs com `LINE` (`conftest.linha_48`; conjunto fixo em
+  `test_arquivo_gamets_com_linha`).
 
 Não há sectores fixos. A app teve 3 sectores (Norte/Centro/Sul) até à v17;
 foram substituídos por geometria dinâmica porque marcavam um sector
@@ -397,6 +439,8 @@ caixa) → toda a área. O MOV desloca com o cos dos dois extremos de latitude d
 diagonal encurtava a margem para 5–8 NM (revisor do #32). A faixa continua a
 dizer ACTIVO e o alerta "fora da área do GAMET".
 Os níveis (`TOP FL340`, `SFC/FL080`) ainda não restringem a decisão.
+Desde a 4.8 a mesma geometria lê `D OF LINE` no GAMET (ver "`D OF LINE` no
+GAMET" acima; sem margem).
 
 **BTN degenerado e COT em km (4.5.2, pedido do Duarte a 2-nov-2026; sem caso
 real).** Um `BTN` com os dois limites iguais (`BTN N3945 AND N3945`,
@@ -612,7 +656,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-2249 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 41 do `test_v476.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2220 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
+2300 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 41 do `test_v476.py` + 51 do `test_v48.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2271 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -852,6 +896,27 @@ python3 -m pytest
   permissivo (principal e resto), nenhum bloco da 4.7.5 sem bloco que o domine,
   nenhum aviso "Campo não interpretado" novo, "Área não reconhecida" igual.
   Outras sementes: `GAMET_SEMENTE=n GAMET_CASOS=400`
+- `tests/test_v48.py` — `D OF LINE` no GAMET (GAMET real 091500: VIS 1200 LCA e
+  base 400 ft só a N da linha, os 10 pontos do sul GO e os outros 42 NO-GO, sem
+  avisos de área nem "Campo não interpretado", CB `N OF N3845` subentrada
+  própria, `analisar.py` sem "LINE"; N/S/E/W, 3 pontos e linha em V, MAR/LAN/
+  COT, outro qualificador com e sem AND antes e depois, quebra depois de
+  valores, janelas antes/no fim da linha anterior/a meio, superfície a meio;
+  na dúvida toda a FIR + aviso — um ponto, degenerada, quase paralela, só
+  graus, coordenada ilegível, diagonal, ponto por ler, `LINE` sem `D OF`,
+  intersecção vazia, fora da FIR, sem superfície —, nunca mais permissivo do
+  que a 4.7.6; Secção II: 091500 sem nota, nota só do lado da linha, 270900;
+  propriedade: em linhas aleatórias, dentro da área ⇔ do lado D, com o lado
+  calculado à parte por um raio contra a linha prolongada) e contra o motor da
+  **4.7.6** (`tests/referencia/app_4_7_6.py`, cópia fixa do `app.py` do main
+  c3712a5; não editar): todo o arquivo (manual com grelha de 0,3° e
+  `arquivo_hist`) igual nos GAMETs sem `LINE` na Secção I (avisos e nota iguais
+  sem `LINE`; só a nota da Secção II muda com `LINE` só aí), e nos outros mais
+  permissivo só com testemunha geométrica (o bloco da 4.7.6 que cobria o ponto
+  passou para uma parte com uma linha de cujo lado D o ponto não está, ou fora
+  dos outros qualificadores/superfície dessa parte; em cima da linha é
+  fronteira); 300 linhas geradas (um quarto sem `LINE`: blocos iguais). Outras
+  sementes: `GAMET_SEMENTE=n GAMET_CASOS=400`
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva

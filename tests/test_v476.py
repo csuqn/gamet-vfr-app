@@ -374,6 +374,8 @@ def test_arquivo_manual_contra_4_7_5(eng, eng475):
         if not f.exists():
             continue
         texto = f.read_text(encoding="utf-8")
+        if conftest.linha_48(texto):
+            continue  # 4.8: "D OF LINE" no GAMET, verificado em test_v48.py
         mudaram += _comparar(eng, eng475, texto, f.name, grelha=True)
         ini = eng._iso_utc(entrada.get("inicio"))
         if ini:
@@ -416,6 +418,8 @@ def test_arquivo_hist_contra_4_7_5(eng, eng475):
         if not ini or not fim:
             continue
         texto = f.read_text(encoding="utf-8")
+        if conftest.linha_48(texto):
+            continue  # 4.8: "D OF LINE" no GAMET, verificado em test_v48.py
         for agora in (ini + timedelta(minutes=30), fim - timedelta(minutes=15)):
             rn, rv = _resto_nao_menos_severo(eng, eng475, texto, agora, f.name,
                                              fonte="arquivo_hist", indice=indice,
@@ -436,6 +440,8 @@ def test_modo475_e_a_leitura_da_4_7_5(eng, eng475):
     textos = []
     if (DADOS / "indice.json").exists():
         textos = [p.read_text(encoding="utf-8") for p in sorted((DADOS / "gamets").rglob("*.txt"))]
+        # 4.8: "D OF LINE" no GAMET (também na leitura interna), em test_v48.py
+        textos = [t for t in textos if not conftest.linha_48(t)]
     rng = random.Random(4760)
     textos += [_g(_linha(rng)) for _ in range(150)]
     for t in textos:

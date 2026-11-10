@@ -72,7 +72,8 @@ secções:
   (`FZLVL`) e QNH mínimo.
 
 Cada fenómeno pode vir limitado no espaço (`N OF N3840`, `BTN N3900 AND
-N4130`, `E OF W00800`), à superfície (`MAR` mar, `LAN` terra, `COT` costa), no
+N4130`, `E OF W00800`, `N OF LINE N3800 W01000 - N4000 W00630` = a norte da
+linha entre esses pontos), à superfície (`MAR` mar, `LAN` terra, `COT` costa), no
 tempo (`11/15` = só das 11 às 15 UTC) e na extensão (`ISOL`, `OCNL`, `FRQ`,
 `LCA` = localmente).
 
@@ -253,6 +254,10 @@ Algarve não afecta Lisboa.
   continua a ser a pior de todo o período.
 - **Os limiares de decisão** foram definidos pelo autor para ultraleves e
   aviação geral VFR; não são uma norma oficial.
+- **Áreas que a app não sabe ler com segurança** (diagonais como `NW OF
+  W00800` ou `NE OF LINE …`, coordenadas só com graus como `N38`, uma linha
+  quase paralela à direcção indicada) são aplicadas a **toda a FIR**, com um
+  aviso "Área não reconhecida".
 - **Estuários** (Tejo, Minho) contam como terra para efeitos de `MAR`/`LAN`.
 - **A faixa costeira** (`COT`) usa 10 km para cada lado da costa; a OACI não
   fixa uma largura.
@@ -273,7 +278,7 @@ Algarve não afecta Lisboa.
 
 ## 10. Qualidade e testes
 
-- **2249 testes automáticos** cobrem a leitura do texto, a geometria, as
+- **2300 testes automáticos** cobrem a leitura do texto, a geometria, as
   decisões, os dados aeronáuticos e a app completa. Cada erro alguma vez
   encontrado tem um teste que impede que volte a aparecer.
 - **Verificação cruzada:** em centenas de GAMETs gerados, a decisão de cada
@@ -293,7 +298,7 @@ Algarve não afecta Lisboa.
 pip install -r requirements.txt -r requirements-dev.txt
 streamlit run app.py               # a app principal (Streamlit)
 cd nicegui_app && python main.py   # a versão de reserva (NiceGUI), http://localhost:8080
-python3 -m pytest                  # os testes (2249)
+python3 -m pytest                  # os testes (2300)
 ```
 
 | Ficheiro / pasta | Conteúdo |

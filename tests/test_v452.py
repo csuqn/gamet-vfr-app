@@ -424,6 +424,8 @@ def test_arquivo_contra_451(eng, eng451):
         if not f.exists():
             continue
         texto = f.read_text(encoding="utf-8")
+        if conftest.linha_48(texto):
+            continue  # 4.8: "D OF LINE" no GAMET, verificado em test_v48.py
         ini = eng._iso_utc(entrada.get("inicio"))
         fim = eng._iso_utc(entrada.get("fim"))
         if not ini or not fim:
