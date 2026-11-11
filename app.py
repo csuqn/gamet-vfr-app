@@ -29,7 +29,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "4.8"
+APP_VERSION = "4.8.1"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -3987,10 +3987,11 @@ def sigmets_terminados(conhecidos, ref, periodo_gamet=(None, None)):
             continue
         # A numeração recomeça às 00 UTC: o id referido pelo GAMET é o da
         # numeração do dia em que o GAMET começa. Um boletim de outro dia UTC
-        # não prova nada (ex.: GAMET AMD 180030 a referir "T02" e o único T02
-        # conhecido ser o do dia 17).
+        # é outro SIGMET: é ignorado, como os que não se sobrepõem (4.8.1; até
+        # à 4.8 bloqueava a prova do do próprio dia). Se não houver nenhum do
+        # dia, o id fica por provar (ex.: GAMET AMD 180030 a referir "T02" e o
+        # único T02 conhecido ser o do dia 17 → toda a área).
         if ini.date() != g_ini.date():
-            por_id[sid].append(None)
             continue
         if ini < g_fim and g_ini < fim:
             if i in cancelados:

@@ -72,7 +72,7 @@ def eng476(eng):
 
 def test_referencia_e_a_4_7_6(eng, eng476):
     assert eng476.APP_VERSION == "4.7.6"
-    assert eng.APP_VERSION == "4.8"
+    assert tuple(int(x) for x in eng.APP_VERSION.split(".")) >= (4, 8)
 
 
 def test_copia_do_gamet_real_igual_ao_arquivo():
