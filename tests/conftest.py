@@ -255,6 +255,94 @@ def indice_sem_graus(indice):
                                   if not GRAUS_RE.search(e.get("texto", ""))]}
 
 
+# 4.6 (relatório de 12-nov-2026): o SIGMET real U08 111400/111700 (`S OF N3940
+# AND E OF W010`) é o primeiro boletim MISTO do arquivo — um qualificador com
+# minutos e outro só com graus. A 4.5.2 lia o primeiro e ignorava em silêncio o
+# segundo; a 4.6 intersecta os dois, e a área é a do mesmo boletim com os
+# minutos escritos (`W010` → `W01000`), lida pela 4.5.2. `com_minutos` escreve
+# os minutos `00` nas coordenadas só com graus dos qualificadores (as que
+# GRAUS_RE encontra), e só nessas: os polígonos WI já liam graus desde a 3.5.
+_GRAUS_QUAL_RE = (
+    re.compile(r"(\b[NSEW]\s+(?:OF|BTN)\s+)(N\d{2}|[WE]\d{3})(?![\dA-Z])"),
+    re.compile(r"(\bBTN\s+)(N\d{2}|[WE]\d{3})(?![\dA-Z])"),
+    re.compile(r"(\bBTN\s+\S+\s*(?:AND|-)\s*)(N\d{2}|[WE]\d{3})(?![\dA-Z])"),
+)
+
+
+def com_minutos(texto):
+    """O mesmo boletim com os minutos `00` escritos nos qualificadores só com graus."""
+    anterior = None
+    while anterior != texto:
+        anterior = texto
+        for r in _GRAUS_QUAL_RE:
+            texto = r.sub(lambda m: m.group(1) + m.group(2) + "00", texto)
+    return texto
+
+
+def indice_com_minutos(indice):
+    """O índice com os boletins só com graus (e mistos) reescritos por `com_minutos`."""
+    if not indice:
+        return indice
+    return {**indice, "sigmets": [
+        {**e, "texto": com_minutos(e.get("texto", ""))} if GRAUS_RE.search(e.get("texto", ""))
+        else e for e in indice.get("sigmets", [])]}
+
+
+# 4.5.1 (relatório de 11-nov-2026): com qualificadores do GAMET num SIGMET, a
+# margem e o MOV contam a partir do semiplano não recortado, e a área pode
+# crescer de propósito (verificado contra a 4.5 em test_v46_margem.py:
+# test_boletins_do_arquivo_contem_4_5 e test_arquivo_contra_4_5). O SIGMET real
+# U01 110100/110500 (`S OF N3459 … MOV NE 30KT`) foi o primeiro do arquivo em
+# que isso se vê: na 4.5.1+ chega à área do GAMET 102100/110300 ("NO-GO na sua
+# área"), nos motores 4.1/4.2/4.4 fica "fora da área do GAMET". Os testes que
+# comparam todo o arquivo com esses motores por igualdade verificam OUTRAS
+# mudanças; tiram-se do índice só os boletins cuja área a 4.5.1+ lê de forma
+# diferente da 4.5 (`tests/referencia/app_4_5.py`, cópia fixa; não editar).
+_REF45 = Path(__file__).resolve().parent / "referencia" / "app_4_5.py"
+_MOTOR45 = []
+
+
+def _motor_45():
+    if not _MOTOR45:
+        mod = types.ModuleType("motor_4_5_conftest")
+        mod.__dict__["__file__"] = str(_REF45)
+        exec(compile(_extract_engine(_REF45.read_text(encoding="utf-8")), str(_REF45),
+                     "exec"), mod.__dict__)
+        _MOTOR45.append(mod)
+    return _MOTOR45[0]
+
+
+def margem_451(eng, texto, ref):
+    """True se a área do boletim na 4.5.1+ (`eng`) não é a da 4.5."""
+    e45 = cot_452(_motor_45(), eng)   # a faixa COT da 4.5.2 (como nos motores comparados)
+    if re.match(r"\s*LPPC\s+AIRMET", texto):
+        # AIRMET: sem margem; o que entra na decisão são os blocos de ler_airmet
+        b, b45 = eng.ler_airmet(texto, ref)["blocos"], e45.ler_airmet(texto, ref)["blocos"]
+        if len(b) != len(b45):
+            return True
+        return any(x.phenomenon != y.phenomenon
+                   or x.polygon.symmetric_difference(y.polygon).area > 1e-9
+                   for x, y in zip(b, b45))
+    g, d = eng.area_sigmet(texto, ref)
+    g45, d45 = e45.area_sigmet(texto, ref)
+    if (g is None) != (g45 is None):
+        return True
+    if g is None:
+        return False
+    return g.symmetric_difference(g45).area > 1e-9
+
+
+def indice_sem_margem_451(indice, eng):
+    if not indice:
+        return indice
+    fica = []
+    for e in indice.get("sigmets", []):
+        ref = eng._iso_utc(e.get("inicio"))
+        if ref is None or not margem_451(eng, e.get("texto", ""), ref):
+            fica.append(e)
+    return {**indice, "sigmets": fica}
+
+
 # 4.5.2: a faixa costeira (COT) passou a ter 10 km reais em todas as direcções
 # (até à 4.5.1, ~7,7 km em longitude). Os testes que comparam com motores fixos
 # anteriores (4.1, 4.2, 4.4) por igualdade verificam OUTRAS mudanças: dá-se ao

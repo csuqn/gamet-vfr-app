@@ -436,15 +436,20 @@ def test_boletins_do_arquivo_area_igual_a_4_4_sem_line(eng, eng44):
 def test_arquivo_contra_4_4(eng, eng44):
     if not (DADOS / "indice.json").exists():
         pytest.skip("sem dados/")
-    # 4.6: sem os boletins só com graus (verificados contra a 4.5 em test_v46.py)
-    indice = indice_sem_graus(json.loads((DADOS / "indice.json").read_text(encoding="utf-8")))
+    # 4.6: sem os boletins só com graus (verificados contra a 4.5 em test_v46.py);
+    # 4.5.1: sem os boletins cuja área cresce com a margem a partir do semiplano
+    # (verificados contra a 4.5 em test_v46_margem.py)
+    indice = conftest.indice_sem_margem_451(
+        indice_sem_graus(json.loads((DADOS / "indice.json").read_text(encoding="utf-8"))), eng)
     sem = indice_sem_linhas(indice)
     com_linha = 0
     for entrada in indice.get("gamets", []):
         f = DADOS / entrada["ficheiro"]
         if not f.exists():
             continue
-        texto = f.read_text(encoding="utf-8")
+        # 4.7.5: a 4.4 não conhece `SFC WIND:` — os dois motores lêem `SFC WSPD:`
+        # (GAMET real 111500/112100 de 11-nov; como em test_v42/test_v43)
+        texto = conftest.sfc_wind_475(f.read_text(encoding="utf-8"))
         if conftest.linha_48(texto):
             continue  # 4.8: "D OF LINE" no GAMET, verificado em test_v48.py
         ini = eng._iso_utc(entrada.get("inicio"))

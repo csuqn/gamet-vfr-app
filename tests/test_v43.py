@@ -882,8 +882,9 @@ def test_arquivo_analise_completa_e_resto(eng, eng42):
     fich = _arquivo()
     if not fich:
         pytest.skip("arquivo (ramo dados) não disponível")
-    indice = indice_sem_graus(indice_sem_linhas(
-        json.loads(INDICE.read_text(encoding="utf-8")) if INDICE.exists() else None))  # 4.5, 4.6
+    indice = conftest.indice_sem_margem_451(indice_sem_graus(indice_sem_linhas(
+        json.loads(INDICE.read_text(encoding="utf-8")) if INDICE.exists() else None)),
+        eng)  # 4.5, 4.6, 4.5.1
     entradas = {e["ficheiro"]: e for e in (indice or {}).get("gamets", [])}
     for f in fich:
         texto = conftest.sfc_wind_475(f.read_text(encoding="utf-8"))  # 4.7.5
