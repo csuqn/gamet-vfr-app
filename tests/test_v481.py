@@ -123,3 +123,38 @@ def test_gamet_2100_0300_boletim_do_dia_seguinte_nao_prova_nada(eng):
     # Com o T01 do dia 10 ainda activo, continua a contar
     t01_10_activo = T01_10.replace("100900/101200", "102300/110300")
     assert "T01" not in eng.sigmets_terminados([t01_10_activo, t01_11_cedo], agora, periodo)
+
+
+# ---------------------------------------------------------------------
+# Revisor do #46: um boletim de outro dia ainda activo e sobreposto ao GAMET
+# continua a bloquear a prova (o GAMET pode estar a referi-lo)
+# ---------------------------------------------------------------------
+# Dia 10: T01 emitido tarde, válido até às 03:00 do dia 11 (padrão real:
+# T07 082300/090300, U01 102100/110100 → U01 110100/110500)
+X_10 = "LPPC SIGMET T01 VALID 102300/110300 LPPT- LPPC LISBOA FIR EMBD TS FCST WI N3958 W00704 - N3959 W00959 - N3652 W01008 - N3647 W00853 - N3958 W00704 TOP FL300 STNR NC"
+# Dia 11: T01 emitido às 00:10 e cancelado às 00:40
+Y_11 = "LPPC SIGMET T01 VALID 110010/110410 LPPT- LPPC LISBOA FIR EMBD TS FCST WI N4130 W00700 - N4130 W00800 - N4100 W00800 - N4100 W00700 - N4130 W00700 TOP FL300 STNR NC"
+CNL_Y = "LPPC SIGMET T02 VALID 110040/110410 LPPT- LPPC LISBOA FIR CNL SIGMET T01 110010/110410"
+AS_0050 = datetime(2026, 11, 11, 0, 50, tzinfo=timezone.utc)
+AMD_0045 = (datetime(2026, 11, 11, 0, 45, tzinfo=timezone.utc),
+            datetime(2026, 11, 11, 3, 0, tzinfo=timezone.utc))
+
+
+def test_revisor_t01_de_ontem_activo_bloqueia_a_prova(eng):
+    assert "T01" not in eng.sigmets_terminados([X_10, Y_11, CNL_Y], AS_0050, AMD_0045)
+
+
+def test_revisor_pagina_sem_o_t01_de_ontem_continua_nogo_em_toda_a_area(eng):
+    g = build_gamet("SECN I SFC VIS: N OF N4100 5000M BR", validity="110045/110300", sigmet="T01")
+    r = eng.analisar_gamet(g, "ipma", boletins=[], boletins_at=AS_0050, agora=AS_0050,
+                           boletins_arquivo=[X_10, Y_11, CNL_Y])
+    d = _decisoes(eng, r)
+    assert all(v == "NO-GO" for v in d.values()), d
+
+
+def test_revisor_t01_de_ontem_ja_terminado_nao_bloqueia(eng):
+    # Às 03:30 o X_10 já expirou: não bloqueia; o Y_11 cancelado prova
+    depois = datetime(2026, 11, 11, 3, 30, tzinfo=timezone.utc)
+    per = (datetime(2026, 11, 11, 0, 45, tzinfo=timezone.utc),
+           datetime(2026, 11, 11, 6, 0, tzinfo=timezone.utc))
+    assert eng.sigmets_terminados([X_10, Y_11, CNL_Y], depois, per).get("T01") == "cancelado"

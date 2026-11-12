@@ -523,11 +523,14 @@ deixa de contar, com aviso. Se o estado não se souber, conta em toda a área.
 A numeração dos SIGMET recomeça todos os dias: só contam os boletins com
 esse id que começam no mesmo dia UTC do GAMET e se sobrepõem à sua validade,
 com cabeçalho legível, e todos têm de estar
-terminados. Um boletim com o mesmo id de **outro dia UTC** é ignorado (4.8.1;
-até à 4.8 bloqueava a prova: no GAMET real 110300/110900 de 11-nov-2026 o T01
+terminados. Um boletim com o mesmo id de **outro dia UTC** nunca serve de
+prova e é ignorado se não se sobrepõe ao GAMET ou já terminou (4.8.1, aprovado
+pelo Duarte a 12-nov-2026; até à 4.8 bloqueava sempre a prova: no GAMET real 110300/110900 de 11-nov-2026 o T01
 de 10-nov no arquivo impedia de dar como terminado o T01 de 11-nov, expirado às
 04:45Z → NO-GO em toda a área; `test_v481.py`). Sem nenhum do dia, o id
-continua a contar em toda a área. Um CNL só cancela o boletim concreto (mesmo id **e** validade;
+continua a contar em toda a área. Se se sobrepõe ao GAMET e está activo ou
+futuro, continua a bloquear (revisor do #46: um AMD emitido depois das 00Z pode
+referir o T01 de ontem ainda em vigor). Um CNL só cancela o boletim concreto (mesmo id **e** validade;
 sem validade, o que estava em vigor no início do CNL — `_boletins_cancelados`,
 também usado por `active_bulletins`).
 
@@ -672,7 +675,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-2321 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 41 do `test_v476.py` + 65 do `test_v48.py` + 7 do `test_v481.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2292 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
+2324 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 41 do `test_v476.py` + 65 do `test_v48.py` + 10 do `test_v481.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2295 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -942,7 +945,8 @@ python3 -m pytest
   de outro dia UTC (GAMET real 110300 com os T01 de 10 e 11-nov: às 08:30Z
   "expirou às 0445Z"; só o de ontem → toda a área; o de hoje activo conta;
   cancelado com o de ontem presente → terminado; GAMET 2100/0300 com o do dia
-  seguinte)
+  seguinte; contra-exemplo do revisor do #46: AMD 110045/110300 com o T01 de
+  ontem activo fora da página do IPMA → continua NO-GO em toda a área)
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva
