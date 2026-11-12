@@ -848,7 +848,15 @@ python3 -m pytest
   em `arquivo_hist` a 3 horas igual fora dos períodos com esses boletins, e
   nesses nunca acima da 4.5.2 e igual à 4.5.2 sem eles. Os testes do arquivo
   contra a 4.1/4.2/4.4/4.5/4.5.1 tiram esses boletins do índice
-  (`conftest.indice_sem_graus`)
+  (`conftest.indice_sem_graus`). Desde 12-nov-2026 (SIGMET real U08 111400,
+  `S OF N3940 AND E OF W010`, o primeiro boletim **misto** do arquivo) a
+  referência destes boletins é a 4.5.2 a ler o mesmo texto com os minutos
+  escritos (`conftest.com_minutos`/`indice_com_minutos`): área igual e, nos
+  mistos, contida na da 4.5.2 (que ignorava o qualificador só com graus). Os
+  testes do arquivo contra a 4.1/4.2/4.4 tiram também os boletins cuja área a
+  4.5.1 lê de forma diferente da 4.5 (`conftest.indice_sem_margem_451`: no
+  arquivo a 12-nov-2026, os U01 110100 e U03 110500 `S OF N3459 … MOV NE`),
+  verificados contra a 4.5 em `test_v46_margem.py`. O `test_v45.py::test_arquivo_contra_4_4` e o `test_v46.py::test_arquivo_contra_4_5_2` passam a dar aos dois motores o texto com `SFC WSPD` (`conftest.sfc_wind_475`), como os da 4.1/4.2 (GAMETs reais 110900 e 111500 de 11-nov com `SFC WIND:`)
 - `tests/test_v461.py` — NiceGUI: resultado da análise por pickle (GAMET
   251500 com os AIRMET 1 e 2 reais: índice sintético e arquivo real, que salta
   sem `dados/`) num `ProcessPoolExecutor` real (fork, spawn, forkserver) e no

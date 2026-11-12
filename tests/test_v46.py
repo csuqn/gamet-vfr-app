@@ -324,7 +324,7 @@ def test_gamet_inalterado(eng, eng452, corpo):
 
 def test_boletins_do_arquivo_contra_4_5_2(eng, eng452):
     indice = _arquivo()
-    graus = 0
+    graus = mistos = 0
     for e in indice.get("sigmets", []):
         txt = e.get("texto", "")
         ref = eng._iso_utc(e.get("inicio")) or AGORA
@@ -332,8 +332,18 @@ def test_boletins_do_arquivo_contra_4_5_2(eng, eng452):
         g5, d5 = eng452.area_sigmet(txt, ref)
         if GRAUS_RE.search(txt):
             graus += 1
-            assert g5 is None, txt                             # 4.5.2: toda a área
             assert g6 is not None, txt
+            # Área = a do mesmo boletim com os minutos escritos, lido pela 4.5.2
+            # (vale para os só com graus e para os mistos, como o U08 de 11-nov)
+            g5m, d5m = eng452.area_sigmet(conftest.com_minutos(txt), ref)
+            assert g5m is not None and g6.symmetric_difference(g5m).area < 1e-12, txt
+            if g5 is not None:
+                # Misto (`S OF N3940 AND E OF W010`): a 4.5.2 lia o qualificador
+                # com minutos e ignorava em silêncio o outro; a 4.6 intersecta.
+                mistos += 1
+                assert g6.difference(g5).area < 1e-9, txt
+                continue
+            # Só com graus: a 4.5.2 dava toda a área.
             assert g6.difference(eng.FIR_POLYGON).area < 1e-9, txt
             m = re.search(r"\b([NS])\s+OF\s+N(\d{2})(?![\dA-Z])", txt)
             if m:
@@ -352,18 +362,25 @@ def test_boletins_do_arquivo_contra_4_5_2(eng, eng452):
         if a6 is not None:
             a5 = eng452.ler_airmet(txt, ref)
             assert repr(a6) == repr(a5), txt
-    assert graus >= 2                                          # o T02 e o T03 reais
+    assert graus >= 3                                          # o T02, o T03 e o U08 reais
+    assert mistos >= 1                                         # o U08 de 11-nov
 
 
 def test_arquivo_contra_4_5_2(eng, eng452):
     indice = _arquivo()
-    piso_idx = _sem_graus(indice)
+    # Piso: a 4.5.2 a ler os mesmos boletins com os minutos escritos — a área
+    # que a 4.6 promete (CLAUDE.md). Até 12-nov era a 4.5.2 sem esses boletins,
+    # que só servia enquanto estavam todos a > 100 NM (T02/T03 de 1-nov); o
+    # U08 de 11-nov (misto) cobre o centro e o sul.
+    piso_idx = conftest.indice_com_minutos(indice)
     com_graus = 0
     for entrada in indice.get("gamets", []):
         f = DADOS / entrada["ficheiro"]
         if not f.exists():
             continue
-        texto = f.read_text(encoding="utf-8")
+        # 4.7.5: a 4.5.2 não conhece `SFC WIND:` — os dois motores lêem `SFC WSPD:`
+        # (GAMETs reais 110900 e 111500 de 11-nov; como em test_v42/test_v43)
+        texto = conftest.sfc_wind_475(f.read_text(encoding="utf-8"))
         if conftest.linha_48(texto):
             continue  # 4.8: "D OF LINE" no GAMET, verificado em test_v48.py
         ini = eng._iso_utc(entrada.get("inicio"))
@@ -391,7 +408,7 @@ def test_arquivo_contra_4_5_2(eng, eng452):
             for n in eng.AERODROMES:
                 assert GRAV[dn[n]] <= GRAV[dv[n]], (f.name, n)
                 assert GRAV[dn[n]] >= GRAV[dp[n]], (f.name, n)   # nunca abaixo do piso
-            # Os T02/T03 de 1-nov estão a > 100 NM: igual à 4.5.2 sem eles.
+            # Igual à 4.5.2 com os minutos escritos.
             assert dn == dp, f.name
             assert rn["por_dec"] == piso["por_dec"], f.name
             assert rn["faixa_sig"] == rv["faixa_sig"], f.name    # continua ACTIVO
