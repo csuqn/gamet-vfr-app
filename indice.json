@@ -853,6 +853,13 @@
    "inicio": "2026-11-13T15:00Z",
    "fim": "2026-11-13T21:00Z",
    "tipo": "GAMET"
+  },
+  {
+   "ficheiro": "gamets/2026/11/20261113T2046Z_132100-140300_8989bcdbbd.txt",
+   "recolhido": "2026-11-13T20:46Z",
+   "inicio": "2026-11-13T21:00Z",
+   "fim": "2026-11-14T03:00Z",
+   "tipo": "GAMET"
   }
  ],
  "sigmets": [
