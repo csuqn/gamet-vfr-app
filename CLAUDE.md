@@ -386,7 +386,11 @@ Três pormenores que já causaram erros reais:
   aterragem e no espaço G é preciso estar livre de nuvens. BASE MARGINAL passa de
   < 500 ft para **< 1000 ft** (GAFOR/DWD: MIKE; coincide com o critério de SIG
   CLD). Vale também para os AIRMETs (mesma `decision()`). A nota informativa da
-  Secção II continua a < 500 ft (`_NUVEM_BAIXA_FT`). Os testes que comparam a
+  Secção II passa a < **1000 ft** nas bases AGL (`_NUVEM_BAIXA_AGL_FT`) e
+  continua a menos de 500 ft do MEF nas bases AMSL (`_NUVEM_BAIXA_FT`; o MEF já
+  inclui obstáculos e margem — com 1000 ft os pontos assinalados no arquivo
+  passavam de 228 para 460), decisão do Duarte a 15-nov-2026. As cópias de
+  referência recebem o mesmo limiar e o cabeçalho novo da nota. Os testes que comparam a
   leitura com as cópias fixas de `tests/referencia/` carregam-nas com
   `conftest._extract_engine_ref`, que lhes dá os limiares da 5.0 (sem isso a
   comparação misturava leitura e limiares); `_extract_engine` não mexe em nada

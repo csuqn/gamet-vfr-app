@@ -66,7 +66,8 @@ def test_gamet_real_192100_decisao_nao_muda(eng):
 
 
 def test_sem_nota_quando_a_secn2_nao_tem_base_baixa(eng):
-    g = G192100.replace("SCT ST 004-008/012HFT", "SCT ST 006-008/012HFT")
+    # (5.0) limiar AGL da nota passou a 1000 ft: 006 já dá nota (teste abaixo)
+    g = G192100.replace("SCT ST 004-008/012HFT", "SCT ST 010-012/015HFT")
     assert eng.nuvens_baixas_secn2(g)[1] == []
     assert _nota(eng.analisar_gamet(g, "manual", agora=AGORA)) is None
 
@@ -123,3 +124,18 @@ def test_lca_aparece_na_nota(eng):
     _, nuvens = eng.nuvens_baixas_secn2(g)
     assert nuvens and nuvens[0][6] is True
     assert "LCA" in _nota(eng.analisar_gamet(g, "manual", agora=AGORA))[1]
+
+
+def test_nota_agl_abaixo_de_1000ft_5_0(eng):
+    """(5.0) Base AGL entre 500 e 999 ft na Secção II também dá a nota."""
+    g = G192100.replace("SCT ST 004-008/012HFT", "SCT ST 006-008/012HFT")
+    nuvens = eng.nuvens_baixas_secn2(g)[1]
+    assert [(n[0], n[1]) for n in nuvens] == [(600, "AGL")]
+    tipo, txt = _nota(eng.analisar_gamet(g, "manual", agora=AGORA))
+    assert tipo == "info" and "600 ft AGL" in txt and "1000 ft" in txt
+    assert set(_decisoes(eng, eng.analisar_gamet(g, "manual", agora=AGORA)).values()) == {"GO"}
+
+
+def test_nota_amsl_continua_a_500ft_do_mef_5_0(eng):
+    """(5.0) Bases AMSL: continua a menos de 500 ft do MEF (não 1000)."""
+    assert eng._NUVEM_BAIXA_FT == 500 and eng._NUVEM_BAIXA_AGL_FT == 1000

@@ -4855,8 +4855,13 @@ def generate_pdf(regions, gamet_text, fzlvl_min, qnh_min, validity_label) -> byt
 # Secção II é a nuvem que NÃO cumpre os critérios de SIG CLD (ex.: SCT ST 004,
 # GAMET real 192100/200300) — não entra na decisão, mas um piloto quer saber
 # que há ST baixo. Lê-se o campo com a mesma máquina do SIG CLD (áreas,
-# janelas, AGL/AMSL) e só se devolve o que tem base < 500 ft AGL.
-_NUVEM_BAIXA_FT = 500
+# janelas, AGL/AMSL) e só se devolve o que tem base baixa.
+# (5.0, decisão do Duarte a 15-nov-2026) Bases AGL: < 1000 ft, o limiar de
+# MARGINAL da Secção I. Bases AMSL: a menos de 500 ft do MEF da quadrícula, como
+# até à 4.9 — o MEF já inclui obstáculos e margem, e com 1000 ft a nota dobrava
+# os pontos assinalados no arquivo (228 → 460) sem acrescentar informação.
+_NUVEM_BAIXA_AGL_FT = 1000
+_NUVEM_BAIXA_FT = 500   # bases AMSL, acima do MEF
 _SECN2_CLD_RE = re.compile(
     r"(?:\bSIG\s+)?\bCLD\s*:(.*?)(?=\b(?:WIND/T|FZLVL|MNM\s+QNH|PSYS|SFC\s+VIS|SFC\s+(?:WSPD|WIND)"
     r"|SIGWX|TURB|ICE|MTW|SEA|VA|MT\s+OBSC)\b\s*:?|\bMNM\b|=|$)", re.DOTALL)
@@ -4864,10 +4869,11 @@ _SECN2_CLD_RE = re.compile(
 
 def nuvens_baixas_secn2(texto):
     """
-    Nuvens da Secção II (CLD) com base < 500 ft AGL. Devolve
+    Nuvens da Secção II (CLD) com base baixa: AGL < 1000 ft, ou AMSL a menos
+    de 500 ft do MEF da quadrícula. Devolve
     (conteúdo do campo CLD, [(base_ft, ref, janela, superfície, pontos, área_lida, lca)]),
-    em que `pontos` são os nomes de AERODROMES onde a base fica abaixo de
-    500 ft AGL (bases AMSL contra o MEF da quadrícula). Só informativo: nunca
+    em que `pontos` são os nomes de AERODROMES abrangidos (bases AMSL: onde a
+    base fica a menos de 500 ft do MEF). Só informativo: nunca
     entra em compute_dynamic_regions.
     """
     norm = normalize(texto)
@@ -4915,11 +4921,13 @@ def nuvens_baixas_secn2(texto):
         for nome, (la, lo) in AERODROMES.items():
             if not b.polygon.buffer(1e-9).contains(Point(lo, la)):
                 continue
-            agl = b.value if b.phenomenon == "BASE_AGL" else \
-                b.value - _terrain_elevation_ft(lo, la)
-            if agl < _NUVEM_BAIXA_FT:
+            if b.phenomenon == "BASE_AGL":
+                baixa = b.value < _NUVEM_BAIXA_AGL_FT
+            else:
+                baixa = b.value - _terrain_elevation_ft(lo, la) < _NUVEM_BAIXA_FT
+            if baixa:
                 pontos.append(nome)
-        if b.phenomenon == "BASE_AGL" and b.value >= _NUVEM_BAIXA_FT:
+        if b.phenomenon == "BASE_AGL" and b.value >= _NUVEM_BAIXA_AGL_FT:
             continue
         if b.phenomenon == "BASE_AMSL" and not pontos:
             continue
@@ -4956,8 +4964,8 @@ def _aviso_nuvens_baixas(texto):
     return ("info",
             "☁️ **Nuvens baixas na Secção II** (informativo — **não altera** a decisão "
             "GO/MARGINAL/NO-GO; o GAMET não as considera significativas, porque não "
-            "estão em SIG CLD). Base abaixo de 500 ft acima do solo (bases AMSL: "
-            "acima do relevo mais alto da quadrícula):\n\n" + "\n".join(linhas)
+            "estão em SIG CLD). Base abaixo de 1000 ft acima do solo, ou, nas bases "
+            "AMSL, a menos de 500 ft do relevo mais alto da quadrícula:\n\n" + "\n".join(linhas)
             + ("\n\n⚠️ Uma linha deste campo tem **área não reconhecida** e foi lida "
                "como **toda a FIR** — confirma no texto onde se aplica." if por_ler else "")
             + f"\n\nTexto: `{conteudo.replace('`', '')}`")
