@@ -888,6 +888,13 @@
    "inicio": "2026-11-14T21:00Z",
    "fim": "2026-11-15T03:00Z",
    "tipo": "GAMET"
+  },
+  {
+   "ficheiro": "gamets/2026/11/20261115T0252Z_150300-150900_c9cebff95e.txt",
+   "recolhido": "2026-11-15T02:52Z",
+   "inicio": "2026-11-15T03:00Z",
+   "fim": "2026-11-15T09:00Z",
+   "tipo": "GAMET"
   }
  ],
  "sigmets": [
