@@ -226,7 +226,11 @@ def _assin(blocos):
 @pytest.mark.parametrize("corpo", IGUAIS)
 def test_casos_iguais_a_4_7_5(eng, eng475, corpo):
     t = _g(corpo)
-    bn, *_ = eng.parse_gamet(t)
+    # 4.9: um CB/TCU colado a outra nuvem passa para toda a FIR (test_v49.py);
+    # aqui verifica-se a leitura dos cortes por superfície, sem essa regra
+    # (`_cb_solto=False` = 4.8.1, verificado em test_v49.py)
+    kw = {"_cb_solto": False} if conftest.cb_49(eng, t) else {}
+    bn, *_ = eng.parse_gamet(t, **kw)
     bv, *_ = eng475.parse_gamet(t)
     assert _assin(bn) == _assin(bv), corpo
     assert eng.campos_nao_interpretados(t) == eng475.campos_nao_interpretados(t)

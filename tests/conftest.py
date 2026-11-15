@@ -443,12 +443,15 @@ def superficie_476(eng, texto):
         return sorted((b.phenomenon, str(b.value), b.qualifier, b.surface, b.window,
                        b.janela_ambigua, round(b.polygon.area, 9))
                       for b in eng.parse_gamet(t, **kw)[0])
-    if assin(texto) != assin(texto, _modo475=True):
+    # 4.9: compara sem a regra do CB colado (que as leituras _modo475 não
+    # aplicam; ver cb_49) — aqui só interessam os cortes por superfície
+    sem_cb = {"_cb_solto": False} if hasattr(eng, "_CB_GRUPO_RE") else {}
+    if assin(texto, **sem_cb) != assin(texto, _modo475=True):
         return True
     conteudo, _ = eng.nuvens_baixas_secn2(texto)
     if conteudo:
         t2 = f"SECN I SIG CLD:{conteudo} SECN II"
-        return assin(t2) != assin(t2, _modo475=True)
+        return assin(t2, **sem_cb) != assin(t2, _modo475=True)
     return False
 
 
@@ -466,3 +469,19 @@ _LINE_48_RE = re.compile(r"\bLINE\b")
 def linha_48(texto):
     """True se o GAMET tem "LINE" (a 4.8 pode lê-lo de outra forma)."""
     return bool(_LINE_48_RE.search(texto.upper()))
+
+
+# 4.9: um grupo de CB/TCU colado a outra nuvem em SIG CLD, sem qualificador
+# próprio imediatamente antes, passou para toda a FIR e todo o período
+# (decisão do Duarte a 15-nov-2026; GAMET real 141500/142100 de 14-nov-2026:
+# "… LCA BKN 002-008/010HFT AGL ISOL TCU/CB …"). Os testes que comparam o
+# arquivo por igualdade com motores fixos anteriores verificam OUTRAS mudanças:
+# saltam os GAMETs que a 4.9 lê de outra forma (no arquivo a 15-nov-2026 são 12;
+# conjunto fixo em `test_v49.test_arquivo_gamets_lidos_de_outra_forma`). Esses
+# são verificados contra a 4.8.1 em test_v49.py (nunca mais permissivo, cada
+# bloco da 4.8.1 dominado, os outros blocos iguais).
+def cb_49(eng, texto):
+    """True se a 4.9 (`eng`) põe algum bloco de CB/TCU colado em toda a FIR."""
+    if not hasattr(eng, "_CB_GRUPO_RE"):
+        return False
+    return any(getattr(b, "cb_solto", False) for b in eng.parse_gamet(texto)[0])

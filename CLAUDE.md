@@ -330,6 +330,51 @@ Três pormenores que já causaram erros reais:
   GAMETs com `LINE` (`conftest.linha_48`; conjunto fixo em
   `test_arquivo_gamets_com_linha`).
 
+- **CB/TCU colado a outra nuvem em SIG CLD vale em toda a FIR** (4.9, decisão do
+  Duarte a 15-nov-2026; mudança de leitura, limiares iguais; GAMET real
+  141500/142100 de 14-nov-2026: `SIG CLD:N OF N4000 LCA BKN 008-010/012HFT AGL
+  18/21 N OF N3945 AND E OF W00830 LCA BKN 002-008/010HFT AGL ISOL TCU/CB
+  018-030/XXXHFT AGL`). Até à 4.8.1 o `ISOL TCU/CB` herdava a área e a janela do
+  BKN 002 (N de N3945 e E de W00830, 18–21Z) e 38 dos 52 pontos ficavam GO. O
+  Anexo 3 da OACI (Tabela A5-3, Nota 3) pede a localização dos CB/TCU além das
+  áreas de nuvem BKN/OVC, e o IPMA cola o CB à última linha de nuvem baixa
+  (121500, 122100, 130300, 130900, 131500, 132100, 140300, 140900, 141500).
+  Em SIG CLD, um grupo de CB/TCU (`_CB_GRUPO_RE`: `ISOL|OCNL|FRQ|EMBD[/…]
+  TCU/CB|CB/TCU|CB`) **sem qualificador próprio imediatamente antes** (área ou
+  superfície; LCA, janela e AND não contam — `_NAO_QUAL_PROPRIO_RE`) e **depois de
+  outro conteúdo de nuvem na mesma subentrada** (na mesma parte, ou numa linha
+  anterior da subentrada, ou na parte anterior de uma linha cortada por janela —
+  `09/11 N OF N4000 BKN 002… 11/15 ISOL TCU/CB`), numa área que não é toda a FIR
+  (também só superfície: `LAN AND COT LCA BKN 002… ISOL/EMBD TCU/CB`, 100300 de
+  10-nov), passa para **toda a FIR e todo o período** (sem janela,
+  `janela_ambigua=True`: conta sempre no resto do período; sem superfície; LCA só
+  se estiver no texto do próprio grupo). A **base do próprio grupo** (`018-030/XXXHFT`,
+  o número depois do CB) vai com ele — leitura conservadora: se o CB pode estar
+  em qualquer lado, a base dele também (decide se for < 500 ft). Os outros blocos
+  da subentrada (o BKN 002, a VIS) ficam exactamente como estavam. Ficam como na
+  4.8.1: CB com área/superfície própria antes (`N OF N4000 ISOL TCU/CB`, `N OF N4000
+  LCA ISOL …`, `21/24 N OF N4000 ISOL TCU/CB` do 142100, `BTN N4030 - N3800 MAR AND
+  COT ISOL TCU/CB` do 061500, `MAR AND COT ISOL/EMBD TCU/CB` do 081500 — parte
+  aberta pela superfície, 4.7.6 —, `S OF N4000 MAR ISOL TCU/CB` do 080900), CB a
+  abrir o campo ou campo sem área (já é toda a FIR), TS em SIGWX, a Secção II
+  (`nuvens_baixas_secn2` chama `parse_gamet(…, _cb_solto=False)`) e o AIRMET
+  sintético (o campo sintético não tem área). As leituras das versões anteriores
+  (`_modo42`/`_modo475`/`_modo476`, garantia e testes) não aplicam a regra:
+  `_cb_solto=False` é a 4.8.1 (verificado no arquivo e em linhas geradas).
+  `MetBlock.cb_solto` marca os blocos movidos (diagnóstico e testes). Toda a FIR
+  contém a área antiga: nunca mais permissivo. Contra a 4.8.1
+  (`tests/referencia/app_4_8_1.py`, `test_v49.py`): arquivo a 15-nov-2026 (128
+  GAMETs, `comparar_versoes.py`): 0 mais permissivas, 207 mais severas (todas GO →
+  MARGINAL: 121500 27, 122100 27, 130300 31, 130900 31, 131500 38, 132100 5,
+  140300 5, 140900 5, 141500 38); com `--indice` 0 e 165 (o 140900 e 37 do 141500
+  já eram NO-GO por SIGMET). 12 GAMETs lidos de outra forma (também 100300,
+  100900, 101500, sem mudar decisões nos 52 pontos); os testes do arquivo contra
+  motores anteriores saltam-nos (`conftest.cb_49`; conjunto fixo em
+  `test_v49.test_arquivo_gamets_lidos_de_outra_forma`). `test_v472` passa a
+  esperar MARGINAL ("CB ISOL") a S de N3830 no caso `N OF N3830 BKN 002-008/010/
+  015HFT AGL ISOL TCU/CB …` (era GO), e `test_v476.test_casos_iguais_a_4_7_5`
+  compara a leitura sem a regra.
+
 Não há sectores fixos. A app teve 3 sectores (Norte/Centro/Sul) até à v17;
 foram substituídos por geometria dinâmica porque marcavam um sector
 inteiro como NO-GO quando só uma fatia estava afectada — Bragança e Porto
@@ -675,7 +720,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-2324 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 41 do `test_v476.py` + 65 do `test_v48.py` + 10 do `test_v481.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2295 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
+2373 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 41 do `test_v476.py` + 65 do `test_v48.py` + 10 do `test_v481.py` + 49 do `test_v49.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2344 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -955,6 +1000,22 @@ python3 -m pytest
   cancelado com o de ontem presente → terminado; GAMET 2100/0300 com o do dia
   seguinte; contra-exemplo do revisor do #46: AMD 110045/110300 com o T01 de
   ontem activo fora da página do IPMA → continua NO-GO em toda a área)
+- `tests/test_v49.py` — CB/TCU colado a outra nuvem em SIG CLD → toda a FIR e
+  todo o período (GAMET real 141500: CB ISOL em toda a FIR, sem janela,
+  `janela_ambigua`, base de 1800 ft com ele, os outros blocos iguais à 4.8.1, os
+  38 pontos GO → MARGINAL "CB ISOL" e os 14 NO-GO iguais; casos que não mudam —
+  área/superfície própria antes do CB, 142100, 061500, 081500, 080900, 060900, CB a
+  abrir o campo, campo sem área, TCU sozinho, SIGWX; casos que mudam — 121500,
+  100300 (só superfície), 140900 (janela), OCNL/FRQ/EMBD/sem qualificador, janela
+  a meio da linha, superfície a meio, `D OF LINE`, linha de continuação; base do
+  CB < 300 ft → NO-GO em toda a FIR; resto do período conta o CB; Secção II e
+  AIRMET iguais) e contra o motor da **4.8.1** (`tests/referencia/app_4_8_1.py`,
+  cópia fixa do `app.py` do main 26cec97; não editar): todo o arquivo (manual com
+  grelha de 0,3° e `arquivo_hist` a 3 horas, com o resto do período), nunca mais
+  permissivo, cada bloco da 4.8.1 dominado, avisos iguais, conjunto fixo dos 12
+  GAMETs lidos de outra forma; 300 linhas geradas; `_cb_solto=False` e os
+  `_modo42/475/476` iguais à 4.8.1. Outras sementes: `GAMET_SEMENTE=n
+  GAMET_CASOS=400`
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva

@@ -532,6 +532,10 @@ def _comparar(eng, eng476, texto, ctx, grelha=False, decisoes=None):
         novo, antigo = decisoes
     bn, *_ = eng.parse_gamet(texto)
     bv, *_ = eng476.parse_gamet(texto)
+    if not re.search(r"\bLINE\b", _secn1(texto)) and conftest.cb_49(eng, texto):
+        # 4.9: CB/TCU colado em toda a FIR, verificado em test_v49.py (só mais severo)
+        assert all(GRAV[novo[k]] >= GRAV[antigo[k]] for k in novo), ctx
+        return 0
     if not re.search(r"\bLINE\b", _secn1(texto)):
         assert _assin(bn) == _assin(bv), ctx
         assert novo == antigo, ctx
@@ -601,7 +605,7 @@ def test_arquivo_manual_contra_4_7_6(eng, eng476):
         perm += _comparar(eng, eng476, texto, f.name, grelha=True)
         rn = eng.analisar_gamet(texto, "manual")
         rv = eng476.analisar_gamet(texto, "manual")
-        if not conftest.linha_48(texto):
+        if not conftest.linha_48(texto) and not conftest.cb_49(eng, texto):  # 4.9: test_v49.py
             assert rn["avisos"] == rv["avisos"], f.name
             assert rn["por_dec"] == rv["por_dec"], f.name
             assert eng.nuvens_baixas_secn2(texto) == eng476.nuvens_baixas_secn2(texto)
@@ -638,7 +642,7 @@ def test_arquivo_hist_contra_4_7_6(eng, eng476):
               for k, (la, lo) in pts}
         dv = {k: (eng476.find_region_for_point(rv["regioes"], la, lo) or {}).get("decision")
               for k, (la, lo) in pts}
-        if not re.search(r"\bLINE\b", _secn1(texto)):
+        if not re.search(r"\bLINE\b", _secn1(texto)) and not conftest.cb_49(eng, texto):
             assert dn == dv, f.name
             assert rn["por_dec"] == rv["por_dec"], f.name
         else:

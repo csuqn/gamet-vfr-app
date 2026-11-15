@@ -141,7 +141,11 @@ def test_sig_cld_duas_barras_com_cb_no_go_sem_silencio(eng):
     for p in (INTERIOR, NORTE_COSTA):
         reg = eng.find_region_for_point(regioes, *p)
         assert reg["decision"] == "NO-GO", reg["reasons"]
-    assert eng.find_region_for_point(regioes, 37.1, -8.0)["decision"] == "GO"
+    # A base de 200 ft fica a N de N3830. Desde a 4.9 o ISOL TCU/CB colado ao
+    # BKN (sem qualificador próprio) vale em toda a FIR (decisão do Duarte a
+    # 15-nov-2026, test_v49.py): a S de N3830 só o CB → MARGINAL (até à 4.8.1 GO)
+    sul = eng.find_region_for_point(regioes, 37.1, -8.0)
+    assert sul["decision"] == "MARGINAL" and sul["reasons"] == ["CB ISOL (cumulonimbos)"]
 
 
 @pytest.mark.parametrize("texto, base", [

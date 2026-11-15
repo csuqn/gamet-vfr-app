@@ -452,6 +452,8 @@ def test_arquivo_contra_4_4(eng, eng44):
         texto = conftest.sfc_wind_475(f.read_text(encoding="utf-8"))
         if conftest.linha_48(texto):
             continue  # 4.8: "D OF LINE" no GAMET, verificado em test_v48.py
+        if conftest.cb_49(eng, texto):
+            continue  # 4.9: CB/TCU colado em toda a FIR, verificado em test_v49.py
         ini = eng._iso_utc(entrada.get("inicio"))
         fim = eng._iso_utc(entrada.get("fim"))
         if not ini or not fim:
