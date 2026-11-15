@@ -398,6 +398,8 @@ def test_arquivo_manual_contra_4_7_4(eng, eng474):
             continue
         if conftest.linha_48(f.read_text(encoding="utf-8")):
             continue  # 4.8: "D OF LINE" no GAMET, verificado em test_v48.py
+        if conftest.cb_49(eng, f.read_text(encoding="utf-8")):
+            continue  # 4.9: CB/TCU colado em toda a FIR, verificado em test_v49.py
         ini = eng._iso_utc(entrada.get("inicio"))
         kw = {"agora": ini + timedelta(hours=3, minutes=30)} if ini else {}
         mudam += _comparar(eng, eng474, f.read_text(encoding="utf-8"), f.name, **kw)
@@ -415,6 +417,8 @@ def test_arquivo_hist_contra_4_7_4(eng, eng474):
             continue
         if conftest.linha_48(f.read_text(encoding="utf-8")):
             continue  # 4.8: "D OF LINE" no GAMET, verificado em test_v48.py
+        if conftest.cb_49(eng, f.read_text(encoding="utf-8")):
+            continue  # 4.9: CB/TCU colado em toda a FIR, verificado em test_v49.py
         ini, fim = eng._iso_utc(entrada.get("inicio")), eng._iso_utc(entrada.get("fim"))
         if not ini or not fim:
             continue
@@ -439,6 +443,10 @@ def test_arquivo_so_mudam_blocos_wspd(eng, eng474):
         # 4.7.6: superfície a meio da linha (GAMET 081500), verificada contra a
         # 4.7.5 em test_v476.py: aqui a leitura da 4.7.5 do mesmo motor
         kw = {"_modo475": True} if conftest.superficie_476(eng, texto) else {}
+        # 4.9: CB/TCU colado em toda a FIR, verificado em test_v49.py: aqui a
+        # leitura sem essa regra (`_cb_solto=False` = 4.8.1, test_v49.py)
+        if not kw and conftest.cb_49(eng, texto):
+            kw = {"_cb_solto": False}
         bn, *_ = eng.parse_gamet(texto, **kw)
         bv, *_ = eng474.parse_gamet(texto)
         resto_n = [b for b in bn if b.phenomenon != "WSPD"]

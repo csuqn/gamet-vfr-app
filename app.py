@@ -29,7 +29,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "4.8.1"
+APP_VERSION = "4.9"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -1036,6 +1036,10 @@ class MetBlock:
     # herda a área dela). Usado pela garantia da nota da Secção II. Fora do
     # repr e da igualdade: os blocos comparam-se como até à 4.7.6.
     linha: bool = field(default=False, repr=False, compare=False)
+    # (4.9) Grupo de CB/TCU colado a outra nuvem em SIG CLD, sem qualificador
+    # próprio: o bloco (CB ou a base do grupo) passou para toda a FIR e todo o
+    # período. Diagnóstico e testes; fora do repr e da igualdade.
+    cb_solto: bool = field(default=False, repr=False, compare=False)
 
 # -------------------------------------------------
 # NORMALIZE
@@ -1951,6 +1955,16 @@ _AREA_ALGURES_RE = re.compile(
     r"|\b[NS]\d{2,4}\b|\b[WE]\d{3,5}\b|\b\d{1,3}\s*NM\b")
 
 
+# Grupo de CB/TCU em SIG CLD (4.9): "ISOL TCU/CB", "ISOL/EMBD CB/TCU", "OCNL CB",
+# "CB". O grupo começa no 1.º qualificador (ISOL/OCNL/FRQ/EMBD) colado ao CB.
+_CB_GRUPO_RE = re.compile(
+    r"(?<![\w/])(?:(?:ISOL|OCNL|FRQ|EMBD)(?:\s*/\s*(?:ISOL|OCNL|FRQ|EMBD))*\s+)?"
+    r"(?:TCU\s*/\s*CB|CB(?:\s*/\s*TCU)?)\b")
+# Termos que, sozinhos antes do grupo, NÃO são um qualificador próprio dele
+# (LCA, janela, ligação): o CB fica com a área herdada da subentrada.
+_NAO_QUAL_PROPRIO_RE = re.compile(r"LCA|AND|-+|\d{2}/\d{2}")
+
+
 def _cortes_superficie(linha, cortes_janela=()):
     """
     Posições das superfícies a meio da linha que abrem uma parte nova (4.7.6),
@@ -2008,7 +2022,7 @@ def _domina(n, v):
 
 
 def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=False,
-                _areas42=None, _modo475=False, _modo476=False):
+                _areas42=None, _modo475=False, _modo476=False, _cb_solto=True):
     # _modo42 / _areas42 (4.3, uso interno): leitura da 4.2 (só a partição da
     # 4.1), que regista a área de cada parte em _areas42 — a garantia de que
     # a leitura nova nunca é mais permissiva (ver "Janela a meio da linha").
@@ -2016,6 +2030,11 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
     # superfície a meio da linha), que é então a garantia em vez da da 4.2.
     # _modo476 (4.8, uso interno): leitura da 4.7.6 (sem "D OF LINE …": sem a
     # quebra, a junção e a área das linhas), para a garantia da Secção II.
+    # _cb_solto (4.9): CB/TCU colado a outra nuvem em SIG CLD → toda a FIR e
+    # todo o período. False na Secção II (nuvens_baixas_secn2), que não muda,
+    # e nas leituras das versões anteriores (_modo42/_modo475/_modo476: a
+    # garantia e os testes usam-nas como a leitura de antes).
+    _cb_solto = _cb_solto and not (_modo42 or _modo475 or _modo476)
     # Função que procura "LINE" (nada na leitura da 4.7.6)
     _lr = (lambda x: None) if _modo476 else _LINE_RE.search
 
@@ -2182,12 +2201,12 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
             # seus valores, e um bloco da 4.7.5 sem bloco novo que o domine
             # entra tal como a 4.7.5 o lia.
             blocos42 = parse_gamet(text, _modo475=True, _areas42=areas42,
-                                   _modo476=_modo476)[0]
+                                   _modo476=_modo476, _cb_solto=False)[0]
         elif [(it[3], it[4], it[6]) for it in itens] != [(it[3], it[4], "") for it in itens42] \
                 or any(it[1] for it in itens42):
             # Há linhas lidas de outra forma: a leitura da 4.2, para a garantia
             blocos42 = parse_gamet(text, _modo42=True, _areas42=areas42,
-                                   _modo476=_modo476)[0]
+                                   _modo476=_modo476, _cb_solto=False)[0]
         else:
             itens = itens42         # igual à 4.2, sem custo
 
@@ -2447,6 +2466,11 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
             _fechar_sub()
             sub = {"campo": campo_txt, "linhas": [], "n0": len(blocks),
                    "descartada": False, "item": item_atual}
+        # (4.9) Conteúdo do campo nas linhas anteriores da subentrada (algo
+        # que não é área, superfície, LCA, janela nem pontuação)
+        conteudo_antes = any(
+            not (_SO_AREA_TOK_RE.fullmatch(t) or not re.search(r"[A-Z0-9]", t))
+            for x in sub["linhas"] for t in re.findall(r"[^\s:,;.=]+", x))
         sub["linhas"].append(content)
 
         poly = current_polygon
@@ -2633,6 +2657,40 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
             # menor do intervalo, por ser o conservador. Antes da v32 a
             # forma base/topo sem intervalo não era reconhecida e nuvens a
             # 200 ft passavam como GO.
+            # (4.9, decisão do Duarte a 15-nov-2026) CB/TCU colado a outra
+            # nuvem. O Anexo 3 (Tabela A5-3, Nota 3) pede a localização dos
+            # CB/TCU além das áreas de nuvem BKN/OVC, e o IPMA cola o CB à
+            # última linha de nuvem baixa ("18/21 N OF N3945 AND E OF W00830
+            # LCA BKN 002-008/010HFT AGL ISOL TCU/CB 018-030/XXXHFT AGL", GAMET
+            # real 141500/142100): até à 4.8.1 o CB herdava a área e a janela
+            # do BKN 002. Um grupo de CB/TCU sem qualificador próprio
+            # imediatamente antes (área ou superfície; LCA e janela não
+            # contam), depois de outro conteúdo de nuvem na mesma subentrada,
+            # numa área que não é toda a FIR, vale em toda a FIR e em todo o
+            # período (janela_ambigua: conta sempre no resto do período). A
+            # base do próprio grupo vai com ele (leitura conservadora). Os
+            # outros blocos da subentrada não mudam; toda a FIR contém a área
+            # antiga, por isso nunca é mais permissivo.
+            cb_ini = None
+            mcb = _CB_GRUPO_RE.search(content) if _cb_solto else None
+            if mcb and not poly.buffer(1e-9).contains(FIR_POLYGON):
+                toks = [t for t in re.findall(r"[^\s:,;.=]+", content[:mcb.start()])
+                        if re.search(r"[A-Z0-9]", t)]
+                if any(not _SO_AREA_TOK_RE.fullmatch(t) for t in toks):
+                    cb_ini = mcb.start()            # outra nuvem antes, na parte
+                elif (all(_NAO_QUAL_PROPRIO_RE.fullmatch(t) for t in toks)
+                      and (so_valores or conteudo_antes)):
+                    cb_ini = mcb.start()            # área herdada de outra nuvem
+
+            def _bloco_cld(fen, val, pos):
+                if cb_ini is not None and pos >= cb_ini:
+                    q = "LCA" if re.search(r"\bLCA\b", content[cb_ini:]) else ""
+                    b = MetBlock(fen, FIR_POLYGON, val, q, janela_ambigua=True)
+                    b.cb_solto = True
+                    return b
+                return MetBlock(fen, poly, val, qualifier, surface=surface, window=window,
+                                janela_ambigua=ambigua)
+
             for m in _CLD_BASE_RE.finditer(content):
                 # Um número colado a '-' ou '/' nunca começa um match (ver o
                 # lookbehind de _CLD_BASE_RE; "TCU/CB 020HFT" mantém-se: o '/'
@@ -2659,7 +2717,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
                 # referência é quase certamente uma gralha. Só "AMSL"
                 # explícito é convertido contra o relevo.
                 fen = "BASE_AMSL" if ref == "AMSL" else "BASE_AGL"
-                blocks.append(MetBlock(fen, poly, base_ft, qualifier, surface=surface, window=window, janela_ambigua=ambigua))
+                blocks.append(_bloco_cld(fen, base_ft, m.start()))
 
             # Cumulonimbos na linha de nuvens (2.0). Até à 1.6 "TCU/CB" em
             # SIG CLD era lido só como tipo de nuvem: se o IPMA não pusesse
@@ -2680,7 +2738,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
                     cb_q = "EMBD"
                 else:
                     cb_q = "GEN"
-                blocks.append(MetBlock("CB", poly, cb_q, qualifier, surface=surface, window=window, janela_ambigua=ambigua))
+                blocks.append(_bloco_cld("CB", cb_q, mcb.start() if mcb else 0))
 
         elif state == "SIGWX":
             # FIX: EMBD tratado separadamente e eleva risco
@@ -4811,7 +4869,7 @@ def nuvens_baixas_secn2(texto):
     cab = partes[0].split("SECN I", 1)[0]
     sem_area = []
     texto_cld = f"{cab} SECN I SIG CLD:{conteudo} SECN II"
-    blocos, *_ = parse_gamet(texto_cld, sem_area)
+    blocos, *_ = parse_gamet(texto_cld, sem_area, _cb_solto=False)
     # (4.8, revisor do PR #45) Garantia da nota: com "LINE" no campo, cada
     # base fica com a área da 4.8 unida com a que a 4.7.6 dava à mesma base
     # (fenómeno e valor), e uma base da 4.7.6 sem nenhuma igual na 4.8 entra
@@ -4823,7 +4881,7 @@ def nuvens_baixas_secn2(texto):
     # de "S OF LINE … FEW/SCT SC/CU …" pode valer para toda a FIR — a nota
     # mantém LPBG/LPSE/LP66. A Secção I não muda.
     if _LINE_RE.search(conteudo):
-        antigos = [v for v in parse_gamet(texto_cld, _modo476=True)[0]
+        antigos = [v for v in parse_gamet(texto_cld, _modo476=True, _cb_solto=False)[0]
                    if v.phenomenon in ("BASE_AGL", "BASE_AMSL")]
         novos = []
         for b in blocos:

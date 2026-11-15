@@ -865,6 +865,8 @@ def test_arquivo_igual_a_4_2(eng, eng42):
             continue  # 4.7.6: verificado em test_v476.py
         if conftest.linha_48(t):
             continue  # 4.8: "D OF LINE" no GAMET, verificado em test_v48.py
+        if conftest.cb_49(eng, t):
+            continue  # 4.9: CB/TCU colado em toda a FIR, verificado em test_v49.py
         novo, antigo = _comparar(eng, eng42, t)
         assert novo == antigo, p.name
         bn, bv = eng.parse_gamet(t)[0], eng42.parse_gamet(t)[0]
@@ -890,6 +892,8 @@ def test_arquivo_analise_completa_e_resto(eng, eng42):
         texto = conftest.sfc_wind_475(f.read_text(encoding="utf-8"))  # 4.7.5
         if conftest.linha_48(texto):
             continue  # 4.8: "D OF LINE" no GAMET, verificado em test_v48.py
+        if conftest.cb_49(eng, texto):
+            continue  # 4.9: CB/TCU colado em toda a FIR, verificado em test_v49.py
         m = re.match(r"(\d{8})T", f.name)
         if not m:
             continue
