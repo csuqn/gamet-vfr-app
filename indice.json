@@ -902,6 +902,13 @@
    "inicio": "2026-11-15T09:00Z",
    "fim": "2026-11-15T15:00Z",
    "tipo": "GAMET"
+  },
+  {
+   "ficheiro": "gamets/2026/11/20261115T1454Z_151500-152100_6bcff7cc11.txt",
+   "recolhido": "2026-11-15T14:54Z",
+   "inicio": "2026-11-15T15:00Z",
+   "fim": "2026-11-15T21:00Z",
+   "tipo": "GAMET"
   }
  ],
  "sigmets": [
