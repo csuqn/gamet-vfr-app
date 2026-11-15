@@ -38,7 +38,7 @@ REF = Path(__file__).resolve().parent / "referencia" / "app_3_10.py"
 @pytest.fixture(scope="module")
 def eng310():
     mod = types.ModuleType("motor_3_10")
-    exec(compile(conftest._extract_engine(REF.read_text(encoding="utf-8")), str(REF), "exec"),
+    exec(compile(conftest._extract_engine_ref(REF.read_text(encoding="utf-8")), str(REF), "exec"),
          mod.__dict__)
     assert mod.APP_VERSION == "3.10"
     return mod
@@ -125,9 +125,11 @@ def test_base_lida(eng, nuvem, base):
 def test_airmet_intervalo_com_espacos_fica_a_mais_baixa(eng):
     agora = datetime(2026, 10, 20, 18, tzinfo=timezone.utc)
     air = ("LPPC AIRMET 5 VALID 201700/202100 LPPT- LPPC LISBOA FIR/MAINLAND AREA "
-           "BKN CLD 004 - 008/010HFT AGL OBS N OF N4000 STNR NC")
+           "BKN CLD 006 - 008/010HFT AGL OBS N OF N4000 STNR NC")
+    # (5.0) 006 em vez de 004: com os limiares novos 600 ft é MARGINAL e
+    # 800 ft também — o teste continua a distinguir "fica a mais baixa".
     la = eng.ler_airmet(air, agora)
-    assert [b.value for b in la["blocos"] if b.phenomenon == "BASE_AGL"] == [400]
+    assert [b.value for b in la["blocos"] if b.phenomenon == "BASE_AGL"] == [600]
     g = build_gamet("SECN I SFC VIS: N OF N4100 5000M BR", validity="201500/202100")
     r = eng.analisar_gamet(g, "ipma", boletins=[air], boletins_at=agora, agora=agora)
     reg = eng.find_region_for_point(r["regioes"], 41.3, -7.5)

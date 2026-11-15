@@ -59,7 +59,7 @@ G270900 = (
 @pytest.fixture(scope="module")
 def eng40():
     mod = types.ModuleType("motor_4_0")
-    exec(compile(conftest._extract_engine(REF.read_text(encoding="utf-8")), str(REF), "exec"),
+    exec(compile(conftest._extract_engine_ref(REF.read_text(encoding="utf-8")), str(REF), "exec"),
          mod.__dict__)
     assert mod.APP_VERSION == "4.0"
     return mod

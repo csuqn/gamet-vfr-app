@@ -75,7 +75,11 @@ def test_gamet_real_gera_base_800_agl_a_norte_de_n4100(eng, analyse):
 
 
 def test_gamet_real_decisao_go_inalterada(eng, analyse):
-    assert set(_decisoes(eng, analyse(G201500)["regions"]).values()) == {"GO"}
+    # (5.0) A base LCA 800 ft a norte de N4100 fica < 1000 ft → MARGINAL a
+    # norte (até à 4.9 era tudo GO); o sul continua GO.
+    d = _decisoes(eng, analyse(G201500)["regions"])
+    assert {d[n] for n in _norte(eng)} == {"MARGINAL"}
+    assert {d[n] for n in _sul(eng)} == {"GO"}
 
 
 def test_htf_igual_a_hft(eng, analyse):
@@ -87,11 +91,12 @@ def test_htf_igual_a_hft(eng, analyse):
         assert _decisoes(eng, htf["regions"]) == _decisoes(eng, hft["regions"]), base
 
 
-def test_004_htf_marginal_a_norte_de_n4100(eng, analyse):
+def test_004_htf_nogo_a_norte_de_n4100(eng, analyse):
+    # (5.0) 400 ft < 500 ft → NO-GO (até à 4.9 era MARGINAL)
     d = _decisoes(eng, analyse(G201500.replace("008/010HTF", "004/010HTF", 1))["regions"])
     norte, sul = _norte(eng), _sul(eng)
     assert norte and sul
-    assert {d[n] for n in norte} == {"MARGINAL"}
+    assert {d[n] for n in norte} == {"NO-GO"}
     assert {d[n] for n in sul} == {"GO"}
 
 

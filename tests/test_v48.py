@@ -65,7 +65,7 @@ SUL = {"LPFR", "LPBJ", "LPFA", "LPFC", "LPPM", "LP51", "LP54", "LP58", "LP59", "
 def eng476(eng):
     mod = types.ModuleType("motor_4_7_6")
     mod.__dict__["__file__"] = str(REF476)
-    exec(compile(conftest._extract_engine(REF476.read_text(encoding="utf-8")), str(REF476),
+    exec(compile(conftest._extract_engine_ref(REF476.read_text(encoding="utf-8")), str(REF476),
                  "exec"), mod.__dict__)
     return mod
 
@@ -158,10 +158,13 @@ def test_gamet_real_091500_sem_avisos_de_area(eng):
 def test_gamet_real_091500_52_pontos(eng, eng476):
     novo = _decisoes(eng, G091500)
     antigo = _decisoes(eng476, G091500)
-    assert sum(v == "MARGINAL" for v in antigo.values()) == 10
+    # (5.0) Com os limiares novos a base de 400 ft dá NO-GO: na 4.7.6 (lida
+    # com os limiares da 5.0, conftest._limiares_5_0) os 10 pontos do sul
+    # ficam NO-GO; até à 4.9 eram MARGINAL.
+    assert sum(v == "NO-GO" for v in antigo.values()) == 52
     for nome in eng.AERODROMES:
         if _icao(nome) in SUL:
-            assert antigo[nome] == "MARGINAL", nome
+            assert antigo[nome] == "NO-GO", nome
             assert novo[nome] == "GO", nome
         else:
             assert antigo[nome] == "NO-GO", nome

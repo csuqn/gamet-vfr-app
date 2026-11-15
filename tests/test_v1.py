@@ -375,9 +375,11 @@ def test_mef_celula_nao_herda_quadricula_vizinha(analyse, eng):
     REGRESSÃO (1.2): com SCT 028HFT AMSL, Évora (MEF 2500 → base 300 ft,
     MARGINAL) saía NO-GO porque a sua célula tocava numa quadrícula vizinha
     com área ínfima, que o corte ignorava mas o cálculo do MEF contava.
+    (5.0) Com os limiares novos usa-se 032HFT: Évora fica a 700 ft AGL
+    (MARGINAL) e as vizinhas de 3300/3700 ft dariam NO-GO.
     """
     r = analyse(build_gamet(
-        "SECN I SIG CLD: SCT 028HFT AMSL SIGWX: BTN N3900 AND N4130 FRQ TS"))
+        "SECN I SIG CLD: SCT 032HFT AMSL SIGWX: BTN N3900 AND N4130 FRQ TS"))
     reg = eng.find_region_for_point(r["regions"], *eng.AERODROMES["Évora (LPEV)"])
     assert reg["decision"] == "MARGINAL"
 

@@ -375,6 +375,25 @@ Três pormenores que já causaram erros reais:
   015HFT AGL ISOL TCU/CB …` (era GO), e `test_v476.test_casos_iguais_a_4_7_5`
   compara a leitura sem a regra.
 
+- **Limiares de VIS e BASE pelo AIP português** (5.0, decisão do Duarte a
+  15-nov-2026; mudança de regras, leitura igual). VIS MARGINAL passa de < 3000 m
+  para **< 5000 m**: 5 km é o mínimo VMC do SERA.5001 no espaço G abaixo de
+  3000 ft AMSL / 1000 ft acima do terreno; a redução a 1500 m (≤ 140 kt) só vale
+  "quando prescrita pela autoridade competente" e o manual VFR do AIP (ENR 1.2)
+  não a publica para voos diurnos — joga-se pelo AIP. VIS < 1500 m continua
+  NO-GO (MARGINAL se LCA). BASE NO-GO passa de < 300 ft para **< 500 ft**: o
+  ENR 1.2 do manual VFR proíbe voar abaixo de 500 ft fora da descolagem e da
+  aterragem e no espaço G é preciso estar livre de nuvens. BASE MARGINAL passa de
+  < 500 ft para **< 1000 ft** (GAFOR/DWD: MIKE; coincide com o critério de SIG
+  CLD). Vale também para os AIRMETs (mesma `decision()`). A nota informativa da
+  Secção II continua a < 500 ft (`_NUVEM_BAIXA_FT`). Os testes que comparam a
+  leitura com as cópias fixas de `tests/referencia/` carregam-nas com
+  `conftest._extract_engine_ref`, que lhes dá os limiares da 5.0 (sem isso a
+  comparação misturava leitura e limiares); `_extract_engine` não mexe em nada
+  (scripts e NiceGUI). Contra a 4.9 (`comparar_versoes.py`, arquivo a
+  15-nov-2026, 130 GAMETs): **0 mais permissivas**, 494 mais severas em 26
+  GAMETs (468 MARGINAL → NO-GO, 26 GO → MARGINAL).
+
 Não há sectores fixos. A app teve 3 sectores (Norte/Centro/Sul) até à v17;
 foram substituídos por geometria dinâmica porque marcavam um sector
 inteiro como NO-GO quando só uma fatia estava afectada — Bragança e Porto
@@ -388,9 +407,9 @@ definir `FIR_POLYGON` — não entram na decisão.
 |---|---|
 | VIS < 1500 m (geral) | NO-GO |
 | VIS < 1500 m (LCA) | MARGINAL — é local |
-| VIS < 3000 m | MARGINAL |
-| Base < 300 ft AGL | NO-GO |
-| Base < 500 ft AGL | MARGINAL |
+| VIS < 5000 m | MARGINAL (desde a 5.0; até à 4.9 < 3000 m) |
+| Base < 500 ft AGL | NO-GO (desde a 5.0; até à 4.9 < 300 ft) |
+| Base < 1000 ft AGL | MARGINAL (desde a 5.0; até à 4.9 < 500 ft) |
 | TS ISOL | MARGINAL |
 | TS OCNL / FRQ / EMBD / ISOL_EMBD / GEN | NO-GO |
 | CB em SIG CLD, ISOL | MARGINAL (desde a 2.0) |

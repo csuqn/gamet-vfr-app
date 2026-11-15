@@ -173,7 +173,7 @@ Algarve.
 
 O que a app mostra:
 - **NO-GO** no mar e na faixa costeira a norte de 38°40' (cerca de 11% da
-  área): base das nuvens a 200 ft, abaixo do mínimo de 300 ft.
+  área): base das nuvens a 200 ft, abaixo do mínimo de 500 ft.
 - **GO** no resto do país. A turbulência moderada no Algarve aparece como
   informação, porque não altera a decisão.
 
@@ -183,11 +183,11 @@ Em cada zona, a app aplica estas regras. Fica a pior decisão que se aplicar.
 
 | Condição | Decisão | Porquê |
 |---|---|---|
-| Visibilidade < 1500 m | NO-GO | Abaixo dos mínimos VFR |
+| Visibilidade < 1500 m | NO-GO | Abaixo de qualquer mínimo VFR, mesmo reduzido |
 | Visibilidade < 1500 m, mas local (`LCA`) | MARGINAL | Pode ser contornável |
-| Visibilidade < 3000 m | MARGINAL | Perto dos mínimos |
-| Base das nuvens < 300 ft AGL | NO-GO | Sem margem sobre o terreno e obstáculos |
-| Base das nuvens < 500 ft AGL | MARGINAL | Margem reduzida |
+| Visibilidade < 5000 m | MARGINAL | Abaixo do mínimo VMC do SERA no espaço G (5 km); a redução a 1500 m não está publicada no AIP |
+| Base das nuvens < 500 ft AGL | NO-GO | Não dá para cumprir a altura mínima de 500 ft (AIP, ENR 1.2) e ficar livre de nuvens |
+| Base das nuvens < 1000 ft AGL | MARGINAL | Margem reduzida (GAFOR: MIKE) |
 | Trovoada isolada (`ISOL TS`) | MARGINAL | Contornável com cuidado |
 | Trovoada ocasional, frequente ou embebida | NO-GO | Não contornável em segurança |
 | Turbulência ou gelo **severos** | NO-GO | A maioria dos ultraleves não tem margem estrutural nem degelo |

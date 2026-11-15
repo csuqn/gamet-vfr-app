@@ -39,7 +39,7 @@ LAT_SUL = 38 + 40 / 60    # N3840
 LAT_NORTE = 40 + 50 / 60  # N4050
 
 # Decisões da 3.0 para este GAMET, sem o SIGMET T02 (cujo texto não vem no
-# GAMET). A base de 800 ft não altera nenhuma — têm de se manter.
+# GAMET). Até à 4.9 a base de 800 ft não alterava nenhuma (ver o ajuste da 5.0 abaixo).
 DECISOES_3_0 = {
     'Lisboa (LPPT)': 'GO', 'Porto (LPPR)': 'GO', 'Faro (LPFR)': 'GO',
     'Beja (LPBJ)': 'NO-GO', 'Cascais (LPCS)': 'GO', 'Évora (LPEV)': 'NO-GO',
@@ -65,6 +65,12 @@ DECISOES_3_0 = {
     'Casarão (LP76)': 'GO', 'Alentejo Air Park (LP78)': 'GO', 'Faias (LP79)': 'GO',
     'Pias Longas (LP80)': 'GO',
 }
+
+# (5.0) Com os limiares novos a base de 800 ft (< 1000 ft) põe em MARGINAL os
+# pontos da faixa costeira entre N3840 e N4050; o resto fica igual à 3.0.
+DECISOES_3_0 = dict(DECISOES_3_0, **{
+    'Cascais (LPCS)': 'MARGINAL', 'Santa Cruz (LPSC)': 'MARGINAL',
+    'Atouguia da Baleia (LP49)': 'MARGINAL', 'Tojeira (LP63)': 'MARGINAL'})
 
 
 def _dec(eng, regioes, nome):

@@ -63,6 +63,38 @@ def _find_app() -> Path:
     return app
 
 
+# (5.0) Limiares de decisão de VIS e BASE mudaram a 15-nov-2026 (AIP
+# português): VIS MARGINAL < 5000 m (era < 3000 m); BASE NO-GO < 500 ft (era
+# < 300 ft) e MARGINAL < 1000 ft (era < 500 ft). As cópias fixas em
+# tests/referencia/ servem para comparar a LEITURA do GAMET entre versões; para
+# essa comparação continuar a valer, os testes carregam-nas com
+# `_extract_engine_ref`, que troca os limiares pelos da 5.0 (o ficheiro em
+# disco não muda). `_extract_engine` não mexe em nada: os scripts
+# (`comparar_versoes.py`, `analisar.py`) e a NiceGUI usam-no tal como está.
+_LIMIARES_ANTIGOS = [
+    ("vis and vis < 3000:", "vis and vis < 5000:"),
+    ('m < 3000m")', 'm < 5000m")'),
+    ("base is not None and base < 500:", "base is not None and base < 1000:"),
+    ('ft < 500ft")', 'ft < 1000ft")'),
+    ("base is not None and base < 300:", "base is not None and base < 500:"),
+    ('ft < 300ft")', 'ft < 500ft")'),
+]
+
+
+def _limiares_5_0(src: str) -> str:
+    if "base is not None and base < 300:" not in src:
+        return src
+    for a, b in _LIMIARES_ANTIGOS:
+        assert src.count(a) == 1, f"limiar antigo não encontrado uma só vez: {a!r}"
+        src = src.replace(a, b)
+    return src
+
+
+def _extract_engine_ref(src: str) -> str:
+    """Motor de uma cópia fixa de tests/referencia/ com os limiares da 5.0."""
+    return _extract_engine(_limiares_5_0(src))
+
+
 def _extract_engine(src: str) -> str:
     """Junta as secções de lógica pura numa fonte executável."""
     parts = [_app_imports(src)]
@@ -306,7 +338,7 @@ def _motor_45():
     if not _MOTOR45:
         mod = types.ModuleType("motor_4_5_conftest")
         mod.__dict__["__file__"] = str(_REF45)
-        exec(compile(_extract_engine(_REF45.read_text(encoding="utf-8")), str(_REF45),
+        exec(compile(_extract_engine_ref(_REF45.read_text(encoding="utf-8")), str(_REF45),
                      "exec"), mod.__dict__)
         _MOTOR45.append(mod)
     return _MOTOR45[0]

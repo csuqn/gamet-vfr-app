@@ -14,10 +14,11 @@ from conftest import build_gamet
 @pytest.mark.parametrize("metros,decisao", [
     (100, "NO-GO"), (500, "NO-GO"), (999, "NO-GO"), (1499, "NO-GO"),
     (1500, "MARGINAL"), (2000, "MARGINAL"), (2999, "MARGINAL"),
-    (3000, "GO"), (5000, "GO"), (9999, "GO"),
+    (3000, "MARGINAL"), (4999, "MARGINAL"),   # 5.0: era GO (limiar 3000 m)
+    (5000, "GO"), (9999, "GO"),
 ])
 def test_vis_limiares(analyse, metros, decisao):
-    """Limiares VFR: <1500m NO-GO, <3000m MARGINAL, >=3000m GO."""
+    """Limiares VFR (5.0, AIP/SERA.5001): <1500m NO-GO, <5000m MARGINAL, >=5000m GO."""
     r = analyse(build_gamet(f"SECN I SFC VIS: {metros}M"))
     assert metros in r["vis"]
     assert r["decisions"] == [decisao]
@@ -69,9 +70,10 @@ def test_vis_ignora_fl_e_hpa(analyse):
 
 # ── BASE DE NUVENS ───────────────────────────────────────────────────
 @pytest.mark.parametrize("hft,decisao", [
-    (1, "NO-GO"), (2, "NO-GO"),        # <300ft
-    (3, "MARGINAL"), (4, "MARGINAL"),  # <500ft
-    (5, "GO"), (10, "GO"), (30, "GO"),
+    # 5.0 (AIP, ENR 1.2: altura mínima 500 ft): <500ft NO-GO, <1000ft MARGINAL
+    (1, "NO-GO"), (2, "NO-GO"), (3, "NO-GO"), (4, "NO-GO"),
+    (5, "MARGINAL"), (9, "MARGINAL"),
+    (10, "GO"), (30, "GO"),
 ])
 def test_base_limiares(analyse, hft, decisao):
     r = analyse(build_gamet(f"SECN I SIG CLD: BKN {hft:03d}-{hft+10:03d}/XXXHFT AGL"))
