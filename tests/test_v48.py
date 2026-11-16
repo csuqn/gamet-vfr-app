@@ -586,6 +586,10 @@ COM_LINHA = {
     "20261027T0853Z_270900-271500_c8fefbd089.txt": "II",
     "20261106T0841Z_060900-061500_f32bab6a2c.txt": "II",
     "20261109T1444Z_091500-092100_540ca00855.txt": "I",
+    # Acrescentado a 16-nov-2026: GAMET real 160300/160900, `N OF LINE N3900
+    # W01000 - N4100 W00600` só na Secção II (antes do AS/AC 6000 ft AMSL); nota
+    # igual à da 4.7.6 (LPBG, LP66, LPSE), decisões iguais.
+    "20261116T0242Z_160300-160900_b85f238d4d.txt": "II",
 }
 
 

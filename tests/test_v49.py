@@ -389,6 +389,13 @@ CB_SOLTO = {
     "20261114T0247Z_140300-140900_3941a8fc42.txt",
     "20261114T0848Z_140900-141500_736e7be0bd.txt",
     "20261114T1449Z_141500-142100_0b0ae4c2af.txt",
+    # Acrescentado a 16-nov-2026: GAMET real 151500/152100 de 15-nov. `18/21 N OF
+    # N4000 AND E OF W00820 LCA BKN 002-008/010HFT AGL 15/18 ISOL TCU/CB
+    # 018-030/XXXHFT AGL` — CB colado à parte anterior de uma linha cortada por
+    # janela (o caso `09/11 … BKN 002… 11/15 ISOL TCU/CB` da regra da 4.9): passa
+    # para toda a FIR e todo o período, com a base de 1800 ft. Verificado pelos
+    # testes do arquivo contra a 4.8.1: nunca mais permissivo, blocos dominados.
+    "20261115T1454Z_151500-152100_6bcff7cc11.txt",
 }
 
 
@@ -450,8 +457,11 @@ def test_arquivo_manual_contra_4_8_1(eng, eng481):
         severos += len(aero)
         n += 1
     assert n > 100
-    # O 141500 é o caso do pedido: 38 pontos GO → MARGINAL
-    assert por_gamet.get(G141500_F.name) == 38
+    # O 141500 é o caso do pedido: 38 pontos GO → MARGINAL com os limiares da
+    # 4.9. (5.0) Com os limiares novos nos dois motores, os 5 pontos a N de
+    # N4000 (BASE800_141500: base LCA 800 ft < 1000 ft) já são MARGINAL na 4.8.1,
+    # por isso só 38 − 5 = 33 mudam por causa do CB.
+    assert por_gamet.get(G141500_F.name) == 38 - len(BASE800_141500)
     assert set(por_gamet) <= CB_SOLTO
 
 
