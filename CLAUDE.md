@@ -1276,3 +1276,15 @@ decisões mais permissivas** (só mais severas); e não mexe em limiares. O
 PR leva "[Entrou — escolha a confirmar]" no título e a escolha vai na
 mensagem ao Duarte, que pode trocar de leitura depois. Fora disto, a regra
 "na dúvida, não entra" mantém-se.
+
+**Revisor obrigatório nos PRs de regras (decisão do Duarte, 16-nov-2026):**
+um PR que mexa em regras de decisão ou limiares (tabela "Regras de decisão",
+`decision()`, constantes de VIS/base/TS, leitura que muda decisões) só entra
+no `main` com o veredicto do agente `revisor` escrito **no próprio PR**
+(comentário com APROVADO/DÚVIDA/REJEITADO, suite e comparação de versões com
+e sem `--indice`) — **também quando é o Duarte a fazer o merge**. O revisor
+verifica que a implementação faz exactamente o que foi pedido e nada mais,
+e lista todas as decisões mais permissivas com a prova. Sem esse comentário,
+o PR não está pronto para merge. Caso que levou a esta regra: o #49 (5.0,
+limiares do AIP) entrou a 16-nov sem veredicto; a revisão foi feita depois
+do merge (APROVADO, 0 mais permissivas).
