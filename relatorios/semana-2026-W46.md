@@ -127,7 +127,7 @@ O G8 é o teste a fazer o que deve: o conjunto fixo existe para falhar quando ap
 | #46 | 4.8.1 | teu OK à variante do revisor (12-nov 02:29Z) | revisor DÚVIDA: contra-exemplo **optimista** (AMD depois das 00Z com o T01 de ontem activo) | DÚVIDA → variante df1ec75 com o contra-exemplo como teste | 0/0 (o script não exercita a função); varrimento próprio de 102 casos: 0/0 |
 | #47 | — (só testes) | a teu pedido (12-nov 13:10Z) | pedido teu | APROVADO (nenhum teste menos exigente; T02/T03 mais fortes) | n/a (`app.py` igual) |
 | #48 | 4.9 | merge teu (15-nov 17:30Z) | mudança de regra | DÚVIDA formal; implementação correcta; 3 leituras-limite para confirmares | 0 mais permissivas; 207 mais severas (165 com `--indice`), todas GO → MARGINAL "CB ISOL" |
-| #49 | 5.0 | merge teu (16-nov 00:45Z) | mudança de limiares | **sem veredicto registado no PR** (0 comentários, 0 reviews) | 0 mais permissivas; 494 mais severas em 26 GAMETs (468 MARGINAL → NO-GO, 26 GO → MARGINAL) |
+| #49 | 5.0 | merge teu (16-nov 00:45Z) | mudança de limiares | sem veredicto antes do merge; **revisão a posteriori a 16-nov: APROVADO** ([comentário](https://github.com/csuqn/gamet-vfr-app/pull/49#issuecomment-6911972393)) | 0 mais permissivas; 494 mais severas em 26 GAMETs (468 MARGINAL → NO-GO, 26 GO → MARGINAL) |
 
 - **Merges automáticos: 0** (W45: 5). Não era para haver nenhum: tudo foi funcionalidade nova, mudança de regra, escolha de leitura ou pedido teu. Nenhum PR ficou à espera indevidamente.
 - **Reversões: 0.** O main esteve verde em todas as execuções do "Testes".
@@ -137,7 +137,7 @@ O G8 é o teste a fazer o que deve: o conjunto fixo existe para falhar quando ap
   - no #48 separou bem a verificação técnica (correcta) da razão formal (regra);
   - não vi nenhuma rejeição errada.
 - **Decisões mais permissivas na semana:** só as 10 do #45. A prova confirmou-se de forma independente: são exactamente os 10 pontos que o piloto do 091500 tinha posto em GO às cegas, e o comparador verificou a geometria.
-- **Lacuna:** o #49 (limiares) entrou sem veredicto do revisor visível no PR. O corpo do PR traz a comparação de versões e diz "[Precisa do Duarte]", mas o título não. Não consigo verificar se houve revisão fora do PR.
+- **Lacuna:** o #49 (limiares) entrou sem veredicto do revisor visível no PR. O corpo do PR traz a comparação de versões e diz "[Precisa do Duarte]", mas o título não. Não houve revisão antes do merge (falha do processo, reconhecida por ti a 16-nov). A 16-nov o revisor fez a revisão a posteriori: **APROVADO** — só mudam os limiares pedidos, 0 decisões mais permissivas (com e sem `--indice`), 494/493 mais severas, fronteiras verificadas a executar, testes alterados justificados, cópias de referência sem edição. Comentário no PR.
 
 ## f. Riscos e incidentes
 
