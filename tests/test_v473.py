@@ -70,7 +70,7 @@ def _plenos(regiao):
 def eng472(eng):
     mod = types.ModuleType("motor_4_7_2")
     mod.__dict__["__file__"] = str(REF472)
-    exec(compile(conftest._extract_engine(REF472.read_text(encoding="utf-8")), str(REF472),
+    exec(compile(conftest._extract_engine_ref(REF472.read_text(encoding="utf-8")), str(REF472),
                  "exec"), mod.__dict__)
     return mod
 
@@ -97,9 +97,10 @@ def test_gamet_real_061500_cb_nao_e_motivo_do_interior(eng):
     # A fatia com CB absorvida na região grande não perde o motivo
     grande = pontos["LPBG"]
     assert PARCIAL + "CB ISOL (cumulonimbos)" in grande["reasons"]
-    # Decisão de todos os pontos: MARGINAL a N de N3800, GO a sul
+    # Decisão de todos os pontos: NO-GO a N de N3800 (5.0: base 400 ft < 500 ft;
+    # até à 4.9 MARGINAL), GO a sul
     for nome, (la, lo) in eng.AERODROMES.items():
-        esperado = "MARGINAL" if la > 38.0 else "GO"
+        esperado = "NO-GO" if la > 38.0 else "GO"
         assert pontos[_icao(nome)]["decision"] == esperado, nome
 
 

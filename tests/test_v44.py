@@ -57,6 +57,7 @@ def test_decisao_inalterada(eng, analyse):
     regioes = analyse(G301500)["regions"]
     for nome, (la, lo) in eng.AERODROMES.items():
         reg = eng.find_region_for_point(regioes, la, lo)
-        esperado = "MARGINAL" if any(c in nome for c in
+        # (5.0) base 400 ft < 500 ft → NO-GO (até à 4.9 MARGINAL)
+        esperado = "NO-GO" if any(c in nome for c in
                                      ("LPPR", "LPIN", "LPSC", "LP49", "LP62")) else "GO"
         assert reg["decision"] == esperado, nome

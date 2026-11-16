@@ -56,6 +56,16 @@ COD_AIR2 = {"LPPR", "LPVR", "LPBG", "LPBR", "LPCB", "LPCH", "LPCO", "LPIN", "LPJ
             "LP66", "LP69", "LP71", "LP76", "LP80"}
 # Pontos a N de N3930 na faixa costeira (AIRMET 1, base 200 ft)
 COD_AIR1 = {"LPPR", "LPIN", "LP62"}
+# (5.0) A base do próprio GAMET (LCA BKN 006 a N de N4100 e W de W00800) fica
+# < 1000 ft → MARGINAL nestes pontos; até à 4.9 era GO.
+COD_GAMET_BASE = {"LP55", "LP62", "LPBR", "LPPR", "LPVL"}
+
+
+def _so_base_do_gamet(eng, r):
+    """Fora dos AIRMETs: MARGINAL só na área da base do GAMET, o resto GO."""
+    dec = _decisoes(eng, r)
+    assert {c for c, d in dec.items() if d == "MARGINAL"} == COD_GAMET_BASE
+    assert {d for c, d in dec.items() if c not in COD_GAMET_BASE} == {"GO"}
 
 G170900 = (
     "LPPC GAMET VALID 170900/171500 LPPT- LPPC LISBOA FIR/MAINLAND AREA BLW FL150 SECN I SFC "
@@ -98,7 +108,7 @@ def _avisos(r, chave):
 
 def test_real_18h_ainda_sem_airmet_tudo_go(eng):
     r = _r(eng, G251500, [AIR1_25, AIR2_25], _t(25, 18, 0))
-    assert set(_decisoes(eng, r).values()) == {"GO"}
+    _so_base_do_gamet(eng, r)
     assert r["airmets"] == []
 
 
@@ -107,8 +117,9 @@ def test_real_1830_so_airmet_1_base_200_na_costa(eng):
     dec = _decisoes(eng, r)
     nogo = {c for c, d in dec.items() if d == "NO-GO"}
     assert nogo == COD_AIR1, sorted(nogo)
-    assert {d for c, d in dec.items() if c not in COD_AIR1} == {"GO"}
-    assert "AIRMET 1 — BASE 200ft < 300ft" in _motivos(r)
+    assert {c for c, d in dec.items() if d == "MARGINAL"} == COD_GAMET_BASE - COD_AIR1
+    assert {d for c, d in dec.items() if c not in COD_AIR1 | COD_GAMET_BASE} == {"GO"}
+    assert "AIRMET 1 — BASE 200ft < 500ft" in _motivos(r)
 
 
 def test_real_19h_os_dois_airmets_25_pontos_no_go(eng):
@@ -118,7 +129,7 @@ def test_real_19h_os_dois_airmets_25_pontos_no_go(eng):
     assert nogo == COD_AIR2, (sorted(nogo - COD_AIR2), sorted(COD_AIR2 - nogo))
     assert {d for c, d in dec.items() if c not in COD_AIR2} == {"GO"}
     mot = _motivos(r)
-    assert "AIRMET 2 — VIS 200m < 1500m" in mot and "AIRMET 1 — BASE 200ft < 300ft" in mot
+    assert "AIRMET 2 — VIS 200m < 1500m" in mot and "AIRMET 1 — BASE 200ft < 500ft" in mot
     # Porto: os dois AIRMETs nos motivos da região
     porto = eng.find_region_for_point(r["regioes"], *eng.AERODROMES["Porto (LPPR)"])
     assert any(m.startswith("AIRMET 1 —") for m in porto["reasons"])
@@ -145,7 +156,7 @@ def test_real_19h_aviso_lista_o_efeito_de_cada_airmet(eng):
 
 def test_real_2105_tudo_expirado_tudo_go(eng):
     r = _r(eng, G251500, [AIR1_25, AIR2_25], _t(25, 21, 5))
-    assert set(_decisoes(eng, r).values()) == {"GO"}
+    _so_base_do_gamet(eng, r)
     assert r["airmets"] == []
 
 
@@ -171,7 +182,7 @@ def test_real_arquivo_recurso_igual_ao_ipma(eng):
 
 def test_colado_a_mao_nada_muda(eng):
     r = eng.analisar_gamet(G251500, "manual", boletins=[AIR1_25, AIR2_25], agora=_t(25, 19))
-    assert set(_decisoes(eng, r).values()) == {"GO"}
+    _so_base_do_gamet(eng, r)
     assert "AIRMET" not in _motivos(r)
 
 
@@ -217,7 +228,8 @@ def _dec(eng, r, lat, lon):
     ("SFC VIS 0800M BR", "NO-GO"),
     ("SFC VIS 1,2KM BR", "NO-GO"),
     ("SFC VIS 2000M BR", "MARGINAL"),
-    ("SFC VIS 4000M BR", "GO"),
+    ("SFC VIS 4000M BR", "MARGINAL"),   # 5.0: < 5000 m (era GO)
+    ("SFC VIS 5000M BR", "GO"),
     ("SFC VIS LCA 0800M BR", "MARGINAL"),
     ("ISOL TS", "MARGINAL"),
     ("OCNL TS", "NO-GO"),
@@ -246,13 +258,17 @@ def test_fenomeno_antes_da_area(eng, fen, esperado):
 
 @pytest.mark.parametrize("fen, valor, esperado", [
     ("BKN CLD", "002HFT AGL", "NO-GO"),
-    ("OVC CLD", "004HFT AGL", "MARGINAL"),
-    ("BKN CLD", "004/010HFT AGL", "MARGINAL"),
+    # 5.0: < 500 ft NO-GO, < 1000 ft MARGINAL (até à 4.9: < 300 / < 500)
+    ("OVC CLD", "004HFT AGL", "NO-GO"),
+    ("BKN CLD", "004/010HFT AGL", "NO-GO"),
     ("BKN CLD", "002-004/010HFT", "NO-GO"),        # sem referência = AGL
-    ("OVC CLD", "006/015HFT AGL", "GO"),
-    ("BKN CLD", "400/3000FT", "MARGINAL"),          # forma do Anexo 3
+    ("OVC CLD", "006/015HFT AGL", "MARGINAL"),
+    ("OVC CLD", "010/015HFT AGL", "GO"),
+    ("BKN CLD", "400/3000FT", "NO-GO"),             # forma do Anexo 3
+    ("BKN CLD", "700/3000FT", "MARGINAL"),          # forma do Anexo 3
     ("BKN CLD", "060/300M", "NO-GO"),               # Anexo 3 em metros: 60 m ≈ 196 ft
-    ("BKN CLD", "120/900M", "MARGINAL"),            # 120 m ≈ 393 ft
+    ("BKN CLD", "120/900M", "NO-GO"),               # 120 m ≈ 393 ft
+    ("BKN CLD", "200/900M", "MARGINAL"),            # 200 m ≈ 656 ft
 ])
 def test_nuvem_com_a_base_depois_da_area(eng, fen, valor, esperado):
     r = _r(eng, CALMO, [_a(f"{fen} OBS N OF N4000 {valor} STNR NC")], AGORA)

@@ -63,6 +63,8 @@ G141500 = (
 # Os 14 pontos NO-GO da 4.8.1 (N de N3945 e E de W00830: BASE 200, VIS LCA 800, CB)
 NOGO_141500 = {"LPVR", "LPBG", "LPBR", "LPCB", "LPCH", "LPCO", "LPLZ", "LPMI", "LPMU",
                "LPSE", "LPVZ", "LP53", "LP66", "LP76"}
+# (5.0) Pontos a N de N4000 com a base LCA 800 ft (< 1000 ft → MARGINAL)
+BASE800_141500 = {"LPPR", "LPIN", "LPVL", "LP55", "LP62"}
 
 GRELHA = [(36.95 + 0.3 * i, -9.55 + 0.3 * j) for i in range(18) for j in range(12)]
 
@@ -71,7 +73,7 @@ GRELHA = [(36.95 + 0.3 * i, -9.55 + 0.3 * j) for i in range(18) for j in range(1
 def eng481(eng):
     mod = types.ModuleType("motor_4_8_1")
     mod.__dict__["__file__"] = str(REF481)
-    exec(compile(conftest._extract_engine(REF481.read_text(encoding="utf-8")), str(REF481),
+    exec(compile(conftest._extract_engine_ref(REF481.read_text(encoding="utf-8")), str(REF481),
                  "exec"), mod.__dict__)
     return mod
 
@@ -165,14 +167,21 @@ def test_141500_decisoes(eng, eng481):
     novo = {_icao(k): v for k, v in _decisoes(eng, G141500).items()}
     velho = {_icao(k): v for k, v in _decisoes(eng481, G141500).items()}
     assert {k for k, v in velho.items() if v == "NO-GO"} == NOGO_141500
-    assert {k for k, v in velho.items() if v == "GO"} == set(velho) - NOGO_141500
+    # (5.0) A 4.8.1 é lida com os limiares da 5.0 (conftest._limiares_5_0): a
+    # base LCA 800 ft a N de N4000 dá MARGINAL nestes 5 pontos (até à 4.9 GO).
+    assert {k for k, v in velho.items() if v == "MARGINAL"} == BASE800_141500
+    assert {k for k, v in velho.items() if v == "GO"} == \
+        set(velho) - NOGO_141500 - BASE800_141500
     assert len(velho) - len(NOGO_141500) == 38
     # Os 38 pontos GO passam a MARGINAL por "CB ISOL"; os 14 NO-GO ficam
     assert {k for k, v in novo.items() if v == "NO-GO"} == NOGO_141500
     assert {k for k, v in novo.items() if v == "MARGINAL"} == set(novo) - NOGO_141500
     mn, mv = _motivos(eng, G141500), _motivos(eng481, G141500)
-    for k in set(novo) - NOGO_141500:
+    for k in set(novo) - NOGO_141500 - BASE800_141500:
         assert mn[k] == ["CB ISOL (cumulonimbos)"], (k, mn[k])
+    for k in BASE800_141500:
+        assert mn[k] == ["BASE 800ft < 1000ft", "CB ISOL (cumulonimbos)",
+                         "VIS (LCA) 3000m < 5000m"], (k, mn[k])
     for k in NOGO_141500:
         assert mn[k] == mv[k], k
 

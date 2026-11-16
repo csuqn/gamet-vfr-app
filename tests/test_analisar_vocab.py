@@ -43,7 +43,9 @@ def test_gamets_reais_sem_falso_alarme(eng, g):
 
 def test_decisao_inalterada(eng):
     r = analisar.analisar(eng, G230300)
-    assert r["resumo"]["MARGINAL"] > 0 and r["resumo"]["NO-GO"] == 0
+    # (5.0) LCA BKN 004 → base 400 ft < 500 ft → NO-GO a norte de N3800
+    # (até à 4.9 era MARGINAL e não havia NO-GO).
+    assert r["resumo"]["NO-GO"] > 0
 
 
 @pytest.mark.parametrize("tok", ["HTX", "RA/DZ/HTX", "XYZQ/RA/BR"])

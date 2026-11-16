@@ -49,7 +49,7 @@ GRELHA = [(36.95 + 0.3 * i, -9.55 + 0.3 * j) for i in range(18) for j in range(1
 def eng475(eng):
     mod = types.ModuleType("motor_4_7_5")
     mod.__dict__["__file__"] = str(REF475)
-    exec(compile(conftest._extract_engine(REF475.read_text(encoding="utf-8")), str(REF475),
+    exec(compile(conftest._extract_engine_ref(REF475.read_text(encoding="utf-8")), str(REF475),
                  "exec"), mod.__dict__)
     return mod
 

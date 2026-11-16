@@ -45,7 +45,7 @@ CALMO = build_gamet("SECN I SFC VIS: N OF N4100 5000M BR", validity="011000/0114
 def eng451():
     mod = types.ModuleType("motor_4_5_1")
     mod.__dict__["__file__"] = str(REF451)
-    exec(compile(conftest._extract_engine(REF451.read_text(encoding="utf-8")), str(REF451),
+    exec(compile(conftest._extract_engine_ref(REF451.read_text(encoding="utf-8")), str(REF451),
                  "exec"), mod.__dict__)
     return mod
 

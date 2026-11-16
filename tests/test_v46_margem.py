@@ -47,7 +47,7 @@ def _sig(q, mov="STNR NC", tipo="SIGMET", sid="T01", fen="EMBD TS"):
 def eng45():
     mod = types.ModuleType("motor_4_5")
     mod.__dict__["__file__"] = str(REF45)
-    exec(compile(conftest._extract_engine(REF45.read_text(encoding="utf-8")), str(REF45),
+    exec(compile(conftest._extract_engine_ref(REF45.read_text(encoding="utf-8")), str(REF45),
                  "exec"), mod.__dict__)
     return mod
 

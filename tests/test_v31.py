@@ -138,14 +138,14 @@ def test_sem_referencia_igual_a_agl(eng, analyse):
     amsl = analyse(build_gamet("SECN I SIG CLD:BKN 020/060HFT AMSL"))
     (b,) = _bases(amsl)
     assert b.phenomenon == "BASE_AMSL"
-    # 2000 ft AMSL fica abaixo de 300 ft AGL no relevo mais alto → NO-GO algures
+    # 2000 ft AMSL fica abaixo de 500 ft AGL no relevo mais alto → NO-GO algures
     assert "NO-GO" in set(_por_codigo(eng, amsl["regions"]).values())
 
 
 def test_motivo_base_200_ft(analyse):
     r = analyse(GAMET_180300)
     motivos = {m for reg in r["regions"] for m in reg["reasons"]}
-    assert any(re.search(r"BASE 200\s*ft\s*<\s*300\s*ft", m, re.I) for m in motivos), motivos
+    assert any(re.search(r"BASE 200\s*ft\s*<\s*500\s*ft", m, re.I) for m in motivos), motivos
 
 
 def test_analisar_ja_nao_assinala_campo_sem_fenomeno(eng):

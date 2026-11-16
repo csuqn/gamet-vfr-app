@@ -29,7 +29,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "4.9"
+APP_VERSION = "5.0"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -2969,7 +2969,7 @@ _BASE_REASON_RE = re.compile(rf"^({_ORIGEM_MOTIVO})BASE \d+ft")
 def _dedupe_base_reasons(reasons):
     """
     Numa região que junta células com bases diferentes, manter só o motivo
-    com a base mais baixa por limiar ("< 300ft", "< 500ft") — por origem
+    com a base mais baixa por limiar ("< 500ft", "< 1000ft") — por origem
     (GAMET ou cada AIRMET).
     """
     outros, por_limiar = [], {}
@@ -4474,20 +4474,32 @@ def decision(events):
         if decision_level == "GO":
             decision_level = "MARGINAL"
         reasons.append(f"VIS LCA {min(vis_lca)}m < 1500m (local)")
-    elif vis and vis < 3000:
+    elif vis and vis < 5000:
+        # (5.0, decisão do Duarte a 15-nov-2026) 5 km é o mínimo VMC do
+        # SERA.5001 no espaço G abaixo de 3000 ft AMSL / 1000 ft AGL. A
+        # redução a 1500 m só vale se a autoridade a prescrever, e o AIP
+        # português não a publica para voos diurnos — joga-se pelo AIP.
+        # Até à 4.9 o limiar era 3000 m (3000–4999 m dava GO).
         if decision_level == "GO":
             decision_level = "MARGINAL"
         lca_note = " (LCA)" if vis_lca and vis in vis_lca else ""
-        reasons.append(f"VIS{lca_note} {vis}m < 3000m")
+        reasons.append(f"VIS{lca_note} {vis}m < 5000m")
 
     # ---- Base de nuvens ----
-    if base is not None and base < 300:
+    # (5.0, decisão do Duarte a 15-nov-2026) O manual VFR do AIP português
+    # (ENR 1.2) proíbe voar abaixo de 500 ft AGL fora da descolagem e da
+    # aterragem, e no espaço G é preciso estar livre de nuvens: com a base
+    # abaixo de 500 ft o voo em rota não é possível → NO-GO. Entre 500 e
+    # 1000 ft é possível mas sem margem (DWD/GAFOR: MIKE) → MARGINAL. Coincide
+    # com o critério do SIG CLD (BKN/OVC < 1000 ft). Até à 4.9: NO-GO < 300 ft,
+    # MARGINAL < 500 ft.
+    if base is not None and base < 500:
         decision_level = "NO-GO"
-        reasons.append(f"BASE {base}ft < 300ft")
-    elif base is not None and base < 500:
+        reasons.append(f"BASE {base}ft < 500ft")
+    elif base is not None and base < 1000:
         if decision_level == "GO":
             decision_level = "MARGINAL"
-        reasons.append(f"BASE {base}ft < 500ft")
+        reasons.append(f"BASE {base}ft < 1000ft")
 
     # ---- Cinzas vulcânicas — sempre NO-GO ----
     if va_vals:
@@ -4843,8 +4855,13 @@ def generate_pdf(regions, gamet_text, fzlvl_min, qnh_min, validity_label) -> byt
 # Secção II é a nuvem que NÃO cumpre os critérios de SIG CLD (ex.: SCT ST 004,
 # GAMET real 192100/200300) — não entra na decisão, mas um piloto quer saber
 # que há ST baixo. Lê-se o campo com a mesma máquina do SIG CLD (áreas,
-# janelas, AGL/AMSL) e só se devolve o que tem base < 500 ft AGL.
-_NUVEM_BAIXA_FT = 500
+# janelas, AGL/AMSL) e só se devolve o que tem base baixa.
+# (5.0, decisão do Duarte a 15-nov-2026) Bases AGL: < 1000 ft, o limiar de
+# MARGINAL da Secção I. Bases AMSL: a menos de 500 ft do MEF da quadrícula, como
+# até à 4.9 — o MEF já inclui obstáculos e margem, e com 1000 ft a nota dobrava
+# os pontos assinalados no arquivo (228 → 460) sem acrescentar informação.
+_NUVEM_BAIXA_AGL_FT = 1000
+_NUVEM_BAIXA_FT = 500   # bases AMSL, acima do MEF
 _SECN2_CLD_RE = re.compile(
     r"(?:\bSIG\s+)?\bCLD\s*:(.*?)(?=\b(?:WIND/T|FZLVL|MNM\s+QNH|PSYS|SFC\s+VIS|SFC\s+(?:WSPD|WIND)"
     r"|SIGWX|TURB|ICE|MTW|SEA|VA|MT\s+OBSC)\b\s*:?|\bMNM\b|=|$)", re.DOTALL)
@@ -4852,10 +4869,11 @@ _SECN2_CLD_RE = re.compile(
 
 def nuvens_baixas_secn2(texto):
     """
-    Nuvens da Secção II (CLD) com base < 500 ft AGL. Devolve
+    Nuvens da Secção II (CLD) com base baixa: AGL < 1000 ft, ou AMSL a menos
+    de 500 ft do MEF da quadrícula. Devolve
     (conteúdo do campo CLD, [(base_ft, ref, janela, superfície, pontos, área_lida, lca)]),
-    em que `pontos` são os nomes de AERODROMES onde a base fica abaixo de
-    500 ft AGL (bases AMSL contra o MEF da quadrícula). Só informativo: nunca
+    em que `pontos` são os nomes de AERODROMES abrangidos (bases AMSL: onde a
+    base fica a menos de 500 ft do MEF). Só informativo: nunca
     entra em compute_dynamic_regions.
     """
     norm = normalize(texto)
@@ -4903,11 +4921,13 @@ def nuvens_baixas_secn2(texto):
         for nome, (la, lo) in AERODROMES.items():
             if not b.polygon.buffer(1e-9).contains(Point(lo, la)):
                 continue
-            agl = b.value if b.phenomenon == "BASE_AGL" else \
-                b.value - _terrain_elevation_ft(lo, la)
-            if agl < _NUVEM_BAIXA_FT:
+            if b.phenomenon == "BASE_AGL":
+                baixa = b.value < _NUVEM_BAIXA_AGL_FT
+            else:
+                baixa = b.value - _terrain_elevation_ft(lo, la) < _NUVEM_BAIXA_FT
+            if baixa:
                 pontos.append(nome)
-        if b.phenomenon == "BASE_AGL" and b.value >= _NUVEM_BAIXA_FT:
+        if b.phenomenon == "BASE_AGL" and b.value >= _NUVEM_BAIXA_AGL_FT:
             continue
         if b.phenomenon == "BASE_AMSL" and not pontos:
             continue
@@ -4944,8 +4964,8 @@ def _aviso_nuvens_baixas(texto):
     return ("info",
             "☁️ **Nuvens baixas na Secção II** (informativo — **não altera** a decisão "
             "GO/MARGINAL/NO-GO; o GAMET não as considera significativas, porque não "
-            "estão em SIG CLD). Base abaixo de 500 ft acima do solo (bases AMSL: "
-            "acima do relevo mais alto da quadrícula):\n\n" + "\n".join(linhas)
+            "estão em SIG CLD). Base abaixo de 1000 ft acima do solo, ou, nas bases "
+            "AMSL, a menos de 500 ft do relevo mais alto da quadrícula:\n\n" + "\n".join(linhas)
             + ("\n\n⚠️ Uma linha deste campo tem **área não reconhecida** e foi lida "
                "como **toda a FIR** — confirma no texto onde se aplica." if por_ler else "")
             + f"\n\nTexto: `{conteudo.replace('`', '')}`")
@@ -5561,8 +5581,8 @@ if st.session_state.get("_active_gamet_text"):
 - ❄️ ICE – Gelo em voo: MOD (moderado) / SEV (severo)
 
 **Regras de decisão:**
-- VIS < 1500 m → NO-GO (MARGINAL se LCA) · VIS < 3000 m → MARGINAL
-- BASE < 300 ft AGL → NO-GO · BASE < 500 ft AGL → MARGINAL
+- VIS < 1500 m → NO-GO (MARGINAL se LCA) · VIS < 5000 m → MARGINAL
+- BASE < 500 ft AGL → NO-GO · BASE < 1000 ft AGL → MARGINAL
 - TS ISOL → MARGINAL · TS OCNL / GEN / ISOL/EMBD / EMBD / FRQ → NO-GO
 - TURB ou ICE SEV/HVY → NO-GO (MOD é só informativo)
 - MTW (onda de montanha) SEV → NO-GO · MOD → MARGINAL
@@ -5580,14 +5600,14 @@ if st.session_state.get("_active_gamet_text"):
 - 🔴 NO-GO – Não descolares em VFR. As condições estão abaixo dos mínimos legais ou há trovoadas significativas.
 
 **Visibilidade (VIS):**
-- Abaixo de 3000m começas a ter dificuldade em ver e evitar obstáculos e outro tráfego.
-- Abaixo de 1500m o voo VFR é ilegal na maioria das classes de espaço aéreo.
+- Abaixo de 5000m estás abaixo do mínimo VMC do SERA no espaço G (abaixo de 3000 ft AMSL / 1000 ft acima do terreno). A redução a 1500 m só existe se a autoridade a autorizar, e o AIP português não a publica.
+- Abaixo de 1500m nem com essa redução o voo VFR seria possível.
 - LCA significa que a má visibilidade é localizada — pode ser nevoeiro numa zona específica, não em toda a rota.
 
 **Base das nuvens (BASE):**
 - Indica a que altura acima do solo começam as nuvens significativas previstas no GAMET (nebulosidade fragmentada ou encoberta, ou nuvens convectivas).
-- Abaixo de 500ft AGL tens muito pouco espaço para voar por baixo das nuvens.
-- Abaixo de 300ft AGL o voo VFR é praticamente impossível em segurança.
+- Abaixo de 1000ft AGL tens muito pouco espaço para voar por baixo das nuvens.
+- Abaixo de 500ft AGL não consegues cumprir a altura mínima de 500 ft do AIP e ficar livre de nuvens ao mesmo tempo.
 
 **Trovoadas (TS):**
 - ISOL (isoladas) – Menos de 25% da área afetada. Visíveis e evitáveis, mas requerem desvio.

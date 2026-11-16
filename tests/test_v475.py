@@ -85,7 +85,7 @@ def _g(secn1):
 def eng474(eng):
     mod = types.ModuleType("motor_4_7_4")
     mod.__dict__["__file__"] = str(REF474)
-    exec(compile(conftest._extract_engine(REF474.read_text(encoding="utf-8")), str(REF474),
+    exec(compile(conftest._extract_engine_ref(REF474.read_text(encoding="utf-8")), str(REF474),
                  "exec"), mod.__dict__)
     return mod
 

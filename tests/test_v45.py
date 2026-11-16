@@ -395,7 +395,7 @@ GRAV = {"GO": 0, "MARGINAL": 1, "NO-GO": 2}
 def eng44(eng):
     mod = types.ModuleType("motor_4_4")
     mod.__dict__["__file__"] = str(REF44)
-    exec(compile(conftest._extract_engine(REF44.read_text(encoding="utf-8")), str(REF44),
+    exec(compile(conftest._extract_engine_ref(REF44.read_text(encoding="utf-8")), str(REF44),
                  "exec"), mod.__dict__)
     # 4.5.2: a faixa COT da 4.5.2 (verificada contra a 4.5.1 em test_v452.py)
     # 4.7.2: a base com dois topos (verificada em test_v472.py)

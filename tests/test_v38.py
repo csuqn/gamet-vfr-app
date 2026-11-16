@@ -65,8 +65,11 @@ def test_secn2_real_as_ac_contra_mef(eng):
 
 
 def test_secn2_real_decisao_inalterada(eng, analyse):
-    """A Secção II nunca entra na decisão: continua tudo GO."""
-    assert set(_decisoes(eng, analyse(G201500)["regions"]).values()) == {"GO"}
+    """A Secção II nunca entra na decisão: a decisão é a mesma sem ela.
+    (5.0: deixou de ser tudo GO por causa da base LCA 800 ft da Secção I.)"""
+    sem_secn2 = G201500.split("SECN II")[0] + "="
+    assert _decisoes(eng, analyse(G201500)["regions"]) == \
+        _decisoes(eng, analyse(sem_secn2)["regions"])
 
 
 def test_secn2_topo_em_intervalo_base_baixa_da_nota(eng):
@@ -99,8 +102,9 @@ def test_002_topo_em_intervalo_nogo_a_norte_de_n4100(eng, analyse):
     assert {d[n] for n in _sul(eng)} == {"GO"}
 
 
-def test_004_topo_em_intervalo_marginal_a_norte_de_n4100(eng, analyse):
-    d = _decisoes(eng, analyse(_sig("LCA BKN 004/010-015HFT"))["regions"])
+def test_006_topo_em_intervalo_marginal_a_norte_de_n4100(eng, analyse):
+    # (5.0) 600 ft: MARGINAL com os limiares novos (o 004 passou a NO-GO).
+    d = _decisoes(eng, analyse(_sig("LCA BKN 006/010-015HFT"))["regions"])
     assert {d[n] for n in _norte(eng)} == {"MARGINAL"}
     assert {d[n] for n in _sul(eng)} == {"GO"}
 

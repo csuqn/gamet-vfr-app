@@ -35,7 +35,7 @@ NOTA_CB = "CB: apenas sobre a costa e o mar (área já recortada)"
 def eng473(eng):
     mod = types.ModuleType("motor_4_7_3")
     mod.__dict__["__file__"] = str(REF473)
-    exec(compile(conftest._extract_engine(REF473.read_text(encoding="utf-8")), str(REF473),
+    exec(compile(conftest._extract_engine_ref(REF473.read_text(encoding="utf-8")), str(REF473),
                  "exec"), mod.__dict__)
     return mod
 
@@ -65,9 +65,10 @@ def test_gamet_real_061500_interior_norte_sem_nota_costeira_plena(eng):
     for icao in ("LPCS",):
         assert NOTA_BASE in pontos[icao]["notas"] and NOTA_CB in pontos[icao]["notas"]
         assert not any(n.startswith(PARCIAL) for n in pontos[icao]["notas"])
-    # Decisões iguais às da 4.7.3: MARGINAL a N de N3800, GO a sul
+    # Decisões: NO-GO a N de N3800 (5.0: base 400 ft < 500 ft; até à 4.9
+    # MARGINAL, igual à 4.7.3), GO a sul
     for nome, (la, lo) in eng.AERODROMES.items():
-        assert pontos[_icao(nome)]["decision"] == ("MARGINAL" if la > 38.0 else "GO"), nome
+        assert pontos[_icao(nome)]["decision"] == ("NO-GO" if la > 38.0 else "GO"), nome
 
 
 def test_gamet_real_061500_na_4_7_3_a_nota_era_plena(eng473):

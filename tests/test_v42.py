@@ -78,7 +78,7 @@ def eng41(eng):
     src = REF.read_text(encoding="utf-8")
     mod = types.ModuleType("motor_4_1")
     mod.__dict__["__file__"] = str(REF)
-    exec(compile(conftest._extract_engine(src), str(REF), "exec"), mod.__dict__)
+    exec(compile(conftest._extract_engine_ref(src), str(REF), "exec"), mod.__dict__)
     # 4.5.2: a faixa COT da 4.5.2 (verificada contra a 4.5.1 em test_v452.py)
     # 4.7.2: a base com dois topos (verificada em test_v472.py)
     return conftest.cld_base_472(conftest.cot_452(mod, eng), eng)
@@ -110,39 +110,40 @@ def test_real_10h_janela_activa_sem_segunda_linha(eng):
     for i, g in enumerate(r["regioes"]):
         assert LINHA not in eng.html_regiao(g, 50, (), eng.resto_par(r, regiao=i))
 
+    # (5.0) LCA BKN 003 (09/11Z) → 300 ft < 500 ft: principal NO-GO (até à 4.9 MARGINAL)
 
 def test_real_1230_resto_go_a_norte_principal_marginal(eng):
     r = eng.analisar_gamet(G280900, agora=_t(12, 30))
     # O veredicto principal continua a ser o pior caso de todo o período
     pior = next(d for d in ("NO-GO", "MARGINAL", "GO") if r["por_dec"].get(d))
-    assert pior == "MARGINAL"
+    assert pior == "NO-GO"
     resto = r["resto"]
     assert resto is not None and resto["janela"] == "12–15Z"
     assert resto["decisao"] == "GO"
     assert {b.window for b in resto["ignorados"]} == {"09–11Z"}
     assert {b.phenomenon for b in resto["ignorados"]} == {"VIS", "BASE_AGL"}
-    # Todos os pontos a N de N3730: principal MARGINAL, resto GO
+    # Todos os pontos a N de N3730: principal NO-GO, resto GO
     norte = [n for n, (la, lo) in eng.AERODROMES.items() if la > 37.55]
     assert len(norte) > 30
     for n in norte:
-        assert _dec_ponto(eng, r, n) == "MARGINAL", n
+        assert _dec_ponto(eng, r, n) == "NO-GO", n
         assert eng.resto_do_ponto(resto, *eng.AERODROMES[n]) == "GO", n
     # Veredicto: linha secundária, sem substituir o principal
     v = eng.html_veredicto(r["por_dec"], r["area"], eng.resto_par(r))
-    assert ">MARGINAL<" in v
-    assert "Resto do período (12–15Z): <b>GO</b> · pior do período: MARGINAL" in v
+    assert ">NO-GO<" in v
+    assert "Resto do período (12–15Z): <b>GO</b> · pior do período: NO-GO" in v
     assert v.index('class="gv-big"') < v.index("gv-resto")
-    # Cartões: só o MARGINAL leva a linha
+    # Cartões: só o NO-GO leva a linha
     for i, g in enumerate(r["regioes"]):
         h = eng.html_regiao(g, 50, (), eng.resto_par(r, regiao=i))
-        assert (LINHA in h) == (g["decision"] == "MARGINAL"), g["label"]
+        assert (LINHA in h) == (g["decision"] == "NO-GO"), g["label"]
         assert eng.html_chip(g["decision"]) in h
     # Aeródromo seleccionado
     lisboa = _nome(eng, "LPPT")
     h = eng.html_aerodromo(lisboa, eng.find_region_for_point(r["regioes"], *eng.AERODROMES[lisboa]),
                            eng.resto_par(r, ponto=eng.AERODROMES[lisboa]))
-    assert f"{lisboa}: MARGINAL" in h
-    assert "Resto do período (12–15Z): <b>GO</b> · pior do período: MARGINAL" in h
+    assert f"{lisboa}: NO-GO" in h
+    assert "Resto do período (12–15Z): <b>GO</b> · pior do período: NO-GO" in h
     faro = _nome(eng, "LPFR")
     h = eng.html_aerodromo(faro, eng.find_region_for_point(r["regioes"], *eng.AERODROMES[faro]),
                            eng.resto_par(r, ponto=eng.AERODROMES[faro]))
@@ -203,10 +204,11 @@ def test_margem_no_270900_lisboa_nunca_go_antes_das_12(eng):
 
 
 def test_bloco_sem_janela_continua_a_contar(eng):
-    r = eng.analisar_gamet(_g("SFC VIS:09/11 0800M FG SIG CLD: BKN 004/010HFT AGL"),
+    # (5.0) base 600 ft (era 004): < 1000 ft → MARGINAL com os limiares novos
+    r = eng.analisar_gamet(_g("SFC VIS:09/11 0800M FG SIG CLD: BKN 006/010HFT AGL"),
                            agora=_t(12, 30))
     assert {g["decision"] for g in r["regioes"]} == {"NO-GO"}
-    assert r["resto"]["decisao"] == "MARGINAL"          # a base 400 ft sem janela conta
+    assert r["resto"]["decisao"] == "MARGINAL"          # a base 600 ft sem janela conta
     assert eng.resto_par(r) == ("12–15Z", "MARGINAL")
 
 
@@ -267,15 +269,17 @@ def test_sigmet_do_ipma_conta_sempre(eng):
     porto, lisboa = _nome(eng, "LPPR"), _nome(eng, "LPPT")
     assert eng.resto_do_ponto(r["resto"], *eng.AERODROMES[porto]) == "NO-GO"
     assert eng.resto_do_ponto(r["resto"], *eng.AERODROMES[lisboa]) == "GO"
-    assert _dec_ponto(eng, r, lisboa) == "MARGINAL"
+    assert _dec_ponto(eng, r, lisboa) == "NO-GO"   # 5.0: base 300 ft (era MARGINAL)
 
 
 def test_airmet_conta_sempre(eng):
-    air = _a("BKN CLD 004/010HFT AGL OBS N OF N4000 STNR NC")
+    air = _a("BKN CLD 006/010HFT AGL OBS N OF N4000 STNR NC")   # 5.0: era 004
     r = eng.analisar_gamet(G280900, "ipma", boletins=[air], boletins_at=_t(12, 30),
                            agora=_t(12, 30))
     porto, lisboa = _nome(eng, "LPPR"), _nome(eng, "LPPT")
-    assert _dec_ponto(eng, r, porto) == "MARGINAL"
+    # (5.0) principal NO-GO pela base 300 ft das 09–11Z (era MARGINAL);
+    # o resto do período continua a contar o AIRMET → MARGINAL
+    assert _dec_ponto(eng, r, porto) == "NO-GO"
     assert eng.resto_do_ponto(r["resto"], *eng.AERODROMES[porto]) == "MARGINAL"
     assert eng.resto_do_ponto(r["resto"], *eng.AERODROMES[lisboa]) == "GO"
     assert r["resto"]["decisao"] == "MARGINAL"

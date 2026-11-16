@@ -182,8 +182,11 @@ def test_mt_obsc_area_ilegivel_toda_a_fir_com_aviso(eng, analyse, corpo):
 
 
 def test_gamet_real_inalterado(eng, analyse):
-    assert _decisoes(eng, analyse(G201500)["regions"]) == \
-        {n: "GO" for n in eng.AERODROMES}
+    # (5.0) A base LCA 800 ft a norte de N4100 dá MARGINAL a norte (< 1000 ft);
+    # até à 4.9 era tudo GO.
+    d = _decisoes(eng, analyse(G201500)["regions"])
+    assert {d[n] for n in eng.AERODROMES if eng.AERODROMES[n][0] > 41.02} == {"MARGINAL"}
+    assert {d[n] for n in eng.AERODROMES if eng.AERODROMES[n][0] < 40.98} == {"GO"}
 
 
 # ---------------------------------------------------------------------
