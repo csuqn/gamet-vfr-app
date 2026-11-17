@@ -958,6 +958,13 @@
    "inicio": "2026-11-17T09:00Z",
    "fim": "2026-11-17T15:00Z",
    "tipo": "GAMET"
+  },
+  {
+   "ficheiro": "gamets/2026/11/20261117T1449Z_171500-172100_d8bde1eaa4.txt",
+   "recolhido": "2026-11-17T14:49Z",
+   "inicio": "2026-11-17T15:00Z",
+   "fim": "2026-11-17T21:00Z",
+   "tipo": "GAMET"
   }
  ],
  "sigmets": [
