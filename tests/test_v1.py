@@ -274,7 +274,7 @@ def test_app_completa_sem_excepcoes(app_path):
     [b for b in at.button if "Analisar" in b.label][0].click()
     at.run()
     assert not at.exception, [e.value for e in at.exception]
-    assert any("Briefing" in s.value for s in at.subheader)
+    assert any("por fenómeno e zona" in s.value for s in at.subheader)   # 5.1
 
 
 def test_vertice_sul_coincide_com_enr21(eng):

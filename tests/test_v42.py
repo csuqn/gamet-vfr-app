@@ -431,8 +431,10 @@ def test_app_streamlit_mostra_a_linha(app_path):
     assert re.search(r'class="gv-big"[^>]*>MARGINAL<', ver[0])
     assert conftest.veredicto(at).startswith("MARGINAL")
     assert any('class="gv-ad"' in m and "Lisboa (LPPT): MARGINAL" in m and alvo in m for m in md)
-    cartoes = [m for m in md if 'class="gv-regioes"' in m]
-    assert cartoes and alvo in cartoes[0]
+    # 5.1: os cartões das regiões deram lugar ao painel da zona escolhida
+    # (a do aeródromo preferido)
+    zona = [m for m in md if 'class="gv-zona"' in m]
+    assert zona and alvo in zona[0]
 
 
 def test_nicegui_mostra_a_linha():
