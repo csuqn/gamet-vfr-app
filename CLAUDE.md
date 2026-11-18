@@ -1185,7 +1185,9 @@ Legenda; PDF. As zonas são numeradas de **norte para sul** pelo centróide
 (`zonas_ordem`; empate: a mais a oeste) e só têm número. Quadro: uma linha
 por fenómeno presente em alguma zona; a cor de cada célula é o nível que esse
 motivo causa, lido do texto de `decision()` por `classificar_motivo` (com o
-limiar: `BASE 200ft < 500ft` → NO-GO); TURB/ICE MOD e o vento a 1000 ft das
+limiar: `BASE 200ft < 500ft` → NO-GO; a base mostra sempre "AGL" — "200 ft AGL" —, porque a
+que decide é AGL e as AMSL já vêm convertidas contra o MEF: 5.1.1, pedido do
+Duarte a 18-nov-2026); TURB/ICE MOD e o vento a 1000 ft das
 estações dentro da zona entram como informativos; "Sem trovoada nem CB" quando
 não há nenhum; `*` = só em parte da zona. `test_v51` verifica em todo o
 arquivo (manual e `arquivo_hist`) e nos `GAMETS_VARIADOS` que o pior nível dos

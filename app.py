@@ -29,7 +29,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "5.1"
+APP_VERSION = "5.1.1"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -105,6 +105,11 @@ h3 { font-size: 0.8rem !important; letter-spacing: 0.1em; text-transform: upperc
 .gv-qnada { color:#5D7183; }
 .gv-qsel { background:#1E2C3A; }
 .gv-qnota { font-size:12px; line-height:1.5; color:#8FA3B5; margin: 6px 0 12px; }
+.gv-legmapa { display:inline-flex; flex-wrap:wrap; gap:6px 14px; margin:8px 0 10px;
+  padding:7px 12px; border-radius:10px; background:#0E151C; border:1px solid #22303C;
+  font-family:'IBM Plex Mono',monospace; font-size:12px; color:#E6EDF3; }
+.gv-legmapa span { display:flex; align-items:center; gap:6px; }
+.gv-legmapa i { display:inline-block; width:12px; height:12px; border-radius:3px; }
 .gv-quadro-vazio { border:1px solid #22303C; border-radius:14px; padding:14px; color:#C9D3DC; margin-bottom:12px; }
 div[data-testid="stDownloadButton"] button, div[data-testid="stButton"] button { min-height: 44px; }
 </style>
@@ -5423,6 +5428,8 @@ def html_aerodromo(nome, region, resto=None):
 #     escreveu (limiar incluído) — `test_v51` verifica em todo o arquivo que o
 #     pior nível de cada região é exactamente a decisão da região.
 #   · Avisos: título curto + etiqueta; o texto completo fica a um toque.
+#   · A base das nuvens diz sempre "AGL" (5.1.1, pedido do Duarte a 18-nov-2026):
+#     a base que decide é AGL — as AMSL já vêm convertidas contra o MEF.
 
 _NIVEL_GRAV = {"INFO": 0, "MARGINAL": 1, "NO-GO": 2}
 
@@ -5482,7 +5489,7 @@ def classificar_motivo(motivo):
     m = re.match(r"BASE (\d+)ft < (\d+)ft", t)
     if m:
         lim = int(m.group(2))
-        c.update(linha="BASE", valor=f"{m.group(1)} ft", limite=f"{lim} ft",
+        c.update(linha="BASE", valor=f"{m.group(1)} ft AGL", limite=f"{lim} ft",
                  nivel="NO-GO" if lim <= 500 else "MARGINAL")
         return c
     if t.startswith("VA"):
@@ -5728,6 +5735,65 @@ def html_meu_aerodromo(nome, n_zona, region, resto=None):
         f'{html_resto(resto, region["decision"])}</div>{html_chip(region["decision"])}</div></div>')
 
 
+def mapa_zonas_html(regions, ordem, sel, aerodromo=None):
+    """(5.1/5.1.1) Página HTML do mapa Folium: zonas coloridas pela decisão e
+    numeradas (a escolhida com contorno branco), os 52 pontos e o aeródromo
+    preferido realçado. Devolve a página completa (get_root().render()), com o
+    mapa a 100% da altura do iframe — o _repr_html_ dos notebooks dá altura =
+    60% da largura e no telemóvel sobrava um grande espaço vazio por baixo do
+    mapa (captura do Duarte, 18-nov-2026)."""
+    import folium
+    fmap = folium.Map(location=[39.6, -8.0], zoom_start=6, tiles="OpenStreetMap",
+                      control_scale=True)
+    for z, i in enumerate(ordem, 1):
+        region = regions[i]
+        poly = region["polygon"]
+        color = _DEC_BARRA.get(region["decision"], "#888")
+        geoms = [g for g in (poly.geoms if isinstance(poly, MultiPolygon) else [poly])
+                 if not g.is_empty and hasattr(g, "exterior") and g.exterior is not None]
+        for g in geoms:
+            folium.Polygon(
+                locations=[[la, lo] for lo, la in zip(*g.exterior.xy)],
+                color="#FFFFFF" if z == sel else color,
+                weight=4 if z == sel else 1.5,
+                fill=True, fill_color=color,
+                fill_opacity=0.5 if z == sel else 0.3,
+                tooltip=f"Zona {z}: {region['decision']}",
+            ).add_to(fmap)
+        if geoms:
+            p = max(geoms, key=lambda g: g.area).representative_point()
+            folium.Marker(
+                location=[p.y, p.x],
+                icon=folium.DivIcon(
+                    icon_size=(28, 28), icon_anchor=(14, 14),
+                    html=('<div style="width:26px;height:26px;border-radius:13px;'
+                          'background:#0E151C;border:2px solid '
+                          f'{"#FFFFFF" if z == sel else "#C9D3DC"};color:#E6EDF3;'
+                          'font:600 13px IBM Plex Mono,monospace;display:flex;'
+                          f'align-items:center;justify-content:center">{z}</div>')),
+                tooltip=f"Zona {z}: {region['decision']}",
+            ).add_to(fmap)
+    for name, (lat, lon) in CITIES.items():
+        folium.CircleMarker(location=[lat, lon], radius=3, color="#0E151C",
+                            fill=True, fill_color="#0E151C", fill_opacity=0.9,
+                            tooltip=name).add_to(fmap)
+    if aerodromo in AERODROMES:
+        folium.CircleMarker(location=list(AERODROMES[aerodromo]), radius=8, color="#7CC4FF",
+                            weight=3, fill=True, fill_color="#7CC4FF", fill_opacity=0.35,
+                            tooltip=aerodromo).add_to(fmap)
+    x0, y0, x1, y1 = FIR_POLYGON.bounds
+    fmap.fit_bounds([[y0, x0], [y1, x1]])
+    return fmap.get_root().render()
+
+
+def html_legenda_mapa():
+    """(5.1.1, pedido do Duarte a 18-nov-2026) Legenda por baixo do mapa:
+    só as três cores da decisão, numa caixa pequena (como na maqueta)."""
+    cor = "".join(f'<span><i style="background:{_DEC_BARRA[d]}"></i>{d}</span>'
+                  for d in ("NO-GO", "MARGINAL", "GO"))
+    return f'<div class="gv-legmapa" role="img" aria-label="Legenda: NO-GO, MARGINAL, GO">{cor}</div>'
+
+
 _AVISO_EMOJI_RE = re.compile(r"^(?:[^\w«(\"']|[\u2139\ufe0f])+", re.U)   # ℹ️ é "letra"
 
 
@@ -5880,51 +5946,14 @@ if st.session_state.get("_active_gamet_text"):
 
     # ---- Mapa em destaque ----
     if _FOLIUM_OK:
-        fmap = folium.Map(location=[39.6, -8.0], zoom_start=6, tiles="OpenStreetMap",
-                          control_scale=True)
-        for _z, _i in enumerate(_ordem, 1):
-            region = dynamic_regions[_i]
-            poly = region["polygon"]
-            color = _DEC_BARRA.get(region["decision"], "#888")
-            geoms = [g for g in (poly.geoms if isinstance(poly, MultiPolygon) else [poly])
-                     if not g.is_empty and hasattr(g, "exterior") and g.exterior is not None]
-            for g in geoms:
-                folium.Polygon(
-                    locations=[[la, lo] for lo, la in zip(*g.exterior.xy)],
-                    color="#FFFFFF" if _z == _sel else color,
-                    weight=4 if _z == _sel else 1.5,
-                    fill=True, fill_color=color,
-                    fill_opacity=0.5 if _z == _sel else 0.3,
-                    tooltip=f"Zona {_z}: {region['decision']}",
-                ).add_to(fmap)
-            if geoms:
-                _p = max(geoms, key=lambda g: g.area).representative_point()
-                folium.Marker(
-                    location=[_p.y, _p.x],
-                    icon=folium.DivIcon(
-                        icon_size=(28, 28), icon_anchor=(14, 14),
-                        html=('<div style="width:26px;height:26px;border-radius:13px;'
-                              'background:#0E151C;border:2px solid '
-                              f'{"#FFFFFF" if _z == _sel else "#C9D3DC"};color:#E6EDF3;'
-                              'font:600 13px IBM Plex Mono,monospace;display:flex;'
-                              f'align-items:center;justify-content:center">{_z}</div>')),
-                    tooltip=f"Zona {_z}: {region['decision']}",
-                ).add_to(fmap)
-        for name, (lat, lon) in CITIES.items():
-            folium.CircleMarker(location=[lat, lon], radius=3, color="#0E151C",
-                                fill=True, fill_color="#0E151C", fill_opacity=0.9,
-                                tooltip=name).add_to(fmap)
-        if _meu_ponto:
-            folium.CircleMarker(location=list(_meu_ponto), radius=8, color="#7CC4FF",
-                                weight=3, fill=True, fill_color="#7CC4FF", fill_opacity=0.35,
-                                tooltip=selected_airport).add_to(fmap)
-        _x0, _y0, _x1, _y1 = FIR_POLYGON.bounds
-        fmap.fit_bounds([[_y0, _x0], [_y1, _x1]])
+        _mapa_html = mapa_zonas_html(dynamic_regions, _ordem, _sel, selected_airport
+                                     if _meu_ponto else None)
         # st.iframe substitui st.components.v1.html (descontinuado)
         if hasattr(st, "iframe"):
-            st.iframe(fmap._repr_html_(), height=500)
+            st.iframe(_mapa_html, height=460)
         else:
-            st.components.v1.html(fmap._repr_html_(), height=500)
+            st.components.v1.html(_mapa_html, height=460)
+        st.markdown(html_legenda_mapa(), unsafe_allow_html=True)
     else:
         st.warning("Folium não instalado — mapa estático disponível no PDF.")
 
