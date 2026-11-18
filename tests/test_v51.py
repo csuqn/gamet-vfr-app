@@ -328,3 +328,115 @@ def test_mapa_ocupa_o_iframe(eng):
     for z in range(1, len(ordem) + 1):
         assert f"Zona {z}: NO-GO" in h
     assert "Lisboa (LPPT)" in h and "#7CC4FF" in h
+
+
+def _linhas_brancas(h):
+    """(lista de anéis [[lat, lon], ...], posição no HTML) dos PolyLine brancos."""
+    import json
+    out = []
+    for m in re.finditer(r"L\.polyline\(\s*(\[\[.*?\]\]),\s*(\{.*?\})", h, re.S):
+        if '"color": "#FFFFFF"' in m.group(2):
+            out.append((json.loads(m.group(1)), m.start()))
+    return out
+
+
+def test_contorno_da_zona_por_cima_de_todas(eng):
+    """(5.1.2, captura do Duarte a 18-nov-2026) O contorno branco da zona
+    escolhida faz o perímetro inteiro: é desenhado depois de todas as zonas
+    (as seguintes tapavam-no nas fronteiras comuns) e segue todos os anéis."""
+    pytest.importorskip("folium")
+    r = eng.analisar_gamet(G180900, "manual")
+    regs = r["regioes"]
+    ordem = eng.zonas_ordem(regs)
+    assert len(ordem) >= 2
+    for sel in range(1, len(ordem) + 1):
+        h = eng.mapa_zonas_html(regs, ordem, sel)
+        ultimo_poligono = max(m.start() for m in re.finditer(r"L\.polygon\(", h))
+        brancas = _linhas_brancas(h)
+        assert brancas and all(p > ultimo_poligono for _, p in brancas)
+        poly = regs[ordem[sel - 1]]["polygon"]
+        geoms = list(getattr(poly, "geoms", [poly]))
+        aneis = [a for g in geoms for a in [g.exterior, *g.interiors]]
+        assert len(brancas) == len(aneis)
+        for (coords, _), anel in zip(brancas, aneis):
+            assert coords == [[la, lo] for lo, la in anel.coords]
+        # Nenhum polígono de zona é desenhado com contorno branco.
+        assert not re.search(r"L\.polygon\([^;]*?\"color\": \"#FFFFFF\"", h, re.S)
+
+
+def test_zona_com_buraco_nao_pinta_o_buraco(eng):
+    """Uma zona com um buraco (outra zona dentro dela) é desenhada com o anel
+    interior, e o contorno branco também o segue."""
+    pytest.importorskip("folium")
+    from shapely.geometry import Polygon
+    fora = Polygon([(-9, 38), (-7, 38), (-7, 40), (-9, 40)],
+                   [[(-8.5, 38.5), (-7.5, 38.5), (-7.5, 39.5), (-8.5, 39.5)]])
+    dentro = Polygon([(-8.5, 38.5), (-7.5, 38.5), (-7.5, 39.5), (-8.5, 39.5)])
+    regs = [{"polygon": fora, "decision": "GO"}, {"polygon": dentro, "decision": "NO-GO"}]
+    h = eng.mapa_zonas_html(regs, [0, 1], 1)
+    assert len(_linhas_brancas(h)) == 2
+    assert eng._aneis_folium(fora)[1] == [[la, lo] for lo, la in fora.interiors[0].coords]
+    assert eng._aneis_folium(dentro) == [[la, lo] for lo, la in dentro.exterior.coords]
+
+
+# ---------------------------------------------------------------- 5.1.2
+
+def _motivos_base(eng, r):
+    out = []
+    for g in r["regioes"]:
+        ib = eng.info_base(g, r["blocos"])
+        for m in g["reasons"]:
+            c = eng._com_info_base(eng.classificar_motivo(m), ib)
+            if c["linha"] == "BASE":
+                out.append((g["base"], c["valor"], eng.motivo_legivel(c)))
+    return out
+
+
+def test_base_local_gamet_real_180900(eng):
+    """`LCA BKN 002-004/010HFT AGL` (GAMET real 180900/181500): a base é local."""
+    r = eng.analisar_gamet(G180900, "manual")
+    mb = _motivos_base(eng, r)
+    assert mb and all(v == "200 ft AGL (local)" for _, v, _ in mb)
+    assert all(t == "Base das nuvens 200 ft AGL (local) — abaixo de 500 ft → NO-GO"
+               for _, _, t in mb)
+    assert eng.porque_veredicto(r["regioes"], r["blocos"]).startswith(
+        "Base das nuvens 200 ft AGL (local) — abaixo de 500 ft")
+
+
+def test_base_amsl_diz_a_origem(eng):
+    r = eng.analisar_gamet(build_gamet("SECN I SIG CLD: BKN 060/090HFT AMSL"), "manual")
+    mb = _motivos_base(eng, r)
+    assert mb
+    for base, v, t in mb:
+        assert v == f"{base} ft AGL (de AMSL)"
+        assert f"{base} ft AGL (6000 ft AMSL no GAMET, junto ao relevo)" in t
+
+
+def test_base_sem_referencia_diz_a_origem(eng):
+    r = eng.analisar_gamet(build_gamet("SECN I SIG CLD: N OF N4000 BKN 004/010HFT"), "manual")
+    (base, v, t), = _motivos_base(eng, r)
+    assert (base, v) == (400, "400 ft AGL (sem ref.)")
+    assert "(sem referência no GAMET, lida como AGL)" in t
+
+
+def test_base_local_so_se_todas_locais(eng):
+    """Uma base geral com o mesmo valor que uma LCA não fica "local"; a mais
+    baixa é a que decide e é a que se descreve."""
+    r = eng.analisar_gamet(build_gamet(
+        "SECN I SIG CLD: LCA BKN 004/010HFT AGL N OF N4000 BKN 003/010HFT AGL"), "manual")
+    for base, v, _ in _motivos_base(eng, r):
+        assert "local" not in v or base == 400
+    r = eng.analisar_gamet(build_gamet(
+        "SECN I SIG CLD: LCA BKN 004/010HFT AGL N OF N4000 BKN 004/010HFT AGL"), "manual")
+    norte = [v for base, v, _ in _motivos_base(eng, r)]
+    assert "400 ft AGL" in norte          # a N de N4000 há uma base geral de 400
+
+
+def test_origem_da_base_nao_muda_decisoes(eng):
+    """Os blocos devolvidos são exactamente os que entraram nas regiões:
+    recalcular as regiões com eles dá as mesmas decisões."""
+    for corpo in GAMETS_VARIADOS[:15]:
+        r = eng.analisar_gamet(build_gamet(corpo), "manual")
+        regs = eng.compute_dynamic_regions(r["blocos"])
+        assert sorted((g["decision"], round(g["polygon"].area, 6)) for g in regs) == \
+            sorted((g["decision"], round(g["polygon"].area, 6)) for g in r["regioes"])

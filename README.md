@@ -149,7 +149,9 @@ abre o briefing nessa zona.
 vermelho e um número em cada uma — a zona 1 é a mais a norte. Os botões ZONA
 1, 2, 3… por baixo escolhem a zona (a escolhida fica com contorno branco). O
 painel da zona diz a decisão, a percentagem da FIR, os motivos por extenso
-(ex.: "Base das nuvens 200 ft AGL — abaixo de 500 ft → NO-GO"), o alcance
+(ex.: "Base das nuvens 200 ft AGL (local) — abaixo de 500 ft → NO-GO"; a
+base diz também quando vem de um valor AMSL convertido contra o relevo, ou
+quando o GAMET não indicava AGL/AMSL), o alcance
 restrito (ex.: "só sobre o mar", "apenas 11–15Z — já terminou") e os
 aeródromos que lá caem.
 
@@ -290,7 +292,7 @@ Algarve não afecta Lisboa.
 
 ## 10. Qualidade e testes
 
-- **2424 testes automáticos** cobrem a leitura do texto, a geometria, as
+- **2433 testes automáticos** cobrem a leitura do texto, a geometria, as
   decisões, os dados aeronáuticos e a app completa. Cada erro alguma vez
   encontrado tem um teste que impede que volte a aparecer.
 - **Verificação cruzada:** em centenas de GAMETs gerados, a decisão de cada
@@ -310,7 +312,7 @@ Algarve não afecta Lisboa.
 pip install -r requirements.txt -r requirements-dev.txt
 streamlit run app.py               # a app principal (Streamlit)
 cd nicegui_app && python main.py   # a versão de reserva (NiceGUI), http://localhost:8080
-python3 -m pytest                  # os testes (2424)
+python3 -m pytest                  # os testes (2433)
 ```
 
 | Ficheiro / pasta | Conteúdo |

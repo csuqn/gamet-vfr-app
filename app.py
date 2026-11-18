@@ -29,7 +29,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "5.1.1"
+APP_VERSION = "5.1.2"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -1070,6 +1070,9 @@ class MetBlock:
     # próprio: o bloco (CB ou a base do grupo) passou para toda a FIR e todo o
     # período. Diagnóstico e testes; fora do repr e da igualdade.
     cb_solto: bool = field(default=False, repr=False, compare=False)
+    # (5.1.2) Base de nuvem sem AGL/AMSL no texto (lida como AGL, regra da
+    # 3.3). Só para o briefing dizer de onde vem a base; fora da igualdade.
+    sem_ref: bool = field(default=False, repr=False, compare=False)
 
 # -------------------------------------------------
 # NORMALIZE
@@ -2747,7 +2750,9 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
                 # referência é quase certamente uma gralha. Só "AMSL"
                 # explícito é convertido contra o relevo.
                 fen = "BASE_AMSL" if ref == "AMSL" else "BASE_AGL"
-                blocks.append(_bloco_cld(fen, base_ft, m.start()))
+                _blk = _bloco_cld(fen, base_ft, m.start())
+                _blk.sem_ref = ref is None
+                blocks.append(_blk)
 
             # Cumulonimbos na linha de nuvens (2.0). Até à 1.6 "TCU/CB" em
             # SIG CLD era lido só como tipo de nuvem: se o IPMA não pusesse
@@ -4635,7 +4640,7 @@ def decision(events):
 # PDF EXPORT — v14
 # -------------------------------------------------
 
-def _pdf_briefing_page(pdf, regions, gamet_text, validity_label, wind=None):
+def _pdf_briefing_page(pdf, regions, gamet_text, validity_label, wind=None, blocos=None):
     """Página 1 — veredicto, mapa com as zonas numeradas e quadro por fenómeno."""
     ordem = zonas_ordem(regions)
     fig = plt.figure(figsize=(8.27, 11.69))  # A4
@@ -4657,7 +4662,7 @@ def _pdf_briefing_page(pdf, regions, gamet_text, validity_label, wind=None):
     resumo = "   ".join(f"{d} {100 * por_dec[d] / area:.0f}%"
                         for d in ("NO-GO", "MARGINAL", "GO") if por_dec.get(d))
     fig.text(0.94, 0.925, resumo, va="top", ha="right", fontsize=8.5, color="#555")
-    porque = porque_veredicto(regions)
+    porque = porque_veredicto(regions, blocos)
     if porque:
         import textwrap
         fig.text(0.06, 0.900, "\n".join(textwrap.wrap(porque, 100)[:2]), va="top",
@@ -4702,7 +4707,7 @@ def _pdf_briefing_page(pdf, regions, gamet_text, validity_label, wind=None):
     axq.axis("off")
     axq.text(0.0, 1.0, "PORQUÊ · POR FENÓMENO E ZONA", va="top", fontsize=9,
              fontweight="bold", color="#555", transform=axq.transAxes)
-    linhas, ordem = quadro_zonas(regions, ordem, wind)
+    linhas, ordem = quadro_zonas(regions, ordem, wind, blocos)
     if not linhas:
         axq.text(0.0, 0.92, "Sem fenómenos significativos neste GAMET.", va="top",
                  fontsize=9, transform=axq.transAxes)
@@ -4763,7 +4768,7 @@ _PDF_COR = {"GO": "#2ecc71", "MARGINAL": "#e67e22", "NO-GO": "#e74c3c"}
 _PDF_TXT = {"NO-GO": "#c0392b", "MARGINAL": "#b9770e", "INFO": "#2471a3"}
 
 
-def _pdf_zonas_page(pdf, regions, gamet_text):
+def _pdf_zonas_page(pdf, regions, gamet_text, blocos=None):
     """Página 2 (e seguintes, se não couber) — cada zona por extenso e o texto
     original do GAMET."""
     import textwrap
@@ -4796,7 +4801,8 @@ def _pdf_zonas_page(pdf, regions, gamet_text):
         pct = 100 * reg["polygon"].area / FIR_POLYGON.area
         linha(f"Zona {z} — {reg['decision']}   ({pct:.0f}% da FIR)", dy=0.024,
               fontsize=11, fontweight="bold", color=_PDF_COR.get(reg["decision"], "#333"))
-        motivos = [classificar_motivo(m) for m in reg.get("reasons") or []]
+        ib = info_base(reg, blocos)
+        motivos = [_com_info_base(classificar_motivo(m), ib) for m in reg.get("reasons") or []]
         if not motivos:
             linha("• Sem fenómenos significativos.", x=0.07, fontsize=8)
         for c in motivos:
@@ -4848,13 +4854,14 @@ def _pdf_secn2_page(pdf, fzlvl_min, qnh_min):
     plt.close(fig)
 
 
-def generate_pdf(regions, gamet_text, fzlvl_min, qnh_min, validity_label, wind=None) -> bytes:
+def generate_pdf(regions, gamet_text, fzlvl_min, qnh_min, validity_label, wind=None,
+                 blocos=None) -> bytes:
     """Gera um PDF completo (veredicto + mapa + quadro; zonas e texto; secção
     II) e devolve os bytes. `wind` (5.1, opcional): vento a 1000 ft no quadro."""
     buf = io.BytesIO()
     with PdfPages(buf) as pdf:
-        _pdf_briefing_page(pdf, regions, gamet_text, validity_label, wind)
-        _pdf_zonas_page(pdf, regions, gamet_text)
+        _pdf_briefing_page(pdf, regions, gamet_text, validity_label, wind, blocos)
+        _pdf_zonas_page(pdf, regions, gamet_text, blocos)
         if fzlvl_min or qnh_min:
             _pdf_secn2_page(pdf, fzlvl_min, qnh_min)
         # Metadados
@@ -5269,6 +5276,9 @@ def analisar_gamet(texto, fonte="manual", boletins=None, boletins_at=None,
     if resto:
         resto["por_regiao"] = [resto_da_regiao(resto, g) for g in regioes]
     r["resto"] = resto
+    # (5.1.2) Os blocos que entraram nas regiões — só para o briefing dizer de
+    # onde vem a base (LCA, AMSL convertida, sem referência); não decidem nada.
+    r["blocos"] = blocks + sblocos + ablocos
     return r
 
 
@@ -5537,6 +5547,68 @@ def classificar_motivo(motivo):
     return c
 
 
+def info_base(region, blocos):
+    """(5.1.2, pedido do Duarte a 18-nov-2026) De onde vem a base de nuvem que
+    a região mostra: {"lca": bool, "amsl": ft AMSL ou None, "sem_ref": bool},
+    ou {} se não se sabe. Procura, entre os blocos de base que tocam a região,
+    os que dão exactamente a base dela (AGL tal como vem; AMSL convertida pelo
+    MEF de cada quadrícula da sobreposição, como em compute_dynamic_regions).
+    Só diz "local" se TODOS esses blocos forem LCA; só diz AMSL ou "sem
+    referência" se nenhum bloco AGL explícito der a mesma base. Não muda
+    decisões — é só texto."""
+    base = region.get("base")
+    if base is None or not blocos:
+        return {}
+    poly = region["polygon"]
+    lca, achou, amsl, agl_expl, agl_sem = True, False, [], False, False
+    for b in blocos:
+        if b.phenomenon not in ("BASE_AGL", "BASE_AMSL"):
+            continue
+        inter = b.polygon.intersection(poly)
+        if inter.is_empty or inter.area <= 1e-9:
+            continue
+        if b.phenomenon == "BASE_AGL":
+            if b.value != base:
+                continue
+            if getattr(b, "sem_ref", False):
+                agl_sem = True
+            else:
+                agl_expl = True
+        else:
+            vals = {max(0, round(b.value - _TERRAIN_MAX_FT[k]))
+                    for k in _tiles_touching(inter) if k in _TERRAIN_MAX_FT}
+            if base not in vals:
+                continue
+            amsl.append(b.value)
+        achou = True
+        lca = lca and b.qualifier == "LCA"
+    if not achou:
+        return {}
+    return {"lca": lca, "amsl": (min(amsl) if amsl and not agl_expl and not agl_sem else None),
+            "sem_ref": agl_sem and not agl_expl}
+
+
+def _com_info_base(c, info):
+    """(5.1.2) Junta a origem da base ao motivo classificado: valor curto para
+    a célula do quadro e valor longo para o texto por extenso."""
+    if c["linha"] != "BASE" or not info:
+        return c
+    c = dict(c)
+    curto, longo = [], []
+    if info.get("lca"):
+        curto.append("local"); longo.append("local")
+    if info.get("amsl") is not None:
+        curto.append("de AMSL")
+        longo.append(f"{info['amsl']} ft AMSL no GAMET, junto ao relevo")
+    if info.get("sem_ref"):
+        curto.append("sem ref.")
+        longo.append("sem referência no GAMET, lida como AGL")
+    if curto:
+        c["longo"] = f"{c['valor']} ({'; '.join(longo)})"
+        c["valor"] = f"{c['valor']} ({', '.join(curto)})"
+    return c
+
+
 def motivo_legivel(c, com_nivel=True):
     """(5.1) Motivo classificado escrito por extenso, ex.: "Base das nuvens
     200 ft — abaixo de 500 ft → NO-GO". Motivo desconhecido: o texto do motor."""
@@ -5550,7 +5622,7 @@ def motivo_legivel(c, com_nivel=True):
         elif c["linha"] == "AIRMET":
             txt = f"AIRMET {valor} — a app não leu o fenómeno"
         else:
-            txt = f"{rot} {valor}"
+            txt = f"{rot} {c.get('longo', valor)}"
         if c["limite"]:
             txt += (f" — a partir de {c['limite']}" if c["linha"] == "WSPD"
                     else f" — abaixo de {c['limite']}")
@@ -5569,7 +5641,7 @@ def _celula_mais_grave(a, b):
     return a if not a["parcial"] else b       # pleno antes de parcial
 
 
-def quadro_zonas(regions, ordem=None, wind=None):
+def quadro_zonas(regions, ordem=None, wind=None, blocos=None):
     """(5.1) Quadro por fenómeno. Devolve (linhas, colunas): `colunas` é a
     lista de índices de região pela ordem das zonas; `linhas` é uma lista de
     (rótulo, [célula ou None por zona]) só com os fenómenos presentes em alguma
@@ -5581,8 +5653,9 @@ def quadro_zonas(regions, ordem=None, wind=None):
     for i in ordem:
         reg = regions[i]
         cel = {}
+        ib = info_base(reg, blocos)
         for m in reg.get("reasons") or []:
-            c = classificar_motivo(m)
+            c = _com_info_base(classificar_motivo(m), ib)
             if c["nivel"] is None:          # desconhecido: conta como a região
                 c["nivel"] = reg["decision"] if reg["decision"] in _NIVEL_GRAV else "INFO"
             ant = cel.get(c["linha"])
@@ -5611,7 +5684,7 @@ def quadro_zonas(regions, ordem=None, wind=None):
     return linhas, ordem
 
 
-def porque_veredicto(regions):
+def porque_veredicto(regions, blocos=None):
     """(5.1) Uma frase com o porquê do veredicto: os motivos que causam a pior
     decisão e que valem em TODAS as regiões com essa decisão; se não houver
     nenhum comum, os da maior dessas regiões. "" se tudo GO."""
@@ -5623,8 +5696,9 @@ def porque_veredicto(regions):
 
     def causas(g):
         out = []
+        ib = info_base(g, blocos)
         for m in g.get("reasons") or []:
-            c = classificar_motivo(m)
+            c = _com_info_base(classificar_motivo(m), ib)
             if c["nivel"] == pior and not c["parcial"]:
                 out.append(c)
         return out
@@ -5645,10 +5719,10 @@ _QUADRO_COR = {"NO-GO": ("#FF8A80", 600), "MARGINAL": ("#F5CF6B", 600),
                "INFO": ("#9CD2FF", 400)}
 
 
-def html_quadro(regions, ordem=None, sel=None, wind=None):
+def html_quadro(regions, ordem=None, sel=None, wind=None, blocos=None):
     """(5.1) Quadro por fenómeno em HTML. `sel` = número da zona escolhida
     (1…n), realçada. Com scroll horizontal se houver muitas zonas."""
-    linhas, ordem = quadro_zonas(regions, ordem, wind)
+    linhas, ordem = quadro_zonas(regions, ordem, wind, blocos)
     if not linhas:
         return ('<div class="gv-quadro-vazio">Sem fenómenos significativos neste '
                 'GAMET.</div>')
@@ -5699,10 +5773,11 @@ def _alcance_legivel(nota):
     return re.sub(r"\s*\(área já recortada\)", "", str(nota))
 
 
-def html_zona(n, region, pct, regions, notas=(), resto=None):
+def html_zona(n, region, pct, regions, notas=(), resto=None, blocos=None):
     """(5.1) Painel da zona escolhida: "Zona n", % da FIR, decisão, resto do
     período, motivos por extenso, alcance e a lista de aeródromos (a abrir)."""
-    motivos = [classificar_motivo(m) for m in region.get("reasons") or []]
+    ib = info_base(region, blocos)
+    motivos = [_com_info_base(classificar_motivo(m), ib) for m in region.get("reasons") or []]
     itens = "".join(
         f'<li><span class="gv-pt" style="background:'
         f'{_DEC_BARRA.get(c["nivel"] or region["decision"], "#9CD2FF")}"></span>'
@@ -5735,6 +5810,15 @@ def html_meu_aerodromo(nome, n_zona, region, resto=None):
         f'{html_resto(resto, region["decision"])}</div>{html_chip(region["decision"])}</div></div>')
 
 
+def _aneis_folium(g):
+    """Anéis de um Polygon para o folium.Polygon ([lat, lon]): só o exterior,
+    ou exterior + buracos (lista de anéis), para os buracos não ficarem pintados."""
+    ext = [[la, lo] for lo, la in g.exterior.coords]
+    if not g.interiors:
+        return ext
+    return [ext] + [[[la, lo] for lo, la in r.coords] for r in g.interiors]
+
+
 def mapa_zonas_html(regions, ordem, sel, aerodromo=None):
     """(5.1/5.1.1) Página HTML do mapa Folium: zonas coloridas pela decisão e
     numeradas (a escolhida com contorno branco), os 52 pontos e o aeródromo
@@ -5745,6 +5829,7 @@ def mapa_zonas_html(regions, ordem, sel, aerodromo=None):
     import folium
     fmap = folium.Map(location=[39.6, -8.0], zoom_start=6, tiles="OpenStreetMap",
                       control_scale=True)
+    contorno = []    # (5.1.2) contorno da zona escolhida, desenhado no fim
     for z, i in enumerate(ordem, 1):
         region = regions[i]
         poly = region["polygon"]
@@ -5753,13 +5838,14 @@ def mapa_zonas_html(regions, ordem, sel, aerodromo=None):
                  if not g.is_empty and hasattr(g, "exterior") and g.exterior is not None]
         for g in geoms:
             folium.Polygon(
-                locations=[[la, lo] for lo, la in zip(*g.exterior.xy)],
-                color="#FFFFFF" if z == sel else color,
-                weight=4 if z == sel else 1.5,
+                locations=_aneis_folium(g),
+                color=color, weight=1.5,
                 fill=True, fill_color=color,
                 fill_opacity=0.5 if z == sel else 0.3,
                 tooltip=f"Zona {z}: {region['decision']}",
             ).add_to(fmap)
+            if z == sel:
+                contorno.append(g)
         if geoms:
             p = max(geoms, key=lambda g: g.area).representative_point()
             folium.Marker(
@@ -5773,6 +5859,13 @@ def mapa_zonas_html(regions, ordem, sel, aerodromo=None):
                           f'align-items:center;justify-content:center">{z}</div>')),
                 tooltip=f"Zona {z}: {region['decision']}",
             ).add_to(fmap)
+    # (5.1.2, captura do Duarte a 18-nov-2026) O contorno branco vai por cima de
+    # todas as zonas: desenhado com a própria zona, as zonas seguintes tapavam-no
+    # nas fronteiras comuns. Inclui os buracos (anéis interiores).
+    for g in contorno:
+        for anel in [g.exterior, *g.interiors]:
+            folium.PolyLine(locations=[[la, lo] for lo, la in anel.coords],
+                            color="#FFFFFF", weight=4, opacity=1).add_to(fmap)
     for name, (lat, lon) in CITIES.items():
         folium.CircleMarker(location=[lat, lon], radius=3, color="#0E151C",
                             fill=True, fill_color="#0E151C", fill_opacity=0.9,
@@ -5900,7 +5993,7 @@ if st.session_state.get("_active_gamet_text"):
 
     # ---- Veredicto global, com o porquê ----
     st.markdown(html_veredicto(_r["por_dec"], _r["area"], resto_par(_r),
-                               porque_veredicto(dynamic_regions)),
+                               porque_veredicto(dynamic_regions, _r.get("blocos"))),
                 unsafe_allow_html=True)
     # Falhar em voz alta: os erros, o GAMET fora da validade e o GAMET do
     # arquivo ficam sempre abertos, logo a seguir ao veredicto
@@ -5965,10 +6058,11 @@ if st.session_state.get("_active_gamet_text"):
     _reg_sel = dynamic_regions[_i_sel]
     st.markdown(html_zona(_sel, _reg_sel, 100 * _reg_sel["polygon"].area / FIR_POLYGON.area,
                           dynamic_regions, annotate_window_notes(_reg_sel.get("notas"), start_dt),
-                          resto_par(_r, regiao=_i_sel)),
+                          resto_par(_r, regiao=_i_sel), _r.get("blocos")),
                 unsafe_allow_html=True)
     st.subheader("Porquê · por fenómeno e zona")
-    st.markdown(html_quadro(dynamic_regions, _ordem, _sel, wind_data), unsafe_allow_html=True)
+    st.markdown(html_quadro(dynamic_regions, _ordem, _sel, wind_data, _r.get("blocos")),
+                unsafe_allow_html=True)
 
     # ---- A ter em conta: título + etiqueta; o texto completo a um toque ----
     _conta = [(_t, _x) for _t, _x in _r["avisos"]
@@ -6113,7 +6207,7 @@ if st.session_state.get("_active_gamet_text"):
     # ---- Exportar PDF ----
     with st.spinner("A gerar PDF..."):
         pdf_bytes = generate_pdf(dynamic_regions, gamet_text, fzlvl_min, qnh_min, validity_label,
-                                 wind_data)
+                                 wind_data, _r.get("blocos"))
     st.download_button(
         label="⬇️ Descarregar briefing (PDF)",
         data=pdf_bytes,
