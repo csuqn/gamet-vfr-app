@@ -298,7 +298,8 @@ def test_app_sem_historico_da_sessao(app_path):
     at.session_state["_active_gamet_text"] = gamet
     at.run()
     assert not at.exception, [e.value for e in at.exception]
-    assert any("Briefing" in s.value for s in at.subheader)
+    # 5.1: o briefing por zonas tem o quadro "Porquê · por fenómeno e zona"
+    assert any("por fenómeno e zona" in s.value for s in at.subheader)
     assert not any("Histórico" in e.label for e in at.expander)
     assert "gamet_history" not in at.session_state
 
@@ -379,7 +380,7 @@ def test_app_abrir_arquivo_e_carregar(app_path, monkeypatch):
     assert at.session_state["gamet_fonte"] == "arquivo_hist"
     assert at.session_state["_active_gamet_text"] == gamet
     assert "GAMET DO ARQUIVO" in " ".join(w.value for w in at.warning)
-    assert any("Briefing" in s.value for s in at.subheader)
+    assert any("por fenómeno e zona" in s.value for s in at.subheader)   # 5.1
 
 
 def test_recurso_ignora_sigmets_antigos_do_mesmo_dia(eng):

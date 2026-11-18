@@ -743,7 +743,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-2373 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 41 do `test_v476.py` + 65 do `test_v48.py` + 10 do `test_v481.py` + 49 do `test_v49.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2344 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
+2424 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 41 do `test_v476.py` + 65 do `test_v48.py` + 10 do `test_v481.py` + 49 do `test_v49.py` + 8 dos conjuntos fixos de 15/16-nov (#50) + 43 do `test_v51.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2395 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -1039,6 +1039,13 @@ python3 -m pytest
   GAMETs lidos de outra forma; 300 linhas geradas; `_cb_solto=False` e os
   `_modo42/475/476` iguais à 4.8.1. Outras sementes: `GAMET_SEMENTE=n
   GAMET_CASOS=400`
+- `tests/test_v51.py` — briefing 5.1: `classificar_motivo` para cada forma de
+  motivo de `decision()` (parcial, AIRMET), pior nível = decisão em todo o
+  arquivo e nos GAMETs gerados, zonas N→S, quadro (só linhas com dados, MOD
+  informativo, vento por estação, vazio), porquê do veredicto, painel e linha
+  do aeródromo (GAMET real 180900/181500), títulos/etiquetas dos avisos, app
+  completa (ordem dos blocos, zona do aeródromo, mudar de zona, avisos em
+  expanders, erros abertos) e PDF (`pdftotext`)
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva
@@ -1156,6 +1163,39 @@ está em `_CSS` (início da app). Pensada primeiro para o telemóvel.
 - A faixa nunca diz `NIL` se os SIGMETs não foram verificados (`N/VERIF.`).
 - Alertas (SIGMET, AIRMET, validade, texto ilegível, vento) continuam a ser
   `st.error`/`st.warning` nativos.
+
+**Briefing 5.1 — mapa em destaque e quadro por fenómeno** (pedido do Duarte a
+17-nov-2026; maqueta "Briefing VFR — novo design", 2.ª proposta). Só
+apresentação: regiões, decisões, motivos e avisos são os do motor (`comparar_
+versoes.py` 5.0 → 5.1 no arquivo, com e sem `--indice`: 0/0). No Streamlit,
+por esta ordem: faixa (e a linha "Sem SIGMET/AIRMET…"); veredicto com o
+porquê (`porque_veredicto`: os motivos da pior decisão comuns a todas as
+regiões com ela); avisos que ficam sempre abertos (`aviso_visivel`: erros,
+GAMET fora da validade, GAMET do arquivo); "O meu aeródromo" numa linha
+(`html_meu_aerodromo`, com a zona); o **mapa** (Folium, zonas numeradas, a
+escolhida com contorno branco, o aeródromo realçado); botões ZONA 1…n
+(`st.segmented_control`, chave `zona_sel`; começa na zona do aeródromo e volta
+a ela com um GAMET ou aeródromo novo); painel da zona (`html_zona`: % da FIR,
+resto do período, motivos por extenso, alcance, aeródromos a abrir); quadro
+"Porquê · por fenómeno e zona" (`html_quadro`/`quadro_zonas`); "A ter em
+conta · n" (`st.expander` por aviso, título `titulo_aviso` + etiqueta
+`etiqueta_aviso`: verificar / informativo / conta para a decisão; dentro, o
+`st.warning`/`st.info` de sempre); separadores Vento/Temp, Secção II, Texto,
+Legenda; PDF. As zonas são numeradas de **norte para sul** pelo centróide
+(`zonas_ordem`; empate: a mais a oeste) e só têm número. Quadro: uma linha
+por fenómeno presente em alguma zona; a cor de cada célula é o nível que esse
+motivo causa, lido do texto de `decision()` por `classificar_motivo` (com o
+limiar: `BASE 200ft < 500ft` → NO-GO); TURB/ICE MOD e o vento a 1000 ft das
+estações dentro da zona entram como informativos; "Sem trovoada nem CB" quando
+não há nenhum; `*` = só em parte da zona. `test_v51` verifica em todo o
+arquivo (manual e `arquivo_hist`) e nos `GAMETS_VARIADOS` que o pior nível dos
+motivos de cada região é exactamente a decisão dela e que não há motivos
+desconhecidos — **um motivo novo em `decision()` tem de ser ensinado a
+`classificar_motivo`**. O PDF segue a mesma organização: página 1 com o
+veredicto, o mapa numerado e o quadro; página 2 (e seguintes) com cada zona
+por extenso e o texto do GAMET; página 3 com a Secção II. A NiceGUI fica como
+estava (decisão do Duarte a 17-nov-2026); `html_regiao`/`html_aerodromo`
+continuam no motor para ela.
 
 ## Armadilhas conhecidas
 

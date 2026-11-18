@@ -81,7 +81,7 @@ tempo (`11/15` = só das 11 às 15 UTC) e na extensão (`ISOL`, `OCNL`, `FRQ`,
 
 1. **Abre a [app](https://gamet-vfr-app.onrender.com/).** O GAMET em vigor é carregado do IPMA e analisado logo — o briefing aparece no topo.
    - A app foi desenhada primeiro para o telemóvel (tema escuro, que se lê
-     bem ao sol); no computador os cartões das zonas ficam lado a lado.
+     bem ao sol); no computador o mapa e o quadro ocupam a largura do ecrã.
    - Se o IPMA não responder, a app explica o que falhou. Podes colar o GAMET
      à mão na caixa de texto (no fundo da página), ou indicar um endereço
      alternativo no painel "📡 Ligação ao IPMA".
@@ -93,11 +93,17 @@ tempo (`11/15` = só das 11 às 15 UTC) e na extensão (`ISOL`, `OCNL`, `FRQ`,
 2. **Lê o resultado**, de cima para baixo:
    - faixa com a validade, o tempo que falta para expirar e o estado dos
      SIGMETs (`NIL`, `ACTIVO` ou `N/VERIF.` quando não foi possível verificar);
-   - avisos importantes (SIGMET, texto ilegível, vento forte);
-   - veredicto global (ex.: "NO-GO em 11% da FIR"), com uma barra das três decisões;
-   - o teu aeródromo, os cartões das zonas e, em separadores, o mapa, o vento
-     e temperatura, a Secção II, o texto do GAMET e a legenda;
-   - o PDF.
+   - veredicto global (ex.: "NO-GO em 11% da FIR"), com o porquê numa frase e
+     uma barra das três decisões; logo a seguir, os avisos que não podem
+     passar despercebidos (SIGMET, texto ilegível, GAMET fora da validade);
+   - o teu aeródromo, numa linha (decisão e zona);
+   - o **mapa**, com as zonas numeradas de norte para sul, e os botões
+     ZONA 1, 2, 3…;
+   - o painel da zona escolhida e o quadro "Porquê · por fenómeno e zona";
+   - "A ter em conta": os outros avisos, um por linha, com o texto completo a
+     um toque;
+   - em separadores, o vento e temperatura, a Secção II, o texto do GAMET e a
+     legenda; e o PDF.
 3. **🔍 Analisar GAMET** (no fundo) só é preciso se colares ou editares o texto.
 
 A app também funciona sem internet, com o GAMET colado à mão.
@@ -113,7 +119,10 @@ não para planear um voo.
 
 ## 4. Como ler o briefing
 
-**Avisos no topo**
+**Avisos.** Os mais importantes ficam abertos logo a seguir ao veredicto;
+os outros estão em "A ter em conta", com um título curto e uma etiqueta —
+*verificar*, *informativo* ou *conta para a decisão* — e o texto completo a um
+toque.
 - 🚨 **SIGMET:** NO-GO na área do SIGMET, com 10 NM de margem (e estendida
   na direcção do movimento, se o SIGMET se desloca). Se a área não for legível,
   ou se o GAMET só indicar o identificador do SIGMET sem o texto completo estar
@@ -132,28 +141,31 @@ não para planear um voo.
   que estás a ver o actual.
 
 **✈️ O meu aeródromo.** Escolhe um aeródromo ou pista de ultraleves (52
-pontos, com coordenadas oficiais do eVFR) e vês logo a decisão nesse local e
-os motivos. A app lembra-se do último que escolheste.
+pontos, com coordenadas oficiais do eVFR) e vês logo, numa linha, a decisão
+nesse local e a zona onde fica. A app lembra-se do último que escolheste e
+abre o briefing nessa zona.
 
-**📋 Briefing por regiões.** Um cartão por zona, da pior para a melhor:
-- **decisão** (GO / MARGINAL / NO-GO) e percentagem da área;
-- **nome da zona**, pelos aeródromos que lá caem (ex.: "Braga, Porto, Vila
-  Real +5");
-- **valores** de visibilidade, base das nuvens e CB/trovoada em destaque;
-  turbulência, gelo, VA e MT OBSC por baixo, quando existem;
-- **motivos da decisão**, ou seja, que regra a tornou NO-GO ou MARGINAL;
-- **alcance restrito**: avisos que só se aplicam a parte do que está desenhado
-  (ex.: "só sobre o mar", "apenas 11–15Z — já terminou").
+**🗺️ Mapa e zonas.** O mapa vem logo a seguir, com as zonas a verde, âmbar e
+vermelho e um número em cada uma — a zona 1 é a mais a norte. Os botões ZONA
+1, 2, 3… por baixo escolhem a zona (a escolhida fica com contorno branco). O
+painel da zona diz a decisão, a percentagem da FIR, os motivos por extenso
+(ex.: "Base das nuvens 200 ft — abaixo de 500 ft → NO-GO"), o alcance
+restrito (ex.: "só sobre o mar", "apenas 11–15Z — já terminou") e os
+aeródromos que lá caem.
 
-**🗺️ Mapa** (separador). As zonas a verde, âmbar e vermelho sobre o mapa,
-com todos os aeródromos e pistas. Podes aproximar e clicar.
+**📊 Porquê · por fenómeno e zona.** Um quadro com uma linha por fenómeno
+(base, visibilidade, trovoada, CB, turbulência, gelo, vento…) e uma coluna por
+zona. Vermelho: dá NO-GO; amarelo: dá MARGINAL; azul: só informativo (ex.:
+turbulência ou gelo moderados, vento a 1000 ft). Só aparecem os fenómenos que
+existem neste GAMET; `*` quer dizer "só em parte da zona".
 
 **🌡️ Secção II e Vento/Temp** (separadores). Nível de congelação mínimo, QNH
 mínimo e tabela de vento e temperatura por níveis nas seis estações (Bragança, Porto, Viseu, Lisboa,
 Évora e Faro).
 
-**📄 PDF.** O briefing completo, com o mapa e o texto original do GAMET, para
-guardar ou imprimir.
+**📄 PDF.** A mesma organização do ecrã: na 1.ª página o veredicto, o mapa
+com as zonas numeradas e o quadro por fenómeno; na 2.ª, cada zona por extenso
+e o texto original do GAMET; na 3.ª, a Secção II. Para guardar ou imprimir.
 
 ## 5. Exemplo real
 
@@ -278,7 +290,7 @@ Algarve não afecta Lisboa.
 
 ## 10. Qualidade e testes
 
-- **2373 testes automáticos** cobrem a leitura do texto, a geometria, as
+- **2424 testes automáticos** cobrem a leitura do texto, a geometria, as
   decisões, os dados aeronáuticos e a app completa. Cada erro alguma vez
   encontrado tem um teste que impede que volte a aparecer.
 - **Verificação cruzada:** em centenas de GAMETs gerados, a decisão de cada
@@ -298,7 +310,7 @@ Algarve não afecta Lisboa.
 pip install -r requirements.txt -r requirements-dev.txt
 streamlit run app.py               # a app principal (Streamlit)
 cd nicegui_app && python main.py   # a versão de reserva (NiceGUI), http://localhost:8080
-python3 -m pytest                  # os testes (2373)
+python3 -m pytest                  # os testes (2424)
 ```
 
 | Ficheiro / pasta | Conteúdo |
