@@ -149,7 +149,7 @@ abre o briefing nessa zona.
 vermelho e um número em cada uma — a zona 1 é a mais a norte. Os botões ZONA
 1, 2, 3… por baixo escolhem a zona (a escolhida fica com contorno branco). O
 painel da zona diz a decisão, a percentagem da FIR, os motivos por extenso
-(ex.: "Base das nuvens 200 ft — abaixo de 500 ft → NO-GO"), o alcance
+(ex.: "Base das nuvens 200 ft AGL — abaixo de 500 ft → NO-GO"), o alcance
 restrito (ex.: "só sobre o mar", "apenas 11–15Z — já terminou") e os
 aeródromos que lá caem.
 

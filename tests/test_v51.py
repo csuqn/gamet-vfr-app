@@ -60,8 +60,8 @@ def _verifica_niveis(eng, regioes, origem):
     ("VIS LCA 800m < 1500m (local)", "VIS", "MARGINAL", "800 m (local)"),
     ("VIS 3000m < 5000m", "VIS", "MARGINAL", "3000 m"),
     ("VIS (LCA) 3000m < 5000m", "VIS", "MARGINAL", "3000 m (local)"),
-    ("BASE 200ft < 500ft", "BASE", "NO-GO", "200 ft"),
-    ("BASE 800ft < 1000ft", "BASE", "MARGINAL", "800 ft"),
+    ("BASE 200ft < 500ft", "BASE", "NO-GO", "200 ft AGL"),
+    ("BASE 800ft < 1000ft", "BASE", "MARGINAL", "800 ft AGL"),
     ("TS OCNL (risco alto)", "TS", "NO-GO", "OCNL"),
     ("TS ISOL", "TS", "MARGINAL", "ISOL"),
     ("CB ISOL (cumulonimbos)", "CB", "MARGINAL", "ISOL"),
@@ -151,7 +151,7 @@ def test_quadro_vazio_e_porque(eng, analyse):
     assert eng.porque_veredicto(r["regions"]) == ""
     r = analyse(build_gamet("SECN I SIG CLD: LCA BKN 002-004/010HFT AGL "
                             "TURB: N OF N4000 SEV SFC/FL050"))
-    assert eng.porque_veredicto(r["regions"]) == "Base das nuvens 200 ft — abaixo de 500 ft"
+    assert eng.porque_veredicto(r["regions"]) == "Base das nuvens 200 ft AGL — abaixo de 500 ft"
 
 
 def test_quadro_vento_por_estacao(eng):
@@ -169,10 +169,10 @@ def test_gamet_real_180900(eng):
     regs = r["regioes"]
     _verifica_niveis(eng, regs, "180900")
     assert {g["decision"] for g in regs} == {"NO-GO"}
-    assert eng.porque_veredicto(regs).startswith("Base das nuvens 200 ft — abaixo de 500 ft")
+    assert eng.porque_veredicto(regs).startswith("Base das nuvens 200 ft AGL — abaixo de 500 ft")
     ordem = eng.zonas_ordem(regs)
     h = _texto(eng.html_zona(1, regs[ordem[0]], 65, regs))
-    assert h.startswith("Zona 1") and "Base das nuvens 200 ft — abaixo de 500 ft → NO-GO" in h
+    assert h.startswith("Zona 1") and "Base das nuvens 200 ft AGL — abaixo de 500 ft → NO-GO" in h
     assert "Visibilidade 800 m (local) — abaixo de 1500 m → MARGINAL" in h
     assert "aeródromos e pistas" in h
     lisboa = "Lisboa (LPPT)"
@@ -255,7 +255,7 @@ def test_app_ordem_e_zona_do_aerodromo(app_path, eng):
     zona = next(m for m in md if 'class="gv-zona"' in m)
     n = at.session_state["zona_sel"]
     assert f"ZONA {n}" in meu and f"Zona {n}" in zona and "Faro (LPFR): NO-GO" in meu
-    assert "Base das nuvens 400 ft — abaixo de 500 ft → NO-GO" in _texto(zona)
+    assert "Base das nuvens 400 ft AGL — abaixo de 500 ft → NO-GO" in _texto(zona)
     # Escolher a zona 1 (norte): o painel muda
     at.session_state["zona_sel"] = 1
     at.run()
@@ -300,3 +300,31 @@ def test_pdf_segue_o_ecra(eng, tmp_path):
                      "Base das nuvens", "Zonas — de norte para sul",
                      "Texto GAMET original"):
         assert esperado in txt, esperado
+
+
+# ---------------------------------------------------------------- 5.1.1
+
+def test_legenda_do_mapa(eng, app_path):
+    assert _texto(eng.html_legenda_mapa()) == "NO-GO MARGINAL GO"
+    at = _app(app_path, _gamet_em_vigor("SECN I SFC VIS: N OF N4100 800M FG"))
+    md = [m.value for m in at.markdown]
+    leg = [k for k, m in enumerate(md) if 'class="gv-legmapa"' in m]
+    ver = [k for k, m in enumerate(md) if 'class="gv-veredicto"' in m]
+    zona = [k for k, m in enumerate(md) if 'class="gv-zona"' in m]
+    assert leg and ver[0] < leg[0] < zona[0]
+
+
+def test_mapa_ocupa_o_iframe(eng):
+    """O mapa é a página completa do Folium (altura 100% do iframe), não o
+    _repr_html_ dos notebooks (altura = 60% da largura: no telemóvel sobrava
+    um grande espaço vazio por baixo). Zonas numeradas e aeródromo realçado."""
+    pytest.importorskip("folium")
+    r = eng.analisar_gamet(G180900, "manual")
+    regs = r["regioes"]
+    ordem = eng.zonas_ordem(regs)
+    h = eng.mapa_zonas_html(regs, ordem, 2, "Lisboa (LPPT)")
+    assert h.lstrip().lower().startswith("<!doctype html>")
+    assert "padding-bottom:60%" not in h and "height: 100.0vh" in h
+    for z in range(1, len(ordem) + 1):
+        assert f"Zona {z}: NO-GO" in h
+    assert "Lisboa (LPPT)" in h and "#7CC4FF" in h
