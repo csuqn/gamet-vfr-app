@@ -379,6 +379,54 @@ def test_zona_com_buraco_nao_pinta_o_buraco(eng):
     assert eng._aneis_folium(dentro) == [[la, lo] for lo, la in dentro.exterior.coords]
 
 
+# ---------------------------------------------------------------- 5.1.3
+
+@pytest.mark.parametrize("tooltip,n,esperado", [
+    ("Zona 3: GO", 3, 3), ("Zona 1: NO-GO", 3, 1), ("Zona 2: MARGINAL", 2, 2),
+    ("Zona 4: GO", 3, None), ("Zona 0: GO", 3, None),
+    ("Lisboa (LPPT)", 3, None), ("Alqueidão", 3, None), (None, 3, None), ("", 3, None),
+    (12, 3, None), ("Zona 12: GO", 12, 12),
+])
+def test_zona_do_clique(eng, tooltip, n, esperado):
+    """(5.1.3) O tooltip do objecto tocado no mapa dá a zona; os aeródromos e
+    toques fora de uma zona não mudam nada."""
+    assert eng.zona_do_clique(tooltip, n) == esperado
+
+
+def test_tocar_em_cada_zona_do_mapa_da_essa_zona(eng):
+    """(5.1.3, pedido do Duarte a 19-nov-2026) Cada polígono e cada número do
+    mapa têm um tooltip que `zona_do_clique` lê como a sua zona; o contorno
+    branco não recebe toques (passam para a zona por baixo) e não há rectângulo
+    de foco à volta da zona tocada."""
+    folium = pytest.importorskip("folium")
+    r = eng.analisar_gamet(G180900, "manual")
+    regs = r["regioes"]
+    ordem = eng.zonas_ordem(regs)
+    n = len(ordem)
+    fmap = eng.mapa_zonas(regs, ordem, 2, "Lisboa (LPPT)")
+    por_zona = {}
+    brancas = 0
+    for filho in fmap._children.values():
+        tip = next((c for c in filho._children.values()
+                    if isinstance(c, folium.Tooltip)), None)
+        if isinstance(filho, (folium.Polygon, folium.Marker)) and tip is not None \
+                and tip.text.startswith("Zona"):
+            z = eng.zona_do_clique(tip.text, n)
+            assert z is not None
+            por_zona.setdefault(z, set()).add(type(filho).__name__)
+        if isinstance(filho, folium.PolyLine) and not isinstance(filho, folium.Polygon):
+            assert filho.options.get("interactive") is False
+            brancas += 1
+    assert set(por_zona) == set(range(1, n + 1))
+    assert all(v == {"Polygon", "Marker"} for v in por_zona.values())
+    assert brancas >= 1
+    h = fmap.get_root().render()
+    assert ".leaflet-interactive:focus{outline:none}" in h
+    # Os aeródromos não são zonas
+    for nome in ("Lisboa (LPPT)",):
+        assert eng.zona_do_clique(nome, n) is None
+
+
 # ---------------------------------------------------------------- 5.1.2
 
 def _motivos_base(eng, r):
