@@ -481,3 +481,81 @@ def test_parser_casos_optimistas_continuam_a_contar(eng, corpo):
 ])
 def test_parser_formas_legitimas_lidas(eng, corpo, nivel):
     assert eng.sigmet_acima_vfr(_CAB + corpo) == nivel
+
+
+# ---------------------------------------------------------------------
+# Revisor do PR #58 (DÚVIDA): caminhos optimistas → lista branca
+# ---------------------------------------------------------------------
+_A = "WI N3800 W00900 - N4000 W00900 - N4000 W00700 - N3800 W00700 - N3800 W00900"
+
+
+@pytest.mark.parametrize("corpo", [
+    f"SEV TURB FCST {_A} FL220/430 OCNL TSRA STNR NC=",
+    f"SEV TURB FCST {_A} FL220/430 ISOL TSRA STNR NC=",
+    f"SEV TURB FCST {_A} FL220/430 SQLTS",
+    f"SEV TURB FCST {_A} FL220/430 FZDZ",
+    f"SEV TURB FCST {_A} FL220/430 AND SEV ICE FCST {_A} STNR NC=",
+    f"SEV TURB FCST {_A} FL220/430 AND {_A} 040/060 STNR NC=",
+    f"SEV TURB FCST {_A} FL220/430 AND {_A} 1500 M",
+    f"SEV TURB FCST {_A} F050/150 AND FL220/430",
+    f"SEV TURB FCST {_A} FL220/430 BLW 5000",
+    f"SEV TURB FCST {_A} FL220/430 MOD TURB BLW FL100",
+    f"SEV TURB FCST {_A} FL220/430 MTW SEV",
+    f"SEV TURB FCST {_A} FL220/430 MOD ICE",
+    f"SEV TURB FCST {_A} FL220/430 CNL SIGMET U02",
+    f"SEV TURB FCST {_A} FL220/430 FL100/200",
+    f"SEV TURB FCST {_A} FL2200/430",
+    f"SEV TURB FCST {_A} FL220/430 embd ts",
+    f"SEV TURB (CAT) FCST {_A} FL220/430",
+])
+def test_revisor_lista_branca_continua_a_contar(eng, corpo):
+    """Tirado o que a lista branca conhece, sobra alguma coisa → conta."""
+    assert eng.sigmet_acima_vfr(_CAB + corpo) is None
+
+
+@pytest.mark.parametrize("corpo, nivel", [
+    (f"SEV TURB FCST {_A} FL220/430 STNR NC=", 220),
+    ("SEV TURB FCST ENTIRE FIR FL220/430", 220),
+    (f"SEV TURB FCST {_A} FL430/220", 220),
+    (f"SEV TURB OBS AT 1530Z {_A} FL240/400 MOV NE 25KT WKN=", 240),
+    ("SEV TURB FCST N OF N3900 AND W OF W00900 FL300/400 MOV E 30KMH INTSF", 300),
+])
+def test_revisor_lista_branca_formas_legitimas(eng, corpo, nivel):
+    assert eng.sigmet_acima_vfr(_CAB + corpo) == nivel
+
+
+# Conjunto fixo (revisor do PR #58): os SIGMETs do arquivo que a 6.0 tira da
+# decisão, verificados à mão (todos SEV TURB, limite inferior FL200–FL330). Se
+# aparecer outro, o teste falha para se confirmar a leitura antes de o aceitar —
+# os testes do arquivo contra motores antigos tiram estes do índice
+# (conftest.indice_sem_altos_60) e não dariam por um mal classificado.
+_ALTOS_ARQUIVO = {
+    "20261018T2021Z_SIGMETU01_182030-182330_43207bb07d.txt": 330,
+    "20261018T2337Z_SIGMETU02_182330-190200_38a7584384.txt": 230,
+    "20261029T1650Z_SIGMETU01_291700-292100_b1cf295682.txt": 300,
+    "20261107T0915Z_SIGMETU01_070910-071000_c6cc81ac27.txt": 300,
+    "20261109T0542Z_SIGMETU01_090600-090900_e3c39c024f.txt": 230,
+    "20261111T0120Z_SIGMETU02_110105-110405_da9b1c2aef.txt": 290,
+    "20261111T0852Z_SIGMETU05_110900-111300_54229fa1f1.txt": 200,
+    "20261114T0748Z_SIGMETU01_140745-141145_50b709f1fe.txt": 300,
+    "20261114T1149Z_SIGMETU02_141145-141545_799f0fc89d.txt": 310,
+    "20261114T1550Z_SIGMETU03_141545-141845_477c015864.txt": 310,
+    "20261115T0552Z_SIGMETU01_150600-150900_f7a81d29d9.txt": 300,
+    "20261115T0953Z_SIGMETU02_151000-151300_128083407e.txt": 260,
+    "20261115T1254Z_SIGMETU03_151300-151700_a2a95b959a.txt": 240,
+    "20261115T1625Z_SIGMETU04_151610-151900_166e1b8e52.txt": 260,
+    "20261119T1544Z_SIGMETU01_191500-191700_0887c243e9.txt": 220,
+    "20261119T1659Z_SIGMETU02_191700-192100_9982e5f105.txt": 220,
+}
+
+
+def test_arquivo_conjunto_fixo_dos_sigmets_altos(eng):
+    p = Path(__file__).resolve().parent.parent / "dados" / "indice.json"
+    if not p.exists():
+        pytest.skip("sem o arquivo (dados/)")
+    indice = json.loads(p.read_text(encoding="utf-8"))
+    altos = {e["ficheiro"].split("/")[-1]: eng.sigmet_acima_vfr(e.get("texto", ""))
+             for e in indice.get("sigmets", [])}
+    altos = {k: v for k, v in altos.items() if v is not None}
+    assert altos == {k: v for k, v in _ALTOS_ARQUIVO.items() if k in {
+        e["ficheiro"].split("/")[-1] for e in indice.get("sigmets", [])}}

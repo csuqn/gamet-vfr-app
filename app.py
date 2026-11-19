@@ -4167,19 +4167,46 @@ def nivel_inferior_estrito(texto):
     return nivel_inferior_sigmet(t)
 
 
+# (6.0, revisor do PR #58) Lista branca: o SIGMET só sai da decisão se, tirado
+# o cabeçalho e as partes conhecidas, não sobrar mais nada — um fenómeno SEV
+# TURB/ICE/MTW (uma só vez), OBS/FCST [AT hhmmZ], a área (coordenadas, WI, OF,
+# BTN, LINE, nnNM, ENTIRE FIR, cardinais, AND, -), UM só grupo de níveis
+# (FLaaa/bbb ou ABV FLaaa), MOV dir nnKT|KMH ou STNR, INTSF/WKN/NC e "=".
+# Qualquer outra coisa ("OCNL TSRA", "040/060", "1500 M", "F050/150", um
+# segundo fenómeno…) → continua a contar.
+_SIGMET_CAB_RE = re.compile(r"^.*?\bFIR\s+")
+_SIGMET_ALTO_FEN_RE = re.compile(r"\bSEV\s+(?:TURB|ICE|MTW)\b")
+_SIGMET_LISTA_BRANCA = [
+    re.compile(r"\b(?:OBS|FCST)(?:\s+AT\s+\d{4}Z)?\b"),
+    re.compile(r"\bMOV\s+(?:N|NNE|NE|ENE|E|ESE|SE|SSE|S|SSW|SW|WSW|W|WNW|NW|NNW)\s+\d{1,3}\s*(?:KT|KMH)\b"),
+    re.compile(r"\b(?:STNR|INTSF|WKN|NC)\b"),
+    re.compile(r"\bENTIRE\s+FIR\b"),
+    re.compile(r"\b\d{1,3}\s*NM\b"),
+    re.compile(r"\b[NS]\d{2}(?:\d{2})?\b|\b[EW]\d{3}(?:\d{2})?\b"),
+    re.compile(r"\b(?:WI|OF|BTN|LINE|AND|N|S|E|W|NE|NW|SE|SW)\b"),
+    re.compile(r"[-=,]"),
+]
+
+
 def sigmet_acima_vfr(texto):
-    """(6.0) Limite inferior (FL) se o SIGMET é SÓ de TURB/ICE/MTW severos e
-    todos os níveis escritos ficam acima do FL195 — não entra na decisão VFR.
-    Senão None (na dúvida, conta). Com cabeçalho, o fenómeno tem de ser o
-    primeiro depois de "FIR"."""
-    t = re.sub(r"\s+", " ", (texto or ""))
-    if not re.search(r"\bSEV (?:TURB|ICE|MTW)\b", t) or _OUTRO_FEN_RE.search(t):
+    """(6.0) Limite inferior (FL) se o SIGMET é SÓ de TURB/ICE/MTW severos, com
+    um só grupo de níveis `FLaaa/bbb` ou `ABV FLaaa` acima do FL195, e nada
+    mais no texto além do que está na lista branca. Senão None: na dúvida, o
+    SIGMET conta."""
+    t = re.sub(r"\s+", " ", (texto or "")).strip()
+    corpo = _SIGMET_CAB_RE.sub("", t, count=1) if re.search(r"\bFIR\s", t) else t
+    if len(_SIGMET_ALTO_FEN_RE.findall(corpo)) != 1 or not re.match(r"SEV\s+(?:TURB|ICE|MTW)\b", corpo):
         return None
-    cab = re.search(r"\bFIR\s+(\S+(?:\s+\S+)?)", t)
-    if cab and not re.match(r"SEV (?:TURB|ICE|MTW)\b", cab.group(1)):
+    niveis = _NIVEL_ALTO_RE.findall(corpo)
+    if len(niveis) != 1:
         return None
-    ni = nivel_inferior_estrito(t)
-    return ni if ni is not None and ni > _SIGMET_VFR_MAX_FL else None
+    ni = nivel_inferior_sigmet(niveis[0])
+    if ni is None or ni <= _SIGMET_VFR_MAX_FL:
+        return None
+    resto = _NIVEL_ALTO_RE.sub(" ", _SIGMET_ALTO_FEN_RE.sub(" ", corpo, count=1))
+    for rx in _SIGMET_LISTA_BRANCA:
+        resto = rx.sub(" ", resto)
+    return ni if not resto.strip() else None
 
 
 def blocos_sigmet(sigmets, has_sigmet, sigmet_text, ref=None, conhecidos=None,
