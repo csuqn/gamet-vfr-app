@@ -504,11 +504,13 @@ junto ao chão — SIGMETs reais U01/U02 de 19-nov (`SEV TURB FCST … FL220/430
 35% da FIR em NO-GO), U02/U03 do 141500 (FL310–420, 37 pontos GO → NO-GO) e U03
 do 151500 (FL240–400), pendente desde a W42. Desde a 6.0 `sigmet_acima_vfr()`
 usa uma **lista branca** (revisor do PR #58): nenhum outro fenómeno em todo o
-texto (`_OUTRO_FEN_RE`), e tirado o cabeçalho **só se tiver a forma exacta**
-do IPMA, ancorado no início (`LPPC SIGMET U02 VALID 191700/192100 LPPT- LPPC
-LISBOA FIR `; 2.ª e 3.ª revisões: um corte mais solto apagava um `EMBD TS` ou um
-`SFC/FL100` antes de um `FIR` do corpo — com outra forma não se corta nada e o
-corpo não começa por `SEV`, por isso conta),
+texto (`_OUTRO_FEN_RE`, com qualquer palavra começada por `TS` — `TSRA`), e
+tirado o cabeçalho **só se for exactamente o do IPMA**, ancorado no início
+(`^LPPC SIGMET [A-Z]\d{1,2} VALID \d{6}/\d{6} LPPT- LPPC LISBOA FIR `; os 80
+SIGMETs do arquivo casam todos; 2.ª, 3.ª e 4.ª revisões: um corte mais solto
+apagava um `EMBD TS`, um `SFC/FL100` ou um `SFC`/`TSRA` no nome da FIR ou no
+identificador — com outra forma não se corta nada e o corpo não começa por
+`SEV`, por isso conta),
 o corpo tem de começar por um só `SEV TURB|ICE|MTW`, ter **um só** grupo de
 níveis `FLaaa/bbb` ou `ABV FLaaa` com o limite inferior acima do FL195
 (`FL430/220` → 220; `FL200/150` → 150), e, tirados esses e `OBS`/`FCST [AT
@@ -786,7 +788,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-2588 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 41 do `test_v476.py` + 65 do `test_v48.py` + 10 do `test_v481.py` + 49 do `test_v49.py` + 8 dos conjuntos fixos de 15/16-nov (#50) + 78 do `test_v51.py` + 129 do `test_v60.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2559 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
+2594 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 41 do `test_v476.py` + 65 do `test_v48.py` + 10 do `test_v481.py` + 49 do `test_v49.py` + 8 dos conjuntos fixos de 15/16-nov (#50) + 78 do `test_v51.py` + 135 do `test_v60.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2565 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**

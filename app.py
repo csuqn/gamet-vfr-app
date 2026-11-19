@@ -4154,7 +4154,7 @@ _NIVEL_ALTO_RE = re.compile(r"\bFL\d{3}/(?:FL)?\d{3}\b|\bABV\s+FL\d{3}\b")
 _NIVEL_OUTRO_RE = re.compile(r"\bFL\s*\d|\d\s*FT\b|\b\d{3,5}M\b|\b(?:SFC|GND|TOP|BLW|ABV)\b")
 # Outro fenómeno no mesmo texto → continua a contar (TS, CB, VA, TC, DS, SS,
 # RDOACT, GR, FZRA, SQL/EMBD/OBSC/FRQ).
-_OUTRO_FEN_RE = re.compile(r"\bTS(?:GR)?\b|\b(?:CB|VA|TC|DS|SS|RDOACT|GR|FZRA|SQL|EMBD|OBSC|FRQ)\b")
+_OUTRO_FEN_RE = re.compile(r"\bTS\w*|\b(?:CB|VA|TC|DS|SS|RDOACT|GR|FZRA|SQL|EMBD|OBSC|FRQ)\b")
 
 
 def nivel_inferior_estrito(texto):
@@ -4182,8 +4182,9 @@ def nivel_inferior_estrito(texto):
 # ancorado no início ("LPPC SIGMET U02 VALID 191700/192100 LPPT- LPPC LISBOA
 # FIR "); com outra forma não se corta nada e o corpo não começa por "SEV" →
 # o SIGMET conta.
-_SIGMET_CAB_RE = re.compile(r"^[A-Z]{4} SIGMET \S+ VALID \d{6}/\d{6} [A-Z]{4}- [A-Z]{4} "
-                            r"[A-Z]+(?: [A-Z]+)? FIR ")
+# 4.ª revisão: fixo ao do IPMA — o nome da FIR e o identificador não podem
+# esconder um nível ou um fenómeno ("LPPC SFC FIR", "SIGMET SFC/FL100").
+_SIGMET_CAB_RE = re.compile(r"^LPPC SIGMET [A-Z]\d{1,2} VALID \d{6}/\d{6} LPPT- LPPC LISBOA FIR ")
 _SIGMET_ALTO_FEN_RE = re.compile(r"\bSEV\s+(?:TURB|ICE|MTW)\b")
 _SIGMET_LISTA_BRANCA = [
     re.compile(r"\b(?:OBS|FCST)(?:\s+AT\s+\d{4}Z)?\b"),

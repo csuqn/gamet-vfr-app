@@ -614,3 +614,35 @@ def test_revisor_cabecalho_exacto_ponta_a_ponta(eng):
     r = eng.analisar_gamet(g, "ipma", boletins=[s], boletins_at=agora, agora=agora)
     assert any(x["decision"] == "NO-GO" for x in r["regioes"])
     assert r["faixa_sig"] == ("ACTIVO", "NO-GO")
+
+
+# Revisor do PR #58, 4.ª revisão: o cabeçalho é fixo ao do IPMA (o nome da FIR
+# e o identificador não escondem nível nem fenómeno) e "TS…" conta sempre.
+@pytest.mark.parametrize("cab", [
+    "LPPC SIGMET U09 VALID 191700/192100 LPPT- LPPC OCNL TSRA FIR ",
+    "LPPC SIGMET U09 VALID 191700/192100 LPPT- LPPC ISOL TSRA FIR ",
+    "LPPC SIGMET U09 VALID 191700/192100 LPPT- LPPC SFC FIR ",
+    "LPPC SIGMET SFC/FL100 VALID 191700/192100 LPPT- LPPC LISBOA FIR ",
+    "LPPC SIGMET U09 VALID 191700/192100 LPPT- LPPC SEV ICE FIR ",
+])
+def test_revisor_cabecalho_fixo(eng, cab):
+    texto = cab + "SEV TURB FCST " + _A + " FL220/430 STNR NC="
+    assert eng.sigmet_acima_vfr(texto) is None
+    agora = datetime(2026, 11, 19, 17, 30, tzinfo=timezone.utc)
+    g = build_gamet("SIGWX: NIL", validity="191500/192100")
+    r = eng.analisar_gamet(g, "ipma", boletins=[texto], boletins_at=agora, agora=agora)
+    assert r["faixa_sig"] == ("ACTIVO", "NO-GO")
+    assert any(x["decision"] == "NO-GO" for x in r["regioes"])
+
+
+def test_cabecalho_fixo_casa_todos_os_sigmets_do_arquivo(eng):
+    p = Path(__file__).resolve().parent.parent / "dados" / "indice.json"
+    if not p.exists():
+        pytest.skip("sem o arquivo (dados/)")
+    import re as _re
+    indice = json.loads(p.read_text(encoding="utf-8"))
+    sig = [e["texto"] for e in indice.get("sigmets", [])
+           if _re.match(r"\s*LPPC SIGMET", e.get("texto", ""))]
+    assert sig
+    for t in sig:
+        assert eng._SIGMET_CAB_RE.match(_re.sub(r"\s+", " ", t).strip()), t[:80]
