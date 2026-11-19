@@ -317,8 +317,8 @@ def test_arquivo_contra_4_5(eng, eng45):
     if not (DADOS / "indice.json").exists():
         pytest.skip("sem dados/")
     # 4.6: sem os boletins só com graus (verificados contra a 4.5.2 em test_v46.py)
-    indice = conftest.indice_sem_graus(
-        json.loads((DADOS / "indice.json").read_text(encoding="utf-8")))
+    indice = conftest.indice_sem_altos_60(conftest.indice_sem_graus(
+        json.loads((DADOS / "indice.json").read_text(encoding="utf-8"))))  # 6.0
     n = 0
     for entrada in indice.get("gamets", []):
         f = DADOS / entrada["ficheiro"]

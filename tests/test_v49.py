@@ -369,7 +369,7 @@ def test_airmet_sintetico_igual(eng, eng481, corpo):
 def _arquivo():
     if not (DADOS / "indice.json").exists():
         pytest.skip("sem dados/")
-    return json.loads((DADOS / "indice.json").read_text(encoding="utf-8"))
+    return conftest.indice_sem_altos_60(json.loads((DADOS / "indice.json").read_text(encoding="utf-8")))  # 6.0
 
 
 # GAMETs do arquivo que a 4.9 lê de outra forma (a 15-nov-2026).

@@ -427,6 +427,7 @@ definir `FIR_POLYGON` — não entram na decisão.
 | MT OBSC | NO-GO |
 | VA (cinzas vulcânicas) | NO-GO |
 | SIGMET activo com área legível (página do IPMA / arquivo) | NO-GO na área + 10 NM, estendida pelo MOV (desde a 3.0; `D OF LINE` como semiplano desde a 4.5) |
+| SIGMET só de TURB/ICE/MTW SEV com todos os níveis escritos acima do FL195 (`FL220/430`, `ABV FL250`) | informativo, não altera a decisão (desde a 6.0; SERA.5005(d)(2): o VFR não se faz acima do FL195) |
 | SIGMET sem área legível, ENTIRE FIR, ou só o identificador no GAMET | NO-GO em toda a área |
 | SIGMET referido no GAMET que se sabe terminado (expirou / CNL) | não conta; aviso (desde a 3.2). Estado desconhecido → toda a área |
 | AIRMET em vigor (página do IPMA / arquivo) | as regras acima, na área do AIRMET, **sem margem**, estendida pelo MOV (desde a 4.0). Área/MOV ilegível → toda a FIR + aviso |
@@ -494,6 +495,38 @@ Continua a ser **toda a área** quando: a área não é legível, há `ENTIRE FI
 ou uma `LINE` que não se lê (ver abaixo), o `MOV` não tem direcção/velocidade
 legível, ou o GAMET refere um SIGMET cujo texto completo não está disponível
 (ex.: GAMET colado à mão).
+
+**Níveis dos SIGMET (6.0, decisão do Duarte a 19-nov-2026; mudança de regra).**
+O VFR não se faz acima do FL195 (SERA.5005(d)(2), salvo reserva de espaço ou
+autorização do ATS até ao FL285). Até à 5.1.5 os níveis não contavam e um
+SIGMET de turbulência na alta altitude punha NO-GO na sua área como se fosse
+junto ao chão — SIGMETs reais U01/U02 de 19-nov (`SEV TURB FCST … FL220/430`,
+35% da FIR em NO-GO), U02/U03 do 141500 (FL310–420, 37 pontos GO → NO-GO) e U03
+do 151500 (FL240–400), pendente desde a W42. Desde a 6.0 `sigmet_acima_vfr()`
+dá o limite inferior só quando o SIGMET é **só** de SEV TURB/ICE/MTW (nenhum
+outro fenómeno no texto — TS, CB, VA, TC, DS, SS, RDOACT, GR, FZRA, SQL/EMBD/
+OBSC/FRQ; com cabeçalho, o fenómeno é o primeiro depois de `FIR`) e **todos**
+os níveis escritos são `FLaaa/bbb` ou `ABV FLaaa` (`nivel_inferior_estrito`:
+qualquer outro nível que sobre — `FL150`, `3000M/FL250`, `SFC-FL100`, `8000
+FT`, `OBS … FCST … FL180`, `FL220 / 430` — → None) com o limite inferior acima
+do FL195 (`FL200/150` → 150). Então `blocos_sigmet` dá um bloco
+`SIGMET_ALTO` (não NO-GO): `decision()` junta o motivo "SIGMET … (acima dos
+níveis VFR)" sem mudar o nível, `classificar_motivo` dá-lhe "INFO", o painel
+da zona diz "… — acima dos níveis VFR (o VFR não se faz acima do FL195):
+informativo, não entra na decisão". Se todos os SIGMETs em vigor forem assim:
+faixa "ACIMA FL195" (sem cor) e aviso `info`; com `SIGMET APPLICABLE` e o
+texto disponível, aviso `aviso` (não força toda a FIR). Continuam NO-GO como
+até à 5.1.5: limite inferior na superfície ou até ao FL195 (`ABV FL195`
+incluído), só o topo (`TOP FL340`), níveis por ler, outro fenómeno, `SEV ICE
+(FZRA)`, e o SIGMET só referido no GAMET sem o texto completo. Na dúvida, o
+SIGMET conta (revisão do agente `parser`: as leituras optimistas da 1.ª versão
+estão em `test_v60.py`). Também (relatório W46, g.6) o aviso de SIGMETs não
+referidos no GAMET e todos acima do FL150 deixa de dizer "provavelmente emitido
+depois dele" — o GAMET é BLW FL150 e não os tem de referir (só texto). Os
+testes do arquivo contra motores anteriores tiram do índice os SIGMETs altos
+(`conftest.indice_sem_altos_60`) e repõem o texto antigo desse aviso
+(`conftest.avisos_redaccao_60`); `test_v51` passa a ignorar "INFO" no pior
+nível e verifica a descrição com o U01 a `SFC/FL100`.
 
 **`D OF LINE …` (4.5, pedido do Duarte a 1-nov-2026).** Casos reais: SIGMET
 T01 311035/311330 (`SW OF LINE N3508 W01641 - N35 W01628 AND W OF LINE N35
@@ -743,7 +776,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-2459 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 41 do `test_v476.py` + 65 do `test_v48.py` + 10 do `test_v481.py` + 49 do `test_v49.py` + 8 dos conjuntos fixos de 15/16-nov (#50) + 78 do `test_v51.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2430 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
+2553 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 41 do `test_v476.py` + 65 do `test_v48.py` + 10 do `test_v481.py` + 49 do `test_v49.py` + 8 dos conjuntos fixos de 15/16-nov (#50) + 78 do `test_v51.py` + 94 do `test_v60.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2524 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -1049,6 +1082,15 @@ python3 -m pytest
   referência) e contorno da zona escolhida por cima de todas, com os buracos (5.1.2),
   tocar numa zona do mapa escolhe-a (5.1.3), camada da zona e mapa base fixo
   (5.1.4), o que o SIGMET avisa (5.1.5)
+- `tests/test_v60.py` — níveis dos SIGMET (6.0): `nivel_inferior_sigmet` e
+  `sigmet_acima_vfr` (fronteira FL195/FL196, TURB/ICE/MTW, outros fenómenos);
+  SIGMET U02 real de 19-nov sozinho (52 pontos GO, motivo INFO, faixa "ACIMA
+  FL195", aviso `info`, painel, porquê); variantes que continuam NO-GO iguais à
+  versão forçada; U02 com um SIGMET baixo; `SIGMET APPLICABLE` com e sem
+  texto; resto do período; 200 SIGMETs gerados (só menos severo quando o nível
+  passa do FL195, e então igual ao GAMET sem o SIGMET); arquivo em
+  `arquivo_hist` (nenhum SIGMET alto dá NO-GO; sem eles, decisões iguais); os
+  casos optimistas do agente `parser` continuam a contar
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva

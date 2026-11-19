@@ -345,6 +345,7 @@ def eng_norm(texto):
 def _comparar(eng, eng474, texto, nome, fonte="manual", **kw):
     rn = eng.analisar_gamet(texto, fonte, **kw)
     rv = eng474.analisar_gamet(texto, fonte, **kw)
+    rn["avisos"] = conftest.avisos_redaccao_60(rn["avisos"])  # 6.0, só texto
     muda = _tem_sfc_wind(texto)
     if not muda:
         _iguais(eng, eng474, rn["regioes"], rv["regioes"], nome)
@@ -386,7 +387,7 @@ def _nunca_mais_permissivo(eng, eng474, regs_n, regs_v, nome):
 def _arquivo():
     if not (DADOS / "indice.json").exists():
         pytest.skip("sem dados/")
-    return json.loads((DADOS / "indice.json").read_text(encoding="utf-8"))
+    return conftest.indice_sem_altos_60(json.loads((DADOS / "indice.json").read_text(encoding="utf-8")))  # 6.0
 
 
 def test_arquivo_manual_contra_4_7_4(eng, eng474):

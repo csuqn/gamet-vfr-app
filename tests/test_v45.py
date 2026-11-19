@@ -439,8 +439,8 @@ def test_arquivo_contra_4_4(eng, eng44):
     # 4.6: sem os boletins só com graus (verificados contra a 4.5 em test_v46.py);
     # 4.5.1: sem os boletins cuja área cresce com a margem a partir do semiplano
     # (verificados contra a 4.5 em test_v46_margem.py)
-    indice = conftest.indice_sem_margem_451(
-        indice_sem_graus(json.loads((DADOS / "indice.json").read_text(encoding="utf-8"))), eng)
+    indice = conftest.indice_sem_altos_60(conftest.indice_sem_margem_451(
+        indice_sem_graus(json.loads((DADOS / "indice.json").read_text(encoding="utf-8"))), eng))  # 6.0
     sem = indice_sem_linhas(indice)
     com_linha = 0
     for entrada in indice.get("gamets", []):
@@ -469,7 +469,7 @@ def test_arquivo_contra_4_4(eng, eng44):
             dv = {n: _dec(eng44, rv, *p) for n, p in eng.AERODROMES.items()}
             if not tem_linha:
                 assert rn["por_dec"] == rv["por_dec"], f.name
-                assert rn["avisos"] == rv["avisos"], f.name
+                assert conftest.avisos_redaccao_60(rn["avisos"]) == rv["avisos"], f.name  # 6.0
                 assert rn["faixa_sig"] == rv["faixa_sig"], f.name
                 assert dn == dv, f.name
                 continue

@@ -174,7 +174,7 @@ def test_gamets_reais_decisoes_esperadas(eng):
 def _arquivo():
     if not (DADOS / "indice.json").exists():
         pytest.skip("sem dados/")
-    return json.loads((DADOS / "indice.json").read_text(encoding="utf-8"))
+    return conftest.indice_sem_altos_60(json.loads((DADOS / "indice.json").read_text(encoding="utf-8")))  # 6.0
 
 
 _sem_graus = conftest.indice_sem_graus
@@ -399,7 +399,7 @@ def test_arquivo_contra_4_5_2(eng, eng452):
             dn, dv = _decisoes(eng, rn), _decisoes(eng452, rv)
             if not tem:
                 assert rn["por_dec"] == rv["por_dec"], f.name
-                assert rn["avisos"] == rv["avisos"], f.name
+                assert conftest.avisos_redaccao_60(rn["avisos"]) == rv["avisos"], f.name  # 6.0
                 assert rn["faixa_sig"] == rv["faixa_sig"], f.name
                 assert dn == dv, f.name
                 continue

@@ -144,6 +144,7 @@ GRELHA = [(la / 10, lo / 10) for la in range(368, 422, 3) for lo in range(-96, -
 def _comparar(eng, eng473, texto, nome, fonte="manual", **kw):
     rn = eng.analisar_gamet(texto, fonte, **kw)
     rv = eng473.analisar_gamet(texto, fonte, **kw)
+    rn["avisos"] = conftest.avisos_redaccao_60(rn["avisos"])  # 6.0, só texto
     _comparar_regioes(eng, eng473, rn["regioes"], rv["regioes"], nome)
     for campo in ("por_dec", "avisos", "faixa_sig"):
         assert rn.get(campo) == rv.get(campo), (nome, campo)
@@ -180,7 +181,7 @@ def _comparar_regioes(eng, eng473, regs_n, regs_v, nome):
 def _arquivo():
     if not (DADOS / "indice.json").exists():
         pytest.skip("sem dados/")
-    return json.loads((DADOS / "indice.json").read_text(encoding="utf-8"))
+    return conftest.indice_sem_altos_60(json.loads((DADOS / "indice.json").read_text(encoding="utf-8")))  # 6.0
 
 
 def test_arquivo_manual_contra_4_7_3(eng, eng473):

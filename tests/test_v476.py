@@ -367,7 +367,7 @@ def _resto_nao_menos_severo(eng, eng475, texto, agora, ctx, **kw):
 def _arquivo():
     if not (DADOS / "indice.json").exists():
         pytest.skip("sem dados/")
-    return json.loads((DADOS / "indice.json").read_text(encoding="utf-8"))
+    return conftest.indice_sem_altos_60(json.loads((DADOS / "indice.json").read_text(encoding="utf-8")))  # 6.0
 
 
 def test_arquivo_manual_contra_4_7_5(eng, eng475):
