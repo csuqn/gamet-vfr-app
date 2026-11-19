@@ -406,7 +406,14 @@ def test_tocar_em_cada_zona_do_mapa_da_essa_zona(eng):
     fmap = eng.mapa_zonas(regs, ordem, 2, "Lisboa (LPPT)")
     por_zona = {}
     brancas = 0
-    for filho in fmap._children.values():
+
+    def _todos(el):
+        for c in el._children.values():
+            yield c
+            if isinstance(c, folium.FeatureGroup):
+                yield from _todos(c)
+
+    for filho in _todos(fmap):
         tip = next((c for c in filho._children.values()
                     if isinstance(c, folium.Tooltip)), None)
         if isinstance(filho, (folium.Polygon, folium.Marker)) and tip is not None \
@@ -425,6 +432,53 @@ def test_tocar_em_cada_zona_do_mapa_da_essa_zona(eng):
     # Os aeródromos não são zonas
     for nome in ("Lisboa (LPPT)",):
         assert eng.zona_do_clique(nome, n) is None
+
+
+def test_camada_da_zona_escolhida(eng):
+    """(5.1.4) A camada da zona escolhida tem o contorno de todos os anéis da
+    zona e o número com aro branco, e nada nela recebe toques. O mapa base
+    (sem zona escolhida) não depende da zona: no Streamlit fica igual entre
+    toques e o componente não o monta de novo."""
+    folium = pytest.importorskip("folium")
+    r = eng.analisar_gamet(G180900, "manual")
+    regs = r["regioes"]
+    ordem = eng.zonas_ordem(regs)
+    for sel in range(1, len(ordem) + 1):
+        fg = eng.camada_zona(regs, ordem, sel)
+        assert isinstance(fg, folium.FeatureGroup)
+        linhas = [c for c in fg._children.values() if isinstance(c, folium.PolyLine)]
+        marcas = [c for c in fg._children.values() if isinstance(c, folium.Marker)]
+        poly = regs[ordem[sel - 1]]["polygon"]
+        aneis = [a for g in getattr(poly, "geoms", [poly]) for a in [g.exterior, *g.interiors]]
+        assert len(linhas) == len(aneis) and len(marcas) == 1
+        assert all(c.options.get("interactive") is False for c in linhas + marcas)
+        assert f">{sel}</div>" in marcas[0].icon.options["html"]
+        assert "#FFFFFF" in marcas[0].icon.options["html"]
+    # Fora de 1..n ou sem zona: camada vazia
+    assert not eng.camada_zona(regs, ordem, 0)._children
+    assert not eng.camada_zona(regs, ordem, len(ordem) + 1)._children
+    # O mapa base não leva camada nem contorno branco
+    base = eng.mapa_zonas(regs, ordem, None)
+    assert not any(isinstance(c, folium.FeatureGroup) for c in base._children.values())
+    assert '"color": "#FFFFFF"' not in base.get_root().render()
+
+
+def test_mapa_base_igual_entre_zonas_para_o_st_folium(eng):
+    """(5.1.4) A chave interna do st_folium é um hash do JavaScript do mapa base
+    sem os identificadores aleatórios: dois mapas base gerados em voltas
+    diferentes (com outra zona escolhida) dão o mesmo hash, por isso o mapa não
+    é montado de novo ao trocar de zona."""
+    pytest.importorskip("folium")
+    sf = pytest.importorskip("streamlit_folium")
+    r = eng.analisar_gamet(G180900, "manual")
+    regs = r["regioes"]
+    ordem = eng.zonas_ordem(regs)
+    hashes = set()
+    for _ in range(3):
+        m = eng.mapa_zonas(regs, ordem, None, "Lisboa (LPPT)")
+        m.render()
+        hashes.add(sf.generate_js_hash(sf._get_map_string(m), "mapa_x"))
+    assert len(hashes) == 1
 
 
 # ---------------------------------------------------------------- 5.1.2

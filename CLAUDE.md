@@ -743,7 +743,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-2445 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 41 do `test_v476.py` + 65 do `test_v48.py` + 10 do `test_v481.py` + 49 do `test_v49.py` + 8 dos conjuntos fixos de 15/16-nov (#50) + 64 do `test_v51.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2416 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
+2447 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 41 do `test_v476.py` + 65 do `test_v48.py` + 10 do `test_v481.py` + 49 do `test_v49.py` + 8 dos conjuntos fixos de 15/16-nov (#50) + 66 do `test_v51.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2418 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -1047,7 +1047,8 @@ python3 -m pytest
   completa (ordem dos blocos, zona do aeródromo, mudar de zona, avisos em
   expanders, erros abertos), PDF (`pdftotext`), origem da base (5.1.2: local, AMSL, sem
   referência) e contorno da zona escolhida por cima de todas, com os buracos (5.1.2),
-  tocar numa zona do mapa escolhe-a (5.1.3)
+  tocar numa zona do mapa escolhe-a (5.1.3), camada da zona e mapa base fixo
+  (5.1.4)
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva
@@ -1182,7 +1183,15 @@ com o `st_folium` do `streamlit-folium` e **tocar numa zona ou no número dela
 escolhe-a** — `zona_do_clique` lê o tooltip "Zona n: …" do objecto tocado, a
 chave do mapa muda com a zona escolhida para o clique anterior não voltar a
 contar, o contorno branco não recebe toques e não há rectângulo de foco; sem o
-`streamlit-folium` volta o `st.iframe` com `mapa_zonas_html`); botões ZONA 1…n
+`streamlit-folium` volta o `st.iframe` com `mapa_zonas_html`; desde a 5.1.4,
+também pedido do Duarte a 19-nov-2026, a secção mapa + botões + painel + quadro
+é um `st.fragment` — um toque só corre essa secção, não a análise nem o PDF —
+e o mapa base (`mapa_zonas(…, None)`) não depende da zona escolhida e tem chave
+fixa: o `st_folium` não o monta de novo, só troca a camada da zona
+(`camada_zona`, `feature_group_to_add`); o toque é lido do `session_state`
+pelo `last_object_clicked_count` no início da volta, sem `st.rerun()`. Medido
+na app local: ~0,5 s por toque, dos quais 250 ms são a espera fixa do
+componente, contra 0,85–1,2 s e 9 mosaicos pedidos de novo na 5.1.3); botões ZONA 1…n
 (`st.segmented_control`, chave `zona_sel`; começa na zona do aeródromo e volta
 a ela com um GAMET ou aeródromo novo); painel da zona (`html_zona`: % da FIR,
 resto do período, motivos por extenso, alcance, aeródromos a abrir); quadro
