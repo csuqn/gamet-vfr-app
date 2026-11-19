@@ -4177,8 +4177,13 @@ def nivel_inferior_estrito(texto):
 # Cabeçalho: até ao "FIR" que vem a seguir a "VALID ddhhmm/ddhhmm", sem
 # atravessar "ENTIRE" (revisor do PR #58, 2.ª revisão: com "FIR/UIR" ou sem
 # FIR no cabeçalho, cortar até ao 1.º "FIR " apagava um "EMBD TS" antes de
-# "ENTIRE FIR"). Sem cabeçalho assim, o texto fica inteiro.
-_SIGMET_CAB_RE = re.compile(r"^.*?\bVALID\s+\d{6}/\d{6}\b(?:(?!\bENTIRE\b).)*?\bFIR\s+")
+# "ENTIRE FIR").
+# 3.ª revisão: só se corta um cabeçalho com a forma exacta dos boletins do IPMA,
+# ancorado no início ("LPPC SIGMET U02 VALID 191700/192100 LPPT- LPPC LISBOA
+# FIR "); com outra forma não se corta nada e o corpo não começa por "SEV" →
+# o SIGMET conta.
+_SIGMET_CAB_RE = re.compile(r"^[A-Z]{4} SIGMET \S+ VALID \d{6}/\d{6} [A-Z]{4}- [A-Z]{4} "
+                            r"[A-Z]+(?: [A-Z]+)? FIR ")
 _SIGMET_ALTO_FEN_RE = re.compile(r"\bSEV\s+(?:TURB|ICE|MTW)\b")
 _SIGMET_LISTA_BRANCA = [
     re.compile(r"\b(?:OBS|FCST)(?:\s+AT\s+\d{4}Z)?\b"),

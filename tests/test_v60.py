@@ -585,3 +585,32 @@ def test_revisor_cabecalho_ponta_a_ponta(eng):
     r = eng.analisar_gamet(g, "ipma", boletins=[s], boletins_at=agora, agora=agora)
     assert all(x["decision"] == "NO-GO" for x in r["regioes"])
     assert r["faixa_sig"] == ("ACTIVO", "NO-GO")
+
+
+# Revisor do PR #58, 3.ª revisão: o corte do cabeçalho não pode apagar um
+# nível baixo — só se corta o cabeçalho com a forma exacta do IPMA.
+@pytest.mark.parametrize("texto", [
+    "LPPC SIGMET U09 VALID 191700/192100 LPPT- LPPC LISBOA SEV TURB FCST " + _A
+    + " SFC/FL100 AND LISBOA FIR SEV TURB FCST " + _A + " FL220/430",
+    "LPPC SIGMET U09 VALID 191700/192100 LPPT- LPPC LISBOA FIR/UIR SEV ICE FCST " + _A
+    + " FL050/150 WI LISBOA FIR SEV TURB FCST " + _A + " FL220/430",
+    "LPPC SIGMET U09 VALID 191700/192100 LPPT- SFC/FL100 LISBOA FIR SEV TURB FCST " + _A + " FL220/430",
+    "LPPC SIGMET U09 VALID 191700/192100 LPPT- FL050/100 SANTA MARIA FIR SEV TURB FCST " + _A
+    + " FL220/430",
+    "SFC/FL100 LPPC SIGMET U09 VALID 191700/192100 LPPT- LPPC LISBOA FIR SEV TURB FCST " + _A
+    + " FL220/430",
+    "LPPC SIGMET U09 VALID 191700/192100 LPPT- LPPC LISBOA FIR TEST SEV TURB FCST " + _A
+    + " FL220/430",
+])
+def test_revisor_cabecalho_exacto(eng, texto):
+    assert eng.sigmet_acima_vfr(texto) is None
+
+
+def test_revisor_cabecalho_exacto_ponta_a_ponta(eng):
+    agora = datetime(2026, 11, 19, 17, 30, tzinfo=timezone.utc)
+    g = build_gamet("SIGWX: NIL", validity="191500/192100")
+    s = ("LPPC SIGMET U09 VALID 191700/192100 LPPT- LPPC LISBOA SEV TURB FCST " + _A
+         + " SFC/FL100 AND LISBOA FIR SEV TURB FCST " + _A + " FL220/430")
+    r = eng.analisar_gamet(g, "ipma", boletins=[s], boletins_at=agora, agora=agora)
+    assert any(x["decision"] == "NO-GO" for x in r["regioes"])
+    assert r["faixa_sig"] == ("ACTIVO", "NO-GO")
