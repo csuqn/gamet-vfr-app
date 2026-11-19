@@ -743,7 +743,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-2447 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 41 do `test_v476.py` + 65 do `test_v48.py` + 10 do `test_v481.py` + 49 do `test_v49.py` + 8 dos conjuntos fixos de 15/16-nov (#50) + 66 do `test_v51.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2418 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
+2459 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 41 do `test_v476.py` + 65 do `test_v48.py` + 10 do `test_v481.py` + 49 do `test_v49.py` + 8 dos conjuntos fixos de 15/16-nov (#50) + 78 do `test_v51.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2430 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -1048,7 +1048,7 @@ python3 -m pytest
   expanders, erros abertos), PDF (`pdftotext`), origem da base (5.1.2: local, AMSL, sem
   referência) e contorno da zona escolhida por cima de todas, com os buracos (5.1.2),
   tocar numa zona do mapa escolhe-a (5.1.3), camada da zona e mapa base fixo
-  (5.1.4)
+  (5.1.4), o que o SIGMET avisa (5.1.5)
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva
@@ -1211,7 +1211,15 @@ AMSL no GAMET, junto ao relevo)" se veio de uma base AMSL convertida, "(sem
 referência no GAMET, lida como AGL)" se o texto não tinha AGL/AMSL —:
 `info_base(região, r["blocos"])`, com `analisar_gamet` a devolver os blocos
 que entraram nas regiões e `MetBlock.sem_ref` marcado pelo parser, fora da
-igualdade; só texto, decisões iguais); TURB/ICE MOD e o vento a 1000 ft das
+igualdade; só texto, decisões iguais); desde a 5.1.5 (pedido do Duarte a
+19-nov-2026, captura de "SIGMET U01 → NO-GO" sem mais nada) o motivo SIGMET diz
+o que ele avisa — "SIGMET U01 — turbulência severa prevista, FL220–FL430,
+desloca-se para E a 40 kt, a intensificar" (`descrever_sigmet`: fenómeno,
+observado/previsto, níveis, MOV/STNR, INTSF/WKN/NC; o que não lê fica de fora)
+e no quadro "U01 SEV TURB" (`_com_info_sigmet`, com o texto do SIGMET guardado
+em `MetBlock.texto`, fora da igualdade; só referido no GAMET → "referido no
+GAMET, sem o texto completo: conta em toda a área"); só texto, decisões
+iguais; TURB/ICE MOD e o vento a 1000 ft das
 estações dentro da zona entram como informativos; "Sem trovoada nem CB" quando
 não há nenhum; `*` = só em parte da zona. `test_v51` verifica em todo o
 arquivo (manual e `arquivo_hist`) e nos `GAMETS_VARIADOS` que o pior nível dos

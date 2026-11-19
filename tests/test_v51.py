@@ -379,6 +379,109 @@ def test_zona_com_buraco_nao_pinta_o_buraco(eng):
     assert eng._aneis_folium(dentro) == [[la, lo] for lo, la in dentro.exterior.coords]
 
 
+# ---------------------------------------------------------------- 5.1.5
+
+_U01_191500 = ("LPPC SIGMET U01 VALID 191500/191700 LPPT- LPPC LISBOA FIR SEV TURB FCST WI "
+               "N3746 W01002 - N3822 W015 - N42 W015 - N3959 W00903 - N3746 W01002 FL220/430 "
+               "MOV E 40KT INTSF")
+
+
+@pytest.mark.parametrize("texto,esperado", [
+    (_U01_191500, "turbulência severa prevista, FL220–FL430, desloca-se para E a 40 kt, "
+                  "a intensificar"),
+    ("LPPC SIGMET U01 VALID 181450/181800 LPPT- LPPC LISBOA FIR SEV TURB FCST N OF N3839 "
+     "AND E OF W010 SFC/FL100 MOV ENE 30KT NC",
+     "turbulência severa prevista, da superfície ao FL100, desloca-se para ENE a 30 kt, "
+     "sem alteração"),
+    ("LPPC SIGMET T01 VALID 010450/010850 LPPT- LPPC LISBOA FIR EMBD TSGR OBS AT 0430Z WI "
+     "N3700 W01200 - N3600 W01100 TOP FL340 STNR WKN=",
+     "trovoada embebida com granizo observada, topo FL340, estacionário, a enfraquecer"),
+    ("LPPC SIGMET T02 VALID 010850/011250 LPPT- LPPC LISBOA FIR EMBD TS FCST S OF N33 "
+     "TOP ABV FL300 MOV NE 15KT NC=",
+     "trovoada embebida prevista, topo acima do FL300, desloca-se para NE a 15 kt, "
+     "sem alteração"),
+    ("LPPC SIGMET I01 VALID 171745/172145 LPPT- LPPC LISBOA FIR SEV ICE (FZRA) FCST ENTIRE "
+     "FIR FL050/120 MOV E 10KT INTSF=",
+     "gelo severo (chuva gelada) previsto, FL050–FL120, desloca-se para E a 10 kt, "
+     "a intensificar"),
+    ("LPPC SIGMET V01 VALID 010000/010600 LPPT- LPPC LISBOA FIR VA CLD OBS AT 2340Z WI "
+     "N40 W010 - N41 W010 - N41 W009 - N40 W010 SFC/FL200 MOV E 20KT=",
+     "cinzas vulcânicas observadas, da superfície ao FL200, desloca-se para E a 20 kt"),
+    ("LPPC SIGMET M01 VALID 010000/010600 LPPT- LPPC LISBOA FIR SEV MTW FCST N OF N4100 "
+     "FL080/160 STNR NC=",
+     "onda de montanha severa prevista, FL080–FL160, estacionário, sem alteração"),
+    ("LPPC SIGMET X01 VALID 010000/010600 LPPT- LPPC LISBOA FIR ALGO NOVO", ""),
+    ("", ""),
+])
+def test_descrever_sigmet(eng, texto, esperado):
+    """(5.1.5, pedido do Duarte a 19-nov-2026) O que o SIGMET avisa, por
+    extenso (boletins reais do arquivo e formatos do Anexo 3). O que não lê
+    fica de fora — nunca inventa."""
+    assert eng.descrever_sigmet(texto) == esperado
+
+
+def test_zona_diz_o_que_o_sigmet_avisa(eng):
+    """(5.1.5, captura do Duarte a 19-nov-2026: "SIGMET U01 → NO-GO" sem mais
+    nada) Com o SIGMET U01 real de 19-nov em vigor, o painel da zona, o porquê
+    do veredicto e o quadro dizem o que ele avisa; a decisão não muda."""
+    pytest.importorskip("folium")
+    agora = datetime(2026, 11, 19, 15, 30, tzinfo=timezone.utc)
+    g = build_gamet("SIGWX: NIL", validity="191500/192100")
+    r0 = eng.analisar_gamet(g, "manual", agora=agora)
+    r = eng.analisar_gamet(g, "ipma", boletins=[_U01_191500], boletins_at=agora, agora=agora)
+    regs = r["regioes"]
+    com = [x for x in regs if any(m.startswith("SIGMET U01") for m in x["reasons"])]
+    assert com and all(x["decision"] == "NO-GO" for x in com)
+    sem = [x for x in regs if x not in com]
+    assert all(x["decision"] == "GO" for x in sem) and r0["regioes"][0]["decision"] == "GO"
+    desc = "turbulência severa prevista, FL220–FL430, desloca-se para E a 40 kt, a intensificar"
+    ordem = eng.zonas_ordem(regs)
+    z = next(n for n, i in enumerate(ordem, 1) if regs[i] in com)
+    h = eng.html_zona(z, regs[ordem[z - 1]], 30.0, regs, (), None, r["blocos"])
+    assert f"SIGMET U01 — {desc}" in eng.html.unescape(h)
+    assert desc in eng.porque_veredicto(regs, r["blocos"])
+    q = eng.html.unescape(eng.html_quadro(regs, ordem, z, None, r["blocos"]))
+    assert "U01 SEV TURB" in q
+
+
+def test_sigmet_so_referido_no_gamet(eng):
+    """Sem o texto do SIGMET (só "SIGMET APPLICABLE" no GAMET colado à mão), o
+    motivo diz isso em vez de ficar só o identificador."""
+    g = build_gamet("SIGWX: NIL", sigmet="U01")
+    r = eng.analisar_gamet(g, "manual")
+    regs = r["regioes"]
+    cs = [eng._com_info_sigmet(eng.classificar_motivo(m), r["blocos"])
+          for x in regs for m in x["reasons"]]
+    sig = [c for c in cs if c["linha"] == "SIGMET"]
+    assert sig and all(c["nivel"] == "NO-GO" for c in sig)
+    assert all("referido no GAMET, sem o texto completo" in eng.motivo_legivel(c) for c in sig)
+
+
+@pytest.mark.skipif(not (DADOS / "gamets").is_dir(), reason="sem o arquivo (dados/)")
+def test_sigmets_do_arquivo_descritos(eng):
+    """Todos os SIGMETs arquivados que entram numa zona (arquivo_hist) ficam
+    descritos — o fenómeno é sempre lido — e o nível continua NO-GO."""
+    indice = json.loads((DADOS / "indice.json").read_text(encoding="utf-8"))
+    entradas = {e.get("ficheiro"): e for e in indice.get("gamets", [])}
+    vistos = 0
+    for f in sorted((DADOS / "gamets").rglob("*.txt")):
+        ent = entradas.get(str(f.relative_to(DADOS)))
+        if not ent:
+            continue
+        r = eng.analisar_gamet(f.read_text(encoding="utf-8"), "arquivo_hist",
+                               indice=indice, entrada=ent)
+        for x in r["regioes"]:
+            for m in x["reasons"]:
+                c = eng._com_info_sigmet(eng.classificar_motivo(m), r["blocos"])
+                if c["linha"] != "SIGMET" or "GAMET, sem área" in m:
+                    continue
+                vistos += 1
+                assert c["nivel"] == "NO-GO"
+                assert c.get("longo", "").startswith(c["valor"].split()[0] + " — "), (f.name, m)
+                assert eng._fen_sigmet_pt(c["longo"])[0] is None  # já em português
+    assert vistos > 0
+
+
 # ---------------------------------------------------------------- 5.1.3
 
 @pytest.mark.parametrize("tooltip,n,esperado", [
