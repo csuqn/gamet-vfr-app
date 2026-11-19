@@ -743,7 +743,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-2433 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 41 do `test_v476.py` + 65 do `test_v48.py` + 10 do `test_v481.py` + 49 do `test_v49.py` + 8 dos conjuntos fixos de 15/16-nov (#50) + 52 do `test_v51.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2404 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
+2445 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 41 do `test_v476.py` + 65 do `test_v48.py` + 10 do `test_v481.py` + 49 do `test_v49.py` + 8 dos conjuntos fixos de 15/16-nov (#50) + 64 do `test_v51.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2416 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -1046,7 +1046,8 @@ python3 -m pytest
   do aeródromo (GAMET real 180900/181500), títulos/etiquetas dos avisos, app
   completa (ordem dos blocos, zona do aeródromo, mudar de zona, avisos em
   expanders, erros abertos), PDF (`pdftotext`), origem da base (5.1.2: local, AMSL, sem
-  referência) e contorno da zona escolhida por cima de todas, com os buracos (5.1.2)
+  referência) e contorno da zona escolhida por cima de todas, com os buracos (5.1.2),
+  tocar numa zona do mapa escolhe-a (5.1.3)
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva
@@ -1176,7 +1177,12 @@ GAMET fora da validade, GAMET do arquivo); "O meu aeródromo" numa linha
 (`html_meu_aerodromo`, com a zona); o **mapa** (Folium, zonas numeradas, a
 escolhida com contorno branco — desde a 5.1.2 desenhado depois de todas as zonas e
 com os buracos, porque as zonas seguintes o tapavam nas fronteiras comuns —, o
-aeródromo realçado); botões ZONA 1…n
+aeródromo realçado; desde a 5.1.3, pedido do Duarte a 19-nov-2026, desenhado
+com o `st_folium` do `streamlit-folium` e **tocar numa zona ou no número dela
+escolhe-a** — `zona_do_clique` lê o tooltip "Zona n: …" do objecto tocado, a
+chave do mapa muda com a zona escolhida para o clique anterior não voltar a
+contar, o contorno branco não recebe toques e não há rectângulo de foco; sem o
+`streamlit-folium` volta o `st.iframe` com `mapa_zonas_html`); botões ZONA 1…n
 (`st.segmented_control`, chave `zona_sel`; começa na zona do aeródromo e volta
 a ela com um GAMET ou aeródromo novo); painel da zona (`html_zona`: % da FIR,
 resto do período, motivos por extenso, alcance, aeródromos a abrir); quadro

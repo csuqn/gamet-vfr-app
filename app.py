@@ -10,6 +10,11 @@ try:
     _FOLIUM_OK = True
 except ImportError:
     _FOLIUM_OK = False
+try:
+    from streamlit_folium import st_folium   # (5.1.3) mapa que devolve o clique
+    _ST_FOLIUM_OK = True
+except ImportError:
+    _ST_FOLIUM_OK = False
 import matplotlib.pyplot as plt
 try:
     import pandas as pd
@@ -29,7 +34,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "5.1.2"
+APP_VERSION = "5.1.3"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -5819,16 +5824,40 @@ def _aneis_folium(g):
     return [ext] + [[[la, lo] for lo, la in r.coords] for r in g.interiors]
 
 
+_ZONA_CLIQUE_RE = re.compile(r"^\s*Zona (\d+):")
+
+
+def zona_do_clique(tooltip, n_zonas):
+    """(5.1.3, pedido do Duarte a 19-nov-2026) Número da zona tocada no mapa,
+    a partir do tooltip do objecto clicado ("Zona 3: GO" — polígono ou número
+    da zona). Outro objecto (aeródromo, nada) ou número fora de 1..n → None."""
+    m = _ZONA_CLIQUE_RE.match(tooltip or "") if isinstance(tooltip, str) else None
+    if not m:
+        return None
+    z = int(m.group(1))
+    return z if 1 <= z <= n_zonas else None
+
+
 def mapa_zonas_html(regions, ordem, sel, aerodromo=None):
-    """(5.1/5.1.1) Página HTML do mapa Folium: zonas coloridas pela decisão e
-    numeradas (a escolhida com contorno branco), os 52 pontos e o aeródromo
-    preferido realçado. Devolve a página completa (get_root().render()), com o
-    mapa a 100% da altura do iframe — o _repr_html_ dos notebooks dá altura =
-    60% da largura e no telemóvel sobrava um grande espaço vazio por baixo do
-    mapa (captura do Duarte, 18-nov-2026)."""
+    """(5.1/5.1.1) Página HTML do mapa Folium (`mapa_zonas`). Devolve a página
+    completa (get_root().render()), com o mapa a 100% da altura do iframe — o
+    _repr_html_ dos notebooks dá altura = 60% da largura e no telemóvel sobrava
+    um grande espaço vazio por baixo do mapa (captura do Duarte, 18-nov-2026).
+    Desde a 5.1.3 só se usa sem o streamlit-folium."""
+    return mapa_zonas(regions, ordem, sel, aerodromo).get_root().render()
+
+
+def mapa_zonas(regions, ordem, sel, aerodromo=None):
+    """(5.1) Mapa Folium: zonas coloridas pela decisão e numeradas (a
+    escolhida com contorno branco), os 52 pontos e o aeródromo preferido
+    realçado. Cada zona e o seu número têm o tooltip "Zona n: DECISÃO", que é
+    o que `zona_do_clique` lê (5.1.3)."""
     import folium
     fmap = folium.Map(location=[39.6, -8.0], zoom_start=6, tiles="OpenStreetMap",
                       control_scale=True)
+    # (5.1.3) Sem o rectângulo de foco do browser à volta da zona tocada.
+    fmap.get_root().header.add_child(folium.Element(
+        "<style>.leaflet-interactive:focus{outline:none}</style>"))
     contorno = []    # (5.1.2) contorno da zona escolhida, desenhado no fim
     for z, i in enumerate(ordem, 1):
         region = regions[i]
@@ -5864,8 +5893,10 @@ def mapa_zonas_html(regions, ordem, sel, aerodromo=None):
     # nas fronteiras comuns. Inclui os buracos (anéis interiores).
     for g in contorno:
         for anel in [g.exterior, *g.interiors]:
+            # interactive=False: o toque passa para a zona por baixo (5.1.3)
             folium.PolyLine(locations=[[la, lo] for lo, la in anel.coords],
-                            color="#FFFFFF", weight=4, opacity=1).add_to(fmap)
+                            color="#FFFFFF", weight=4, opacity=1,
+                            interactive=False).add_to(fmap)
     for name, (lat, lon) in CITIES.items():
         folium.CircleMarker(location=[lat, lon], radius=3, color="#0E151C",
                             fill=True, fill_color="#0E151C", fill_opacity=0.9,
@@ -5876,7 +5907,7 @@ def mapa_zonas_html(regions, ordem, sel, aerodromo=None):
                             tooltip=aerodromo).add_to(fmap)
     x0, y0, x1, y1 = FIR_POLYGON.bounds
     fmap.fit_bounds([[y0, x0], [y1, x1]])
-    return fmap.get_root().render()
+    return fmap
 
 
 def html_legenda_mapa():
@@ -6038,7 +6069,23 @@ if st.session_state.get("_active_gamet_text"):
     _sel = st.session_state.get("zona_sel") or _zona_ini
 
     # ---- Mapa em destaque ----
-    if _FOLIUM_OK:
+    if _FOLIUM_OK and _ST_FOLIUM_OK:
+        # (5.1.3, pedido do Duarte a 19-nov-2026) Tocar numa zona do mapa
+        # escolhe-a. A chave muda com a zona escolhida: o mapa é montado de novo
+        # (com o contorno na zona nova) e o clique anterior não volta a contar.
+        _clique = st_folium(
+            mapa_zonas(dynamic_regions, _ordem, _sel,
+                       selected_airport if _meu_ponto else None),
+            key=f"mapa_{abs(hash(_chave_g)) % 10**8}_{_sel}", height=460,
+            use_container_width=True,
+            returned_objects=["last_object_clicked_tooltip"])
+        _z_clique = zona_do_clique((_clique or {}).get("last_object_clicked_tooltip"),
+                                   len(_opcoes))
+        if _z_clique and _z_clique != _sel:
+            st.session_state["zona_sel"] = _z_clique
+            st.rerun()
+        st.markdown(html_legenda_mapa(), unsafe_allow_html=True)
+    elif _FOLIUM_OK:
         _mapa_html = mapa_zonas_html(dynamic_regions, _ordem, _sel, selected_airport
                                      if _meu_ponto else None)
         # st.iframe substitui st.components.v1.html (descontinuado)
