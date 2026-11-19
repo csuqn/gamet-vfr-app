@@ -34,7 +34,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "5.1.3"
+APP_VERSION = "5.1.4"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -5847,56 +5847,51 @@ def mapa_zonas_html(regions, ordem, sel, aerodromo=None):
     return mapa_zonas(regions, ordem, sel, aerodromo).get_root().render()
 
 
+def _geoms_zona(region):
+    poly = region["polygon"]
+    return [g for g in (poly.geoms if isinstance(poly, MultiPolygon) else [poly])
+            if not g.is_empty and hasattr(g, "exterior") and g.exterior is not None]
+
+
+def _icone_zona(z, escolhida):
+    import folium
+    return folium.DivIcon(
+        icon_size=(28, 28), icon_anchor=(14, 14),
+        html=('<div style="width:26px;height:26px;border-radius:13px;'
+              'background:#0E151C;border:2px solid '
+              f'{"#FFFFFF" if escolhida else "#C9D3DC"};color:#E6EDF3;'
+              'font:600 13px IBM Plex Mono,monospace;display:flex;'
+              f'align-items:center;justify-content:center">{z}</div>'))
+
+
 def mapa_zonas(regions, ordem, sel, aerodromo=None):
-    """(5.1) Mapa Folium: zonas coloridas pela decisão e numeradas (a
-    escolhida com contorno branco), os 52 pontos e o aeródromo preferido
-    realçado. Cada zona e o seu número têm o tooltip "Zona n: DECISÃO", que é
-    o que `zona_do_clique` lê (5.1.3)."""
+    """(5.1) Mapa Folium: zonas coloridas pela decisão e numeradas, os 52
+    pontos e o aeródromo preferido realçado; com `sel`, a camada da zona
+    escolhida (`camada_zona`) por cima. Cada zona e o seu número têm o tooltip
+    "Zona n: DECISÃO", que é o que `zona_do_clique` lê (5.1.3). Sem `sel` o
+    mapa não depende da zona escolhida (5.1.4: no Streamlit fica igual entre
+    toques e não é montado de novo; só a camada muda)."""
     import folium
     fmap = folium.Map(location=[39.6, -8.0], zoom_start=6, tiles="OpenStreetMap",
                       control_scale=True)
     # (5.1.3) Sem o rectângulo de foco do browser à volta da zona tocada.
     fmap.get_root().header.add_child(folium.Element(
         "<style>.leaflet-interactive:focus{outline:none}</style>"))
-    contorno = []    # (5.1.2) contorno da zona escolhida, desenhado no fim
     for z, i in enumerate(ordem, 1):
         region = regions[i]
-        poly = region["polygon"]
         color = _DEC_BARRA.get(region["decision"], "#888")
-        geoms = [g for g in (poly.geoms if isinstance(poly, MultiPolygon) else [poly])
-                 if not g.is_empty and hasattr(g, "exterior") and g.exterior is not None]
+        geoms = _geoms_zona(region)
         for g in geoms:
             folium.Polygon(
                 locations=_aneis_folium(g),
                 color=color, weight=1.5,
-                fill=True, fill_color=color,
-                fill_opacity=0.5 if z == sel else 0.3,
+                fill=True, fill_color=color, fill_opacity=0.35,
                 tooltip=f"Zona {z}: {region['decision']}",
             ).add_to(fmap)
-            if z == sel:
-                contorno.append(g)
         if geoms:
             p = max(geoms, key=lambda g: g.area).representative_point()
-            folium.Marker(
-                location=[p.y, p.x],
-                icon=folium.DivIcon(
-                    icon_size=(28, 28), icon_anchor=(14, 14),
-                    html=('<div style="width:26px;height:26px;border-radius:13px;'
-                          'background:#0E151C;border:2px solid '
-                          f'{"#FFFFFF" if z == sel else "#C9D3DC"};color:#E6EDF3;'
-                          'font:600 13px IBM Plex Mono,monospace;display:flex;'
-                          f'align-items:center;justify-content:center">{z}</div>')),
-                tooltip=f"Zona {z}: {region['decision']}",
-            ).add_to(fmap)
-    # (5.1.2, captura do Duarte a 18-nov-2026) O contorno branco vai por cima de
-    # todas as zonas: desenhado com a própria zona, as zonas seguintes tapavam-no
-    # nas fronteiras comuns. Inclui os buracos (anéis interiores).
-    for g in contorno:
-        for anel in [g.exterior, *g.interiors]:
-            # interactive=False: o toque passa para a zona por baixo (5.1.3)
-            folium.PolyLine(locations=[[la, lo] for lo, la in anel.coords],
-                            color="#FFFFFF", weight=4, opacity=1,
-                            interactive=False).add_to(fmap)
+            folium.Marker(location=[p.y, p.x], icon=_icone_zona(z, False),
+                          tooltip=f"Zona {z}: {region['decision']}").add_to(fmap)
     for name, (lat, lon) in CITIES.items():
         folium.CircleMarker(location=[lat, lon], radius=3, color="#0E151C",
                             fill=True, fill_color="#0E151C", fill_opacity=0.9,
@@ -5907,7 +5902,31 @@ def mapa_zonas(regions, ordem, sel, aerodromo=None):
                             tooltip=aerodromo).add_to(fmap)
     x0, y0, x1, y1 = FIR_POLYGON.bounds
     fmap.fit_bounds([[y0, x0], [y1, x1]])
+    if sel:
+        camada_zona(regions, ordem, sel).add_to(fmap)
     return fmap
+
+
+def camada_zona(regions, ordem, sel):
+    """(5.1.4) Camada da zona escolhida: contorno branco (exterior e buracos;
+    5.1.2) e o número com aro branco. Nada nela recebe toques (interactive=
+    False): o toque passa para a zona por baixo. É desenhada depois de todas
+    as zonas, para nenhuma lhe tapar o contorno nas fronteiras comuns."""
+    import folium
+    fg = folium.FeatureGroup(name="zona escolhida", control=False)
+    if not sel or not 1 <= sel <= len(ordem):
+        return fg
+    geoms = _geoms_zona(regions[ordem[sel - 1]])
+    for g in geoms:
+        for anel in [g.exterior, *g.interiors]:
+            folium.PolyLine(locations=[[la, lo] for lo, la in anel.coords],
+                            color="#FFFFFF", weight=4, opacity=1,
+                            interactive=False).add_to(fg)
+    if geoms:
+        p = max(geoms, key=lambda g: g.area).representative_point()
+        folium.Marker(location=[p.y, p.x], icon=_icone_zona(sel, True),
+                      interactive=False).add_to(fg)
+    return fg
 
 
 def html_legenda_mapa():
@@ -6066,50 +6085,58 @@ if st.session_state.get("_active_gamet_text"):
         st.session_state["zona_sel"] = _zona_ini
     if selected_airport != _guardado:
         st.session_state["aerodromo_preferido"] = selected_airport
-    _sel = st.session_state.get("zona_sel") or _zona_ini
+    # ---- Mapa, botões ZONA, painel da zona e quadro (5.1.4) ----
+    # Num fragmento: tocar numa zona ou num botão só corre esta secção (não a
+    # análise, o PDF nem o resto da página). O mapa base não depende da zona
+    # escolhida e tem chave fixa: o componente não o monta de novo, só troca a
+    # camada da zona (feature_group_to_add). O toque é lido do session_state no
+    # início da volta, para o contorno e o painel já irem com a zona nova.
+    _chave_mapa = f"mapa_{abs(hash(_chave_g)) % 10**8}"
 
-    # ---- Mapa em destaque ----
-    if _FOLIUM_OK and _ST_FOLIUM_OK:
-        # (5.1.3, pedido do Duarte a 19-nov-2026) Tocar numa zona do mapa
-        # escolhe-a. A chave muda com a zona escolhida: o mapa é montado de novo
-        # (com o contorno na zona nova) e o clique anterior não volta a contar.
-        _clique = st_folium(
-            mapa_zonas(dynamic_regions, _ordem, _sel,
-                       selected_airport if _meu_ponto else None),
-            key=f"mapa_{abs(hash(_chave_g)) % 10**8}_{_sel}", height=460,
-            use_container_width=True,
-            returned_objects=["last_object_clicked_tooltip"])
-        _z_clique = zona_do_clique((_clique or {}).get("last_object_clicked_tooltip"),
-                                   len(_opcoes))
-        if _z_clique and _z_clique != _sel:
-            st.session_state["zona_sel"] = _z_clique
-            st.rerun()
-        st.markdown(html_legenda_mapa(), unsafe_allow_html=True)
-    elif _FOLIUM_OK:
-        _mapa_html = mapa_zonas_html(dynamic_regions, _ordem, _sel, selected_airport
-                                     if _meu_ponto else None)
-        # st.iframe substitui st.components.v1.html (descontinuado)
-        if hasattr(st, "iframe"):
-            st.iframe(_mapa_html, height=460)
+    @st.fragment
+    def _secao_zonas():
+        if _FOLIUM_OK and _ST_FOLIUM_OK:
+            _v = st.session_state.get(_chave_mapa) or {}
+            _cnt = (_chave_mapa, _v.get("last_object_clicked_count") or 0)
+            if _cnt[1] and st.session_state.get("_mapa_toque") != _cnt:
+                st.session_state["_mapa_toque"] = _cnt
+                _z = zona_do_clique(_v.get("last_object_clicked_tooltip"), len(_opcoes))
+                if _z:
+                    st.session_state["zona_sel"] = _z
+        _sel = st.session_state.get("zona_sel") or _zona_ini
+        _aer = selected_airport if _meu_ponto else None
+        if _FOLIUM_OK and _ST_FOLIUM_OK:
+            st_folium(mapa_zonas(dynamic_regions, _ordem, None, _aer), key=_chave_mapa,
+                      feature_group_to_add=camada_zona(dynamic_regions, _ordem, _sel),
+                      height=460, use_container_width=True,
+                      returned_objects=["last_object_clicked_tooltip",
+                                        "last_object_clicked_count"])
+            st.markdown(html_legenda_mapa(), unsafe_allow_html=True)
+        elif _FOLIUM_OK:
+            _mapa_html = mapa_zonas_html(dynamic_regions, _ordem, _sel, _aer)
+            # st.iframe substitui st.components.v1.html (descontinuado)
+            if hasattr(st, "iframe"):
+                st.iframe(_mapa_html, height=460)
+            else:
+                st.components.v1.html(_mapa_html, height=460)
+            st.markdown(html_legenda_mapa(), unsafe_allow_html=True)
         else:
-            st.components.v1.html(_mapa_html, height=460)
-        st.markdown(html_legenda_mapa(), unsafe_allow_html=True)
-    else:
-        st.warning("Folium não instalado — mapa estático disponível no PDF.")
+            st.warning("Folium não instalado — mapa estático disponível no PDF.")
 
-    # ---- Zonas: botões, painel da zona escolhida e quadro por fenómeno ----
-    _sel = st.segmented_control(
-        "Zona", _opcoes, format_func=lambda n: f"ZONA {n}", key="zona_sel",
-        label_visibility="collapsed", width="stretch") or _zona_ini
-    _i_sel = _ordem[_sel - 1]
-    _reg_sel = dynamic_regions[_i_sel]
-    st.markdown(html_zona(_sel, _reg_sel, 100 * _reg_sel["polygon"].area / FIR_POLYGON.area,
-                          dynamic_regions, annotate_window_notes(_reg_sel.get("notas"), start_dt),
-                          resto_par(_r, regiao=_i_sel), _r.get("blocos")),
-                unsafe_allow_html=True)
-    st.subheader("Porquê · por fenómeno e zona")
-    st.markdown(html_quadro(dynamic_regions, _ordem, _sel, wind_data, _r.get("blocos")),
-                unsafe_allow_html=True)
+        _sel = st.segmented_control(
+            "Zona", _opcoes, format_func=lambda n: f"ZONA {n}", key="zona_sel",
+            label_visibility="collapsed", width="stretch") or _zona_ini
+        _i_sel = _ordem[_sel - 1]
+        _reg_sel = dynamic_regions[_i_sel]
+        st.markdown(html_zona(_sel, _reg_sel, 100 * _reg_sel["polygon"].area / FIR_POLYGON.area,
+                              dynamic_regions, annotate_window_notes(_reg_sel.get("notas"), start_dt),
+                              resto_par(_r, regiao=_i_sel), _r.get("blocos")),
+                    unsafe_allow_html=True)
+        st.subheader("Porquê · por fenómeno e zona")
+        st.markdown(html_quadro(dynamic_regions, _ordem, _sel, wind_data, _r.get("blocos")),
+                    unsafe_allow_html=True)
+
+    _secao_zonas()
 
     # ---- A ter em conta: título + etiqueta; o texto completo a um toque ----
     _conta = [(_t, _x) for _t, _x in _r["avisos"]
