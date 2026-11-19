@@ -42,7 +42,8 @@ def _texto(h):
 def _nivel_regiao(eng, reg):
     cs = [eng.classificar_motivo(m) for m in reg["reasons"]]
     desconhecidos = [c["texto"] for c in cs if c["nivel"] is None]
-    pior = max([GRAV[c["nivel"]] for c in cs if c["nivel"]] + [-1])
+    # (6.0) "INFO" (SIGMET acima do FL195) não decide: fica fora do pior nível.
+    pior = max([GRAV[c["nivel"]] for c in cs if c["nivel"] and c["nivel"] != "INFO"] + [-1])
     return pior, desconhecidos
 
 
@@ -422,19 +423,23 @@ def test_descrever_sigmet(eng, texto, esperado):
 
 def test_zona_diz_o_que_o_sigmet_avisa(eng):
     """(5.1.5, captura do Duarte a 19-nov-2026: "SIGMET U01 → NO-GO" sem mais
-    nada) Com o SIGMET U01 real de 19-nov em vigor, o painel da zona, o porquê
-    do veredicto e o quadro dizem o que ele avisa; a decisão não muda."""
+    nada) O painel da zona, o porquê do veredicto e o quadro dizem o que o
+    SIGMET avisa; a decisão não muda. Desde a 6.0 o U01 real (FL220/430) é
+    informativo (acima do FL195): verifica-se a descrição com o mesmo SIGMET
+    a SFC/FL100, que continua NO-GO, e o U01 real à parte."""
     pytest.importorskip("folium")
     agora = datetime(2026, 11, 19, 15, 30, tzinfo=timezone.utc)
     g = build_gamet("SIGWX: NIL", validity="191500/192100")
     r0 = eng.analisar_gamet(g, "manual", agora=agora)
-    r = eng.analisar_gamet(g, "ipma", boletins=[_U01_191500], boletins_at=agora, agora=agora)
+    baixo = _U01_191500.replace("FL220/430", "SFC/FL100")
+    r = eng.analisar_gamet(g, "ipma", boletins=[baixo], boletins_at=agora, agora=agora)
     regs = r["regioes"]
     com = [x for x in regs if any(m.startswith("SIGMET U01") for m in x["reasons"])]
     assert com and all(x["decision"] == "NO-GO" for x in com)
     sem = [x for x in regs if x not in com]
     assert all(x["decision"] == "GO" for x in sem) and r0["regioes"][0]["decision"] == "GO"
-    desc = "turbulência severa prevista, FL220–FL430, desloca-se para E a 40 kt, a intensificar"
+    desc = ("turbulência severa prevista, da superfície ao FL100, desloca-se para E a 40 kt, "
+            "a intensificar")
     ordem = eng.zonas_ordem(regs)
     z = next(n for n, i in enumerate(ordem, 1) if regs[i] in com)
     h = eng.html_zona(z, regs[ordem[z - 1]], 30.0, regs, (), None, r["blocos"])
@@ -442,6 +447,17 @@ def test_zona_diz_o_que_o_sigmet_avisa(eng):
     assert desc in eng.porque_veredicto(regs, r["blocos"])
     q = eng.html.unescape(eng.html_quadro(regs, ordem, z, None, r["blocos"]))
     assert "U01 SEV TURB" in q
+    # 6.0: o U01 real, FL220/430 — GO em toda a FIR, motivo informativo descrito
+    r = eng.analisar_gamet(g, "ipma", boletins=[_U01_191500], boletins_at=agora, agora=agora)
+    regs = r["regioes"]
+    assert all(x["decision"] == "GO" for x in regs)
+    com = [x for x in regs if any(m.startswith("SIGMET U01") for m in x["reasons"])]
+    assert com
+    ordem = eng.zonas_ordem(regs)
+    z = next(n for n, i in enumerate(ordem, 1) if regs[i] in com)
+    h = eng.html.unescape(eng.html_zona(z, regs[ordem[z - 1]], 30.0, regs, (), None, r["blocos"]))
+    assert ("SIGMET U01 — turbulência severa prevista, FL220–FL430, desloca-se para E a 40 kt, "
+            "a intensificar — acima dos níveis VFR") in h
 
 
 def test_sigmet_so_referido_no_gamet(eng):
@@ -476,7 +492,8 @@ def test_sigmets_do_arquivo_descritos(eng):
                 if c["linha"] != "SIGMET" or "GAMET, sem área" in m:
                     continue
                 vistos += 1
-                assert c["nivel"] == "NO-GO"
+                # 6.0: acima do FL195 (TURB/ICE/MTW SEV) é informativo
+                assert c["nivel"] == ("INFO" if m.endswith("(acima dos níveis VFR)") else "NO-GO")
                 assert c.get("longo", "").startswith(c["valor"].split()[0] + " — "), (f.name, m)
                 assert eng._fen_sigmet_pt(c["longo"])[0] is None  # já em português
     assert vistos > 0

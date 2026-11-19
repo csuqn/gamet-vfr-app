@@ -274,10 +274,23 @@ _RED44_AMSL = re.compile(
     r"(.*?) — junto às serras, não necessariamente na pista")
 
 
+# 6.0 (relatório W46 g.6): o aviso de um SIGMET não referido no GAMET e todo
+# acima do FL150 deixou de dizer "provavelmente emitido depois dele". Só texto.
+AVISO_ACIMA_FL150_60 = (" — **não referido no GAMET** (fica acima do FL150, que o GAMET "
+                        "não cobre)")
+AVISO_DEPOIS_ANTIGO = " — **não referido no GAMET**, provavelmente emitido depois dele"
+
+
+def avisos_redaccao_60(avisos):
+    """Avisos da 6.0 com a redacção anterior do aviso dos SIGMETs não referidos."""
+    return [(t, md.replace(AVISO_ACIMA_FL150_60, AVISO_DEPOIS_ANTIGO)) for t, md in avisos]
+
+
 def avisos_redaccao_43(avisos):
-    """Avisos da 4.4+ com a redacção da nota de nuvens baixas da 4.3."""
+    """Avisos da 4.4+ com a redacção da nota de nuvens baixas da 4.3 (e, desde a
+    6.0, a do aviso dos SIGMETs não referidos — `avisos_redaccao_60`)."""
     out = []
-    for tipo, md in avisos:
+    for tipo, md in avisos_redaccao_60(avisos):
         if "Nuvens baixas na Secção II" in md:
             md = md.replace(_RED44_CAB, "Base abaixo de 500 ft:")
             md = md.replace(_CAB_5_0, "Base abaixo de 500 ft:")   # 5.0
@@ -296,6 +309,33 @@ def indice_sem_linhas(indice):
         return indice
     return {**indice, "sigmets": [e for e in indice.get("sigmets", [])
                                   if not re.search(r"\bOF\s+LINE\b", e.get("texto", ""))]}
+
+
+# 6.0: um SIGMET de TURB/ICE/MTW SEV com o limite inferior escrito acima do
+# FL195 passou a informativo (não NO-GO; decisão do Duarte a 19-nov-2026,
+# SERA.5005(d)(2)). Os testes que comparam todo o arquivo com motores fixos
+# anteriores verificam OUTRAS mudanças: tiram-se do índice só esses SIGMETs, cuja
+# leitura mudou de propósito e é verificada em test_v60.py (com o arquivo).
+_MOTOR_ACTUAL = {}
+
+
+def _motor_actual():
+    if "m" not in _MOTOR_ACTUAL:
+        app = _find_app()
+        m = types.ModuleType("gamet_engine_60")
+        m.__dict__["__file__"] = str(app)
+        exec(compile(_extract_engine(app.read_text(encoding="utf-8")), str(app), "exec"),
+             m.__dict__)
+        _MOTOR_ACTUAL["m"] = m
+    return _MOTOR_ACTUAL["m"]
+
+
+def indice_sem_altos_60(indice):
+    if not indice:
+        return indice
+    alto = _motor_actual().sigmet_acima_vfr
+    return {**indice, "sigmets": [e for e in indice.get("sigmets", [])
+                                  if alto(e.get("texto", "")) is None]}
 
 
 # 4.6: qualificadores dos SIGMET/AIRMET só com graus ("S OF N33", "W OF W008",

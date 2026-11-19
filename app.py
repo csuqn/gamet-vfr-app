@@ -34,7 +34,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "5.1.5"
+APP_VERSION = "6.0"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -2960,7 +2960,7 @@ _PHENOM_LABEL = {
     "TS": "TS", "TURB": "TURB", "ICE": "ICE",
     "MT_OBSC": "MT OBSC", "VA": "VA",
     "WSPD": "SFC WSPD", "MTW": "MTW", "WX": "SIGWX", "CB": "CB",
-    "SIGMET": "SIGMET", "AIRMET": "AIRMET",
+    "SIGMET": "SIGMET", "SIGMET_ALTO": "SIGMET", "AIRMET": "AIRMET",
 }
 
 
@@ -3217,7 +3217,7 @@ def compute_dynamic_regions(blocks):
                 and b.phenomenon in ("VIS", "BASE_AGL", "BASE_AMSL", "TS",
                                        "TURB", "ICE", "MT_OBSC", "VA",
                                        "WSPD", "MTW", "WX", "CB", "SIGMET",
-                                       "AIRMET")]
+                                       "SIGMET_ALTO", "AIRMET")]
 
     def _empty_region():
         dec, vis, base, ts, turb, turb_layers, ice, ice_layers, mt_obsc, va, reasons = decision([])
@@ -4112,6 +4112,116 @@ def sigmets_terminados(conhecidos, ref, periodo_gamet=(None, None)):
             if ests and all(e is not None for e in ests)}
 
 
+# (6.0, decisão do Duarte a 19-nov-2026) O VFR não se faz acima do FL195
+# (SERA.5005(d)(2), salvo reserva de espaço ou autorização do ATS até ao
+# FL285). Um SIGMET de turbulência, gelo ou onda de montanha severos com o
+# limite inferior ESCRITO acima do FL195 (SIGMET real U02 de 19-nov-2026:
+# "SEV TURB FCST … FL220/430") não toca num voo VFR: entra como informativo
+# (bloco "SIGMET_ALTO"), não como NO-GO. Continuam NO-GO: limite inferior na
+# superfície ou até ao FL195, só o topo (TOP FL340), níveis por ler, TS, VA,
+# TC, DS/SS, RDOACT e o SIGMET só referido no GAMET.
+_SIGMET_VFR_MAX_FL = 195
+_SIGMET_ALTO_NOTA = "(acima dos níveis VFR)"
+_SIGMET_ALTO_FEN = ("SEV TURB", "SEV ICE", "SEV MTW")
+
+
+def nivel_inferior_sigmet(texto):
+    """(6.0) Limite inferior de um SIGMET, em centenas de pés (FL), a partir
+    dos níveis escritos: `FL220/430` e `FL220/FL430` → 220, `ABV FL250` → 250;
+    `SFC/…`, `BLW FL…`, `TOP [ABV|BLW] FL…` (sem limite inferior) e níveis em
+    pés (`SFC/3000FT`, `3000/8000FT`) → 0. Com vários níveis, o mais baixo.
+    Sem nenhum nível legível → None (na dúvida, o SIGMET conta)."""
+    t = re.sub(r"\s+", " ", (texto or "").upper())
+    inferiores = []
+    if re.search(r"\bTOP\s+(?:ABV\s+|BLW\s+)?FL\d{2,3}\b", t):
+        inferiores.append(0)
+    t = re.sub(r"\bTOP\s+(?:ABV\s+|BLW\s+)?FL\d{2,3}\b", " ", t)
+    if re.search(r"\bSFC/", t) or re.search(r"\bBLW\s+FL\d{2,3}\b", t):
+        inferiores.append(0)
+    if re.search(r"\b\d{3,5}(?:/\d{3,5})?FT\b", t):
+        inferiores.append(0)
+    for m in re.finditer(r"\bFL(\d{2,3})/(?:FL)?(\d{2,3})\b", t):
+        inferiores.append(min(int(m.group(1)), int(m.group(2))))   # FL200/150 → 150
+    for m in re.finditer(r"\bABV\s+FL(\d{2,3})\b", t):
+        inferiores.append(int(m.group(1)))
+    return min(inferiores) if inferiores else None
+
+
+_NIVEL_ALTO_RE = re.compile(r"\bFL\d{3}/(?:FL)?\d{3}\b|\bABV\s+FL\d{3}\b")
+# Qualquer outro nível que sobre depois de tirar os do _NIVEL_ALTO_RE (agente
+# `parser`: "FL250/350 AND … FL150", "3000M/FL250", "SFC-FL100", "8000 FT",
+# "OBS … FL220/430 FCST … FL180") → o SIGMET continua a contar.
+_NIVEL_OUTRO_RE = re.compile(r"\bFL\s*\d|\d\s*FT\b|\b\d{3,5}M\b|\b(?:SFC|GND|TOP|BLW|ABV)\b")
+# Outro fenómeno no mesmo texto → continua a contar (TS, CB, VA, TC, DS, SS,
+# RDOACT, GR, FZRA, SQL/EMBD/OBSC/FRQ).
+_OUTRO_FEN_RE = re.compile(r"\bTS\w*|\b(?:CB|VA|TC|DS|SS|RDOACT|GR|FZRA|SQL|EMBD|OBSC|FRQ)\b")
+
+
+def nivel_inferior_estrito(texto):
+    """(6.0) Limite inferior só quando TODOS os níveis do texto são da forma
+    `FLaaa/bbb` ou `ABV FLaaa`; se sobra qualquer outro nível (lido ou não) →
+    None. É a leitura usada para deixar um SIGMET de contar."""
+    t = re.sub(r"\s+", " ", (texto or "").upper())
+    if not _NIVEL_ALTO_RE.search(t) or _NIVEL_OUTRO_RE.search(_NIVEL_ALTO_RE.sub(" ", t)):
+        return None
+    return nivel_inferior_sigmet(t)
+
+
+# (6.0, revisor do PR #58) Lista branca: o SIGMET só sai da decisão se, tirado
+# o cabeçalho e as partes conhecidas, não sobrar mais nada — um fenómeno SEV
+# TURB/ICE/MTW (uma só vez), OBS/FCST [AT hhmmZ], a área (coordenadas, WI, OF,
+# BTN, LINE, nnNM, ENTIRE FIR, cardinais, AND, -), UM só grupo de níveis
+# (FLaaa/bbb ou ABV FLaaa), MOV dir nnKT|KMH ou STNR, INTSF/WKN/NC e "=".
+# Qualquer outra coisa ("OCNL TSRA", "040/060", "1500 M", "F050/150", um
+# segundo fenómeno…) → continua a contar.
+# Cabeçalho: até ao "FIR" que vem a seguir a "VALID ddhhmm/ddhhmm", sem
+# atravessar "ENTIRE" (revisor do PR #58, 2.ª revisão: com "FIR/UIR" ou sem
+# FIR no cabeçalho, cortar até ao 1.º "FIR " apagava um "EMBD TS" antes de
+# "ENTIRE FIR").
+# 3.ª revisão: só se corta um cabeçalho com a forma exacta dos boletins do IPMA,
+# ancorado no início ("LPPC SIGMET U02 VALID 191700/192100 LPPT- LPPC LISBOA
+# FIR "); com outra forma não se corta nada e o corpo não começa por "SEV" →
+# o SIGMET conta.
+# 4.ª revisão: fixo ao do IPMA — o nome da FIR e o identificador não podem
+# esconder um nível ou um fenómeno ("LPPC SFC FIR", "SIGMET SFC/FL100").
+_SIGMET_CAB_RE = re.compile(r"^LPPC SIGMET [A-Z]\d{1,2} VALID \d{6}/\d{6} LPPT- LPPC LISBOA FIR ")
+_SIGMET_ALTO_FEN_RE = re.compile(r"\bSEV\s+(?:TURB|ICE|MTW)\b")
+_SIGMET_LISTA_BRANCA = [
+    re.compile(r"\b(?:OBS|FCST)(?:\s+AT\s+\d{4}Z)?\b"),
+    re.compile(r"\bMOV\s+(?:N|NNE|NE|ENE|E|ESE|SE|SSE|S|SSW|SW|WSW|W|WNW|NW|NNW)\s+\d{1,3}\s*(?:KT|KMH)\b"),
+    re.compile(r"\b(?:STNR|INTSF|WKN|NC)\b"),
+    re.compile(r"\bENTIRE\s+FIR\b"),
+    re.compile(r"\b\d{1,3}\s*NM\b"),
+    re.compile(r"\b[NS]\d{2}(?:\d{2})?\b|\b[EW]\d{3}(?:\d{2})?\b"),
+    re.compile(r"\b(?:WI|OF|BTN|LINE|AND|N|S|E|W|NE|NW|SE|SW)\b"),
+    re.compile(r"[-=,]"),
+]
+
+
+def sigmet_acima_vfr(texto):
+    """(6.0) Limite inferior (FL) se o SIGMET é SÓ de TURB/ICE/MTW severos, com
+    um só grupo de níveis `FLaaa/bbb` ou `ABV FLaaa` acima do FL195, e nada
+    mais no texto além do que está na lista branca. Senão None: na dúvida, o
+    SIGMET conta."""
+    t = re.sub(r"\s+", " ", (texto or "")).strip()
+    # 2.ª protecção: outro fenómeno em QUALQUER parte do texto → conta.
+    if _OUTRO_FEN_RE.search(t.upper()):
+        return None
+    corpo = _SIGMET_CAB_RE.sub("", t, count=1)
+    if len(_SIGMET_ALTO_FEN_RE.findall(corpo)) != 1 or not re.match(r"SEV\s+(?:TURB|ICE|MTW)\b", corpo):
+        return None
+    niveis = _NIVEL_ALTO_RE.findall(corpo)
+    if len(niveis) != 1:
+        return None
+    ni = nivel_inferior_sigmet(niveis[0])
+    if ni is None or ni <= _SIGMET_VFR_MAX_FL:
+        return None
+    resto = _NIVEL_ALTO_RE.sub(" ", _SIGMET_ALTO_FEN_RE.sub(" ", corpo, count=1))
+    for rx in _SIGMET_LISTA_BRANCA:
+        resto = rx.sub(" ", resto)
+    return ni if not resto.strip() else None
+
+
 def blocos_sigmet(sigmets, has_sigmet, sigmet_text, ref=None, conhecidos=None,
                   periodo_gamet=(None, None)):
     """
@@ -4130,6 +4240,19 @@ def blocos_sigmet(sigmets, has_sigmet, sigmet_text, ref=None, conhecidos=None,
             geom, d = None, "toda a área (SIGMET com formato inesperado)"
         fen = re.search(r"\b(EMBD TS|OBSC TS|FRQ TS|SQL TS|SEV TURB|SEV ICE|SEV MTW|HVY DS|HVY SS|VA|TC|RDOACT CLD)\b", s)
         rot = f"{sid}" + (f" ({fen.group(1)})" if fen else "")
+        alto = sigmet_acima_vfr(s)
+        if alto is not None:
+            # (6.0) Todo acima do FL195: informativo, não NO-GO.
+            if geom is not None and geom.is_empty:
+                descr.append(f"SIGMET {rot}: fora da área do GAMET")
+                continue
+            blocos.append(MetBlock("SIGMET_ALTO", geom if geom is not None else FIR_POLYGON,
+                                   f"{rot} — {d if geom is not None else 'toda a área'}"))
+            blocos[-1].texto = s
+            descr.append(f"SIGMET {rot}: acima dos níveis VFR (limite inferior FL{alto:03d}; "
+                         f"o VFR não se faz acima do FL195, SERA.5005) — informativo, "
+                         f"não entra na decisão")
+            continue
         if geom is None:
             blocos.append(MetBlock("SIGMET", FIR_POLYGON, f"{rot} — toda a área"))
             blocos[-1].texto = s
@@ -4633,6 +4756,10 @@ def decision(events):
         decision_level = "NO-GO"
         for v in sig_vals:
             reasons.append(f"SIGMET {v}")
+    # (6.0) SIGMET todo acima do FL195 (TURB/ICE/MTW SEV): informativo, não
+    # muda a decisão — o VFR não se faz acima do FL195 (SERA.5005(d)(2)).
+    for v in sorted({v for t, v, *_ in events if t == "SIGMET_ALTO"}):
+        reasons.append(f"SIGMET {v} {_SIGMET_ALTO_NOTA}")
 
     # ---- AIRMET em vigor cujo fenómeno a app não leu (4.0): MARGINAL na área
     # do AIRMET, por precaução — nunca GO em silêncio. Os AIRMETs lidos entram
@@ -5195,11 +5322,29 @@ def analisar_gamet(texto, fonte="manual", boletins=None, boletins_at=None,
     ablocos, aleituras = blocos_airmet(air, agora)
     regioes = compute_dynamic_regions(blocks + sblocos + ablocos)
 
-    if sig:
+    # (6.0) Todos os SIGMETs em vigor acima do FL195 e nenhum outro a contar:
+    # informativo — não decidem, por isso não aparecem como erro.
+    so_altos = (bool(sig) and all(sigmet_acima_vfr(x) is not None for x in sig)
+                and not any(b.phenomenon == "SIGMET" for b in sblocos))
+    if so_altos:
+        av.append(("info",
+                   f"ℹ️ **{len(sig)} SIGMET {onde} — acima dos níveis VFR** (limite inferior "
+                   "acima do FL195; o VFR não se faz acima do FL195, SERA.5005). Não "
+                   "entra(m) na decisão.\n\n"
+                   + "\n".join(f"- {d}" for d in sdescr)
+                   + "\n\nLê o SIGMET completo:\n\n" + "\n\n".join(f"`{b}`" for b in sig)))
+    elif sig:
+        # (6.0, relatório W46 g.6) O GAMET é BLW FL150 e não tem de referir um
+        # SIGMET todo acima do FL150: aí "provavelmente emitido depois dele" é
+        # inexacto. Só muda o texto.
+        _acima_gamet = all((nivel_inferior_estrito(x) or 0) > 150 for x in sig)
         av.append(("erro",
                    f"🚨 **{len(sig)} SIGMET {onde}**"
-                   + ("" if has_sigmet else " — **não referido no GAMET**, provavelmente "
-                      "emitido depois dele") + ".\n\n"
+                   + ("" if has_sigmet else
+                      " — **não referido no GAMET** (fica acima do FL150, que o GAMET não "
+                      "cobre)" if _acima_gamet else
+                      " — **não referido no GAMET**, provavelmente emitido depois dele")
+                   + ".\n\n"
                    + "\n".join(f"- {d}" for d in sdescr)
                    + "\n\nLê o SIGMET completo:\n\n" + "\n\n".join(f"`{b}`" for b in sig)))
     if air:
@@ -5239,6 +5384,11 @@ def analisar_gamet(texto, fonte="manual", boletins=None, boletins_at=None,
             av.append(("aviso",
                        f"⚠️ **O GAMET refere o SIGMET {sigmet_text}, que já não está em vigor.** "
                        + " ".join(terminado) + ". Confirma no IPMA que não há outro SIGMET."))
+        elif so_altos and coberto:
+            av.append(("aviso",
+                       f"⚠️ **O GAMET refere o SIGMET {sigmet_text}, todo acima dos níveis VFR "
+                       "(limite inferior acima do FL195).** Não entra na decisão — ver acima. "
+                       "Consulta o SIGMET completo antes de voar; esta app não o substitui."))
         else:
             av.append(("erro",
                        f"🚨 **SIGMET APLICÁVEL A ESTE GAMET ({sigmet_text}).** "
@@ -5248,7 +5398,9 @@ def analisar_gamet(texto, fonte="manual", boletins=None, boletins_at=None,
                        + "Consulta o SIGMET completo antes de voar; esta app não o substitui."))
 
     # A faixa nunca diz NIL se os SIGMETs não foram verificados
-    if sig or any(b.phenomenon == "SIGMET" for b in sblocos):
+    if so_altos:
+        r["faixa_sig"] = ("ACIMA FL195", None)       # (6.0) só informativos
+    elif sig or any(b.phenomenon == "SIGMET" for b in sblocos):
         r["faixa_sig"] = ("ACTIVO", "NO-GO")
     elif verificado:
         r["faixa_sig"] = ("NIL", "GO")
@@ -5552,7 +5704,8 @@ def classificar_motivo(motivo):
         return c
     m = re.match(r"SIGMET (\S+)", t)
     if m:
-        c.update(linha="SIGMET", valor=m.group(1), nivel="NO-GO")
+        alto = t.endswith(" " + _SIGMET_ALTO_NOTA)        # (6.0) informativo
+        c.update(linha="SIGMET", valor=m.group(1), nivel="INFO" if alto else "NO-GO")
         return c
     return c
 
@@ -5710,7 +5863,10 @@ def _com_info_sigmet(c, blocos):
     c = dict(c)
     sid = c["valor"]
     resto = _sem_parcial(c["texto"])[len("SIGMET "):]
-    texto = next((b.texto for b in blocos or () if b.phenomenon == "SIGMET"
+    alto = resto.endswith(" " + _SIGMET_ALTO_NOTA)
+    if alto:
+        resto = resto[:-len(" " + _SIGMET_ALTO_NOTA)]
+    texto = next((b.texto for b in blocos or () if b.phenomenon in ("SIGMET", "SIGMET_ALTO")
                   and b.texto and b.value == resto), "")
     if not texto and "(GAMET, sem área)" in resto:
         c["longo"] = f"{sid} — referido no GAMET, sem o texto completo: conta em toda a área"
@@ -5723,7 +5879,10 @@ def _com_info_sigmet(c, blocos):
     curto = _fen_sigmet_pt(texto or resto)[1]
     if curto:
         c["valor"] = f"{sid} {curto}"
-    if d:
+    if alto:
+        c["longo"] = (f"{sid} — {d + ' — ' if d else ''}acima dos níveis VFR (o VFR não se "
+                      f"faz acima do FL195): informativo, não entra na decisão")
+    elif d:
         c["longo"] = f"{sid} — {d}"
     return c
 

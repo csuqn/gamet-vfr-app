@@ -569,7 +569,7 @@ def _nota_nunca_perde(eng, eng476, texto, ctx):
 def _arquivo():
     if not (DADOS / "indice.json").exists():
         pytest.skip("sem dados/")
-    return json.loads((DADOS / "indice.json").read_text(encoding="utf-8"))
+    return conftest.indice_sem_altos_60(json.loads((DADOS / "indice.json").read_text(encoding="utf-8")))  # 6.0
 
 
 def _sem_nota_secn2(avisos):

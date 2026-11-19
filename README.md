@@ -127,7 +127,9 @@ toque.
   na direcção do movimento, se o SIGMET se desloca). Se a área não for legível,
   ou se o GAMET só indicar o identificador do SIGMET sem o texto completo estar
   disponível, NO-GO em toda a área. Um SIGMET referido pelo GAMET que já
-  expirou ou foi cancelado deixa de contar (com aviso). Lê sempre o SIGMET completo.
+  expirou ou foi cancelado deixa de contar (com aviso). Um SIGMET só de
+  turbulência, gelo ou onda de montanha severos, todo acima do FL195, é só
+  informativo (a faixa diz `ACIMA FL195`). Lê sempre o SIGMET completo.
 - ⚠️ **AIRMET:** desde a 4.0 entra na decisão com as mesmas regras do GAMET
   (visibilidade, base, trovoada/CB, onda de montanha, montanhas obscurecidas,
   vento), só na área do AIRMET (sem margem). O aviso diz o que a app leu de
@@ -215,6 +217,7 @@ Em cada zona, a app aplica estas regras. Fica a pior decisão que se aplicar.
 | Cinzas vulcânicas (`VA`) | NO-GO | — |
 | AIRMET em vigor | As regras acima, na área do AIRMET (sem margem, estendida pelo movimento) | Área ilegível → toda a FIR; fenómeno ilegível → MARGINAL, com aviso |
 | SIGMET em vigor | NO-GO na área do SIGMET + 10 NM (estendida pelo movimento) | O SIGMET completo do IPMA traz a área (polígono, círculo ou qualificadores). Sem área legível, ou só com o identificador no GAMET: NO-GO em toda a área |
+| SIGMET só de turbulência, gelo ou onda de montanha severos, todo acima do FL195 (ex.: `FL220/430`) | informativo | O VFR não se faz acima do FL195 (SERA.5005). Mostrado na zona e nos avisos, mas não muda a decisão. Na dúvida (outro nível, outro fenómeno, níveis por ler), conta como qualquer SIGMET |
 
 **Princípios por trás das regras**
 - **Na dúvida, a leitura conservadora.** Errar para o lado pessimista é
@@ -293,7 +296,7 @@ Algarve não afecta Lisboa.
 
 ## 10. Qualidade e testes
 
-- **2459 testes automáticos** cobrem a leitura do texto, a geometria, as
+- **2594 testes automáticos** cobrem a leitura do texto, a geometria, as
   decisões, os dados aeronáuticos e a app completa. Cada erro alguma vez
   encontrado tem um teste que impede que volte a aparecer.
 - **Verificação cruzada:** em centenas de GAMETs gerados, a decisão de cada
@@ -313,7 +316,7 @@ Algarve não afecta Lisboa.
 pip install -r requirements.txt -r requirements-dev.txt
 streamlit run app.py               # a app principal (Streamlit)
 cd nicegui_app && python main.py   # a versão de reserva (NiceGUI), http://localhost:8080
-python3 -m pytest                  # os testes (2459)
+python3 -m pytest                  # os testes (2594)
 ```
 
 | Ficheiro / pasta | Conteúdo |
