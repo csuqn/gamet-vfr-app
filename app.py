@@ -34,7 +34,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "5.1.4"
+APP_VERSION = "5.1.5"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -1078,6 +1078,9 @@ class MetBlock:
     # (5.1.2) Base de nuvem sem AGL/AMSL no texto (lida como AGL, regra da
     # 3.3). Só para o briefing dizer de onde vem a base; fora da igualdade.
     sem_ref: bool = field(default=False, repr=False, compare=False)
+    # (5.1.5) Texto completo do SIGMET (só nos blocos "SIGMET"), para o briefing
+    # dizer o que ele avisa. Fora da igualdade.
+    texto: str = field(default="", repr=False, compare=False)
 
 # -------------------------------------------------
 # NORMALIZE
@@ -4129,11 +4132,13 @@ def blocos_sigmet(sigmets, has_sigmet, sigmet_text, ref=None, conhecidos=None,
         rot = f"{sid}" + (f" ({fen.group(1)})" if fen else "")
         if geom is None:
             blocos.append(MetBlock("SIGMET", FIR_POLYGON, f"{rot} — toda a área"))
+            blocos[-1].texto = s
             descr.append(f"SIGMET {rot}: {d}")
         elif geom.is_empty:
             descr.append(f"SIGMET {rot}: fora da área do GAMET")
         else:
             blocos.append(MetBlock("SIGMET", geom, f"{rot} — {d}"))
+            blocos[-1].texto = s
             descr.append(f"SIGMET {rot}: NO-GO na sua área ({d})")
     if has_sigmet:
         ids = ids_sigmet_aplicavel(sigmet_text)
@@ -4807,7 +4812,7 @@ def _pdf_zonas_page(pdf, regions, gamet_text, blocos=None):
         linha(f"Zona {z} — {reg['decision']}   ({pct:.0f}% da FIR)", dy=0.024,
               fontsize=11, fontweight="bold", color=_PDF_COR.get(reg["decision"], "#333"))
         ib = info_base(reg, blocos)
-        motivos = [_com_info_base(classificar_motivo(m), ib) for m in reg.get("reasons") or []]
+        motivos = [_com_info_sigmet(_com_info_base(classificar_motivo(m), ib), blocos) for m in reg.get("reasons") or []]
         if not motivos:
             linha("• Sem fenómenos significativos.", x=0.07, fontsize=8)
         for c in motivos:
@@ -5614,6 +5619,115 @@ def _com_info_base(c, info):
     return c
 
 
+_SIGMET_FEN_RE = re.compile(
+    r"\b(?:(OBSC|EMBD|FRQ|SQL)\s+TS(GR)?|SEV\s+(TURB|ICE(?:\s*\(FZRA\))?|MTW)"
+    r"|HVY\s+(DS|SS)|(VA(?:\s+ERUPTION|\s+CLD)?)|(TC)|(RDOACT\s+CLD))(?!\w)")
+_SIGMET_TS_PT = {"OBSC": "trovoada obscurecida", "EMBD": "trovoada embebida",
+                 "FRQ": "trovoada frequente", "SQL": "linha de borrasca com trovoada"}
+_SIGMET_SEV_PT = {"TURB": "turbulência severa", "MTW": "onda de montanha severa"}
+
+
+def _fen_sigmet_pt(texto):
+    """(5.1.5) Fenómeno de um SIGMET em português ("turbulência severa",
+    "trovoada embebida com granizo"…) e o código curto do texto ("SEV TURB").
+    Fenómeno que não conhece → (None, None)."""
+    m = _SIGMET_FEN_RE.search(texto or "")
+    if not m:
+        return None, None
+    ts, gr, sev, hvy, va, tc, rd = m.groups()
+    if ts:
+        pt = _SIGMET_TS_PT[ts] + (" com granizo" if gr else "")
+    elif sev:
+        pt = ("gelo severo" + (" (chuva gelada)" if "FZRA" in sev else "")
+              if sev.startswith("ICE") else _SIGMET_SEV_PT[sev])
+    elif hvy:
+        pt = "tempestade de poeira forte" if hvy == "DS" else "tempestade de areia forte"
+    elif va:
+        pt = "cinzas vulcânicas"
+    elif tc:
+        pt = "ciclone tropical"
+    else:
+        pt = "nuvem radioactiva"
+    return pt, re.sub(r"\s+", " ", m.group(0))
+
+
+def _nivel_pt(n):
+    return "a superfície" if n == "SFC" else (f"FL{int(n[2:]):03d}" if n.startswith("FL")
+                                              else f"{int(n[:-2])} ft")
+
+
+def descrever_sigmet(texto):
+    """(5.1.5, pedido do Duarte a 19-nov-2026) O que um SIGMET avisa, por
+    extenso: fenómeno, observado ou previsto, níveis, movimento e evolução —
+    ex.: "turbulência severa prevista, FL220–FL430, desloca-se para E a 40 kt,
+    a intensificar". Só lê o texto: não muda a área nem a decisão. Partes que
+    não lê ficam de fora (o texto completo continua no aviso do SIGMET)."""
+    t = re.sub(r"\s+", " ", (texto or "").upper())
+    fen, _ = _fen_sigmet_pt(t)
+    partes = []
+    if fen:
+        obs = re.search(r"\b(OBS|FCST)\b", t)
+        if obs:
+            # concordância: "gelo severo previsto", "cinzas vulcânicas previstas"
+            fim = ("as" if fen.startswith("cinzas") else
+                   "o" if fen.split()[0] in ("gelo", "ciclone") else "a")
+            fen += (" observad" if obs.group(1) == "OBS" else " previst") + fim
+        partes.append(fen)
+    nv = r"(SFC|FL\d{2,3}|\d{3,5}FT)"
+    m = re.search(rf"\bTOP\s+(ABV|BLW)?\s*FL(\d{{2,3}})\b", t)
+    m2 = re.search(rf"\b{nv}/(?:FL)?(\d{{2,3}}|\d{{3,5}}FT)\b", t)
+    m3 = re.search(r"\b(ABV|BLW)\s+FL(\d{2,3})\b", t)
+    if m2:
+        a, b = m2.group(1), m2.group(2)
+        b = b if b.endswith("FT") else f"FL{b}"
+        partes.append(f"da superfície ao {_nivel_pt(b)}" if a == "SFC"
+                      else f"{_nivel_pt(a)}–{_nivel_pt(b)}")
+    elif m:
+        q = {"ABV": "acima do ", "BLW": "abaixo do "}.get(m.group(1) or "", "")
+        partes.append(f"topo {q}FL{int(m.group(2)):03d}")
+    elif m3:
+        partes.append(("acima do " if m3.group(1) == "ABV" else "abaixo do ")
+                      + f"FL{int(m3.group(2)):03d}")
+    mv = re.search(r"\bMOV\s+([NSEW]{1,3})\s+(\d{1,3})\s*(KT|KMH)\b", t)
+    if mv:
+        partes.append(f"desloca-se para {mv.group(1)} a {int(mv.group(2))} "
+                      f"{'kt' if mv.group(3) == 'KT' else 'km/h'}")
+    elif re.search(r"\bSTNR\b", t):
+        partes.append("estacionário")
+    ev = re.search(r"\b(INTSF|WKN|NC)\s*=?\s*$", t)
+    if ev:
+        partes.append({"INTSF": "a intensificar", "WKN": "a enfraquecer",
+                       "NC": "sem alteração"}[ev.group(1)])
+    return ", ".join(partes)
+
+
+def _com_info_sigmet(c, blocos):
+    """(5.1.5) Junta ao motivo "SIGMET Xnn" o que o SIGMET avisa: no quadro o
+    código curto ("U01 SEV TURB"), por extenso a descrição (`descrever_sigmet`).
+    Sem o texto do SIGMET (só referido no GAMET), diz isso."""
+    if c["linha"] != "SIGMET":
+        return c
+    c = dict(c)
+    sid = c["valor"]
+    resto = _sem_parcial(c["texto"])[len("SIGMET "):]
+    texto = next((b.texto for b in blocos or () if b.phenomenon == "SIGMET"
+                  and b.texto and b.value == resto), "")
+    if not texto and "(GAMET, sem área)" in resto:
+        c["longo"] = f"{sid} — referido no GAMET, sem o texto completo: conta em toda a área"
+        return c
+    d = descrever_sigmet(texto) if texto else ""
+    if not d:
+        m = re.search(r"\(([^)]*)\)", resto)
+        fen = _fen_sigmet_pt(m.group(1))[0] if m else None
+        d = fen or ""
+    curto = _fen_sigmet_pt(texto or resto)[1]
+    if curto:
+        c["valor"] = f"{sid} {curto}"
+    if d:
+        c["longo"] = f"{sid} — {d}"
+    return c
+
+
 def motivo_legivel(c, com_nivel=True):
     """(5.1) Motivo classificado escrito por extenso, ex.: "Base das nuvens
     200 ft — abaixo de 500 ft → NO-GO". Motivo desconhecido: o texto do motor."""
@@ -5660,7 +5774,7 @@ def quadro_zonas(regions, ordem=None, wind=None, blocos=None):
         cel = {}
         ib = info_base(reg, blocos)
         for m in reg.get("reasons") or []:
-            c = _com_info_base(classificar_motivo(m), ib)
+            c = _com_info_sigmet(_com_info_base(classificar_motivo(m), ib), blocos)
             if c["nivel"] is None:          # desconhecido: conta como a região
                 c["nivel"] = reg["decision"] if reg["decision"] in _NIVEL_GRAV else "INFO"
             ant = cel.get(c["linha"])
@@ -5703,7 +5817,7 @@ def porque_veredicto(regions, blocos=None):
         out = []
         ib = info_base(g, blocos)
         for m in g.get("reasons") or []:
-            c = _com_info_base(classificar_motivo(m), ib)
+            c = _com_info_sigmet(_com_info_base(classificar_motivo(m), ib), blocos)
             if c["nivel"] == pior and not c["parcial"]:
                 out.append(c)
         return out
@@ -5782,7 +5896,7 @@ def html_zona(n, region, pct, regions, notas=(), resto=None, blocos=None):
     """(5.1) Painel da zona escolhida: "Zona n", % da FIR, decisão, resto do
     período, motivos por extenso, alcance e a lista de aeródromos (a abrir)."""
     ib = info_base(region, blocos)
-    motivos = [_com_info_base(classificar_motivo(m), ib) for m in region.get("reasons") or []]
+    motivos = [_com_info_sigmet(_com_info_base(classificar_motivo(m), ib), blocos) for m in region.get("reasons") or []]
     itens = "".join(
         f'<li><span class="gv-pt" style="background:'
         f'{_DEC_BARRA.get(c["nivel"] or region["decision"], "#9CD2FF")}"></span>'

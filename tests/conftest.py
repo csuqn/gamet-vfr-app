@@ -442,7 +442,14 @@ _CAMADA_471_RE = re.compile(r"^((?:TURB|ICE) SEV|MTW (?:SEV|MOD)) [^—(]*?(?= �
 
 
 def motivos_sem_camada_471(motivos):
-    return [_CAMADA_471_RE.sub(r"\1", m) for m in motivos]
+    # Também nos motivos parciais da 4.7.3 ("parte da zona: MTW MOD ABV FL050 …";
+    # primeiro caso no arquivo: GAMET 191500/192100 de 19-nov-2026), em que o
+    # prefixo vinha antes e o ^ da expressão não casava.
+    out = []
+    for m in motivos:
+        p = MOTIVO_PARCIAL_473 if m.startswith(MOTIVO_PARCIAL_473) else ""
+        out.append(p + _CAMADA_471_RE.sub(r"\1", m[len(p):]))
+    return out
 
 
 # 4.7.3: numa região fundida, o motivo que só vale numa das partes passou a
