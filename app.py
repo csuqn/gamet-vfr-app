@@ -4174,7 +4174,11 @@ def nivel_inferior_estrito(texto):
 # (FLaaa/bbb ou ABV FLaaa), MOV dir nnKT|KMH ou STNR, INTSF/WKN/NC e "=".
 # Qualquer outra coisa ("OCNL TSRA", "040/060", "1500 M", "F050/150", um
 # segundo fenómeno…) → continua a contar.
-_SIGMET_CAB_RE = re.compile(r"^.*?\bFIR\s+")
+# Cabeçalho: até ao "FIR" que vem a seguir a "VALID ddhhmm/ddhhmm", sem
+# atravessar "ENTIRE" (revisor do PR #58, 2.ª revisão: com "FIR/UIR" ou sem
+# FIR no cabeçalho, cortar até ao 1.º "FIR " apagava um "EMBD TS" antes de
+# "ENTIRE FIR"). Sem cabeçalho assim, o texto fica inteiro.
+_SIGMET_CAB_RE = re.compile(r"^.*?\bVALID\s+\d{6}/\d{6}\b(?:(?!\bENTIRE\b).)*?\bFIR\s+")
 _SIGMET_ALTO_FEN_RE = re.compile(r"\bSEV\s+(?:TURB|ICE|MTW)\b")
 _SIGMET_LISTA_BRANCA = [
     re.compile(r"\b(?:OBS|FCST)(?:\s+AT\s+\d{4}Z)?\b"),
@@ -4194,7 +4198,10 @@ def sigmet_acima_vfr(texto):
     mais no texto além do que está na lista branca. Senão None: na dúvida, o
     SIGMET conta."""
     t = re.sub(r"\s+", " ", (texto or "")).strip()
-    corpo = _SIGMET_CAB_RE.sub("", t, count=1) if re.search(r"\bFIR\s", t) else t
+    # 2.ª protecção: outro fenómeno em QUALQUER parte do texto → conta.
+    if _OUTRO_FEN_RE.search(t.upper()):
+        return None
+    corpo = _SIGMET_CAB_RE.sub("", t, count=1)
     if len(_SIGMET_ALTO_FEN_RE.findall(corpo)) != 1 or not re.match(r"SEV\s+(?:TURB|ICE|MTW)\b", corpo):
         return None
     niveis = _NIVEL_ALTO_RE.findall(corpo)

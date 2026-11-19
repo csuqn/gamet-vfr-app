@@ -559,3 +559,29 @@ def test_arquivo_conjunto_fixo_dos_sigmets_altos(eng):
     altos = {k: v for k, v in altos.items() if v is not None}
     assert altos == {k: v for k, v in _ALTOS_ARQUIVO.items() if k in {
         e["ficheiro"].split("/")[-1] for e in indice.get("sigmets", [])}}
+
+
+# Revisor do PR #58, 2.ª revisão: o corte do cabeçalho não pode chegar a
+# "ENTIRE FIR" e apagar o fenómeno que está antes.
+@pytest.mark.parametrize("texto", [
+    "LPPC SIGMET U09 VALID 191500/191900 LPPT- LPPC LISBOA FIR/UIR EMBD TS FCST ENTIRE FIR "
+    "SEV TURB FL220/430 STNR NC=",
+    "LPPC SIGMET U09 VALID 191500/191900 LPPT- EMBD TS FCST ENTIRE FIR SEV TURB FL220/430 STNR NC=",
+    "LPPC SIGMET U09 VALID 191500/191900 LPPT- LPPC LISBOA FIR/UIR VA ERUPTION FCST ENTIRE FIR "
+    "SEV TURB FL220/430 STNR NC=",
+    "EMBD TS FCST ENTIRE FIR SEV TURB FL220/430 STNR NC=",
+])
+def test_revisor_cabecalho_nao_apaga_o_fenomeno(eng, texto):
+    assert eng.sigmet_acima_vfr(texto) is None
+
+
+def test_revisor_cabecalho_ponta_a_ponta(eng):
+    """`… LISBOA FIR/UIR EMBD TS FCST ENTIRE FIR SEV TURB FL220/430` continua
+    NO-GO em toda a FIR (como na 5.1.5) e a faixa não diz "ACIMA FL195"."""
+    agora = datetime(2026, 11, 19, 17, 30, tzinfo=timezone.utc)
+    g = build_gamet("SIGWX: NIL", validity="191500/192100")
+    s = ("LPPC SIGMET U09 VALID 191700/192100 LPPT- LPPC LISBOA FIR/UIR EMBD TS FCST ENTIRE FIR "
+         "SEV TURB FL220/430 STNR NC=")
+    r = eng.analisar_gamet(g, "ipma", boletins=[s], boletins_at=agora, agora=agora)
+    assert all(x["decision"] == "NO-GO" for x in r["regioes"])
+    assert r["faixa_sig"] == ("ACTIVO", "NO-GO")
