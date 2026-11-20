@@ -529,8 +529,9 @@ hhmmZ]`, a área (coordenadas, `WI`, `OF`, `BTN`, `LINE`, `nnNM`, `ENTIRE FIR`,
 cardinais, `AND`, `-`), `MOV dir nnKT|KMH`/`STNR`, `INTSF`/`WKN`/`NC` e `=`,
 não pode sobrar nada — qualquer outra coisa (`OCNL TSRA`, um segundo
 fenómeno, `040/060`, `1500 M`, `F050/150`, `FL150`, `SFC-FL100`, `(CAT)`,
-minúsculas) → None, o SIGMET conta. Os 16 SIGMETs do arquivo que saem da
-decisão (todos SEV TURB, FL200–FL330) são um conjunto fixo em
+minúsculas) → None, o SIGMET conta. Os 17 SIGMETs do arquivo que saem da
+decisão (todos SEV TURB, FL200–FL330; o U03 192100 de 19-nov entrou a
+20-nov, confirmado no relatório diário) são um conjunto fixo em
 `test_v60.test_arquivo_conjunto_fixo_dos_sigmets_altos`, que falha se
 aparecer outro. Então `blocos_sigmet` dá um bloco
 `SIGMET_ALTO` (não NO-GO): `decision()` junta o motivo "SIGMET … (acima dos
