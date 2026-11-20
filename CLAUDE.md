@@ -800,7 +800,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-2595 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 41 do `test_v476.py` + 65 do `test_v48.py` + 10 do `test_v481.py` + 50 do `test_v49.py` + 8 dos conjuntos fixos de 15/16-nov (#50) + 78 do `test_v51.py` + 135 do `test_v60.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2566 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
+2626 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 41 do `test_v476.py` + 65 do `test_v48.py` + 10 do `test_v481.py` + 50 do `test_v49.py` + 8 dos conjuntos fixos de 15/16-nov (#50) + 78 do `test_v51.py` + 135 do `test_v60.py` + 31 do `test_comparar_piloto.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2597 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -1115,6 +1115,12 @@ python3 -m pytest
   passa do FL195, e então igual ao GAMET sem o SIGMET); arquivo em
   `arquivo_hist` (nenhum SIGMET alto dá NO-GO; sem eles, decisões iguais); os
   casos optimistas do agente `parser` continuam a contar
+- `tests/test_comparar_piloto.py` — `scripts/comparar_piloto.py` (GAMET real
+  141500): diferenças nos dois sentidos, decisão da app = briefing manual,
+  formas do ponto (nome, indicativo, negrito, sem acentos) e da decisão (`NO GO`,
+  `NO–GO`, duas decisões → ilegível), duas tabelas, pontos em falta/repetidos/
+  desconhecidos → código 2, stdin e vários pares; arquivo (10 GAMETs) concorda
+  com a própria app
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva
@@ -1381,6 +1387,10 @@ Ficam separados para que cada recolha não reinicie a app publicada.
   GAMET ilegível, **campos com conteúdo que não geraram fenómeno**,
   palavras fora do vocabulário e discrepâncias com o oráculo. Uso:
   `python scripts/analisar.py --dir dados/gamets --desde 24`.
+- `scripts/comparar_piloto.py` — compara ponto a ponto a tabela do agente
+  `piloto` com a app. Uso: `python scripts/comparar_piloto.py GAMET.txt
+  PILOTO.md [GAMET2.txt PILOTO2.md …]` (ou `-` para ler o piloto do stdin).
+  Saída 0 = concordam nos 52 pontos, 1 = diferenças, 2 = tabela com problemas.
 - Relatórios diários em `relatorios/AAAA-MM-DD.md` e resumo mensal em
   `relatorios/resumo-AAAA-MM.md` (ramo `dados`). Sem data de fim.
 
@@ -1390,7 +1400,12 @@ Tarefa agendada às 08:00 (Lisboa). Cadeia:
 
 1. `scripts/analisar.py` — leitura pelo parser (determinística, não é agente).
 2. `piloto` × N — um por GAMET das últimas 24 h, em paralelo, **às cegas**.
-3. `comparador` — parser × piloto, aeródromo a aeródromo.
+3. `scripts/comparar_piloto.py` — lê a tabela de cada piloto e a decisão da
+   app (só o texto do GAMET, modo manual, decisão principal) e lista os pontos
+   em que diferem (determinístico; recomendação g.4 da W46). Tabela com
+   pontos em falta, repetidos, desconhecidos ou decisão ilegível → código 2,
+   e a comparação não se dá por boa. `comparador` — só classifica as
+   diferenças que o script listou (já não as conta).
 4. Para cada erro do parser confirmado: `editor` (ramo `proposta/...` com
    teste do GAMET real) → PR → check "Testes" (GitHub Actions) →
    `revisor` (independente; inclui `scripts/comparar_versoes.py` sobre todo o
