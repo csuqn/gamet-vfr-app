@@ -747,6 +747,24 @@ mesma linha, uma ilegível). Caso real: GAMET 201500/202100 até à 3.6
 (`MT OBSC: N OF N4100 LAN S OF N3800 LAN`) só avisava; desde a 3.10 gera bloco
 (ver abaixo) e deixa de avisar.
 
+**Campo desconhecido (6.1, relatório W45 g.2; pedido do Duarte a 20-nov-2026).**
+`campos_desconhecidos()` devolve os `NOME: conteúdo` da Secção I (de `SECN I`
+até `SIGMET APPLICABLE` ou `SECN II`) cujo nome — até duas palavras antes de
+`:` — não acaba num nome que a máquina de estados conhece
+(`_CAMPO_CONHECIDO_FIM_RE`, os de `_CAMPO_INI_RE`), e `analisar_gamet` junta um
+aviso `aviso` "Campo desconhecido" (etiqueta "verificar"). Esse texto não
+abre campo: fica colado ao campo anterior como continuação (pode recortá-lo)
+ou, logo depois de `SECN I`, é ignorado — sem "Campo não interpretado",
+porque não chega a ser campo. Foi assim com `SFC WIND:` até à 4.7.5. Só
+aviso: leitura e decisões iguais. Também no `scripts/analisar.py` ("Campo
+desconhecido → …"). 0 avisos no arquivo a 20-nov-2026. O nome mostrado é a
+palavra antes de `:` (com `SFC`/`SIG`/`MT` antes, se houver). **Só cobre
+`NOME:`** (revisão do agente `parser`): um nome desconhecido **sem dois-pontos**
+(`SIG WX OCNL TS` numa linha) continua em silêncio e o seu texto pode perder-se
+(optimista, pré-existente; 0 casos no arquivo — o IPMA escreve sempre `:`); nomes
+de uma letra ou com algarismos (`WIND/T:`, `VIS2:`) também não avisam. Testes em
+`test_v61.py`.
+
 **Resto do período (4.2, pedido do Duarte a 28-out-2026).** A janela `HH/HH`
 continua a **não** mudar a decisão principal: veredicto, cores e regiões são o
 pior caso de todo o período (iguais à 4.1). `resto_do_periodo()` calcula uma
@@ -800,7 +818,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-2626 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 41 do `test_v476.py` + 65 do `test_v48.py` + 10 do `test_v481.py` + 50 do `test_v49.py` + 8 dos conjuntos fixos de 15/16-nov (#50) + 78 do `test_v51.py` + 135 do `test_v60.py` + 31 do `test_comparar_piloto.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2597 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
+2652 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 41 do `test_v476.py` + 65 do `test_v48.py` + 10 do `test_v481.py` + 50 do `test_v49.py` + 8 dos conjuntos fixos de 15/16-nov (#50) + 78 do `test_v51.py` + 135 do `test_v60.py` + 31 do `test_comparar_piloto.py` + 26 do `test_v61.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2623 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -1121,6 +1139,10 @@ python3 -m pytest
   `NO–GO`, duas decisões → ilegível), duas tabelas, pontos em falta/repetidos/
   desconhecidos → código 2, stdin e vários pares; arquivo (10 GAMETs) concorda
   com a própria app
+- `tests/test_v61.py` — aviso "Campo desconhecido" (6.1): `SFC WINDS:` a meio e
+  logo depois de `SECN I`, vários, nomes conhecidos não avisam, fora da Secção I
+  não avisa, conteúdo cortado, decisão igual, GAMET real 141500 e arquivo sem
+  aviso, `analisar.py`, Streamlit (aviso em "A ter em conta")
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva
