@@ -1035,6 +1035,13 @@
    "inicio": "2026-11-20T03:00Z",
    "fim": "2026-11-20T09:00Z",
    "tipo": "GAMET"
+  },
+  {
+   "ficheiro": "gamets/2026/11/20261120T0847Z_200900-201500_3108dcfc1d.txt",
+   "recolhido": "2026-11-20T08:47Z",
+   "inicio": "2026-11-20T09:00Z",
+   "fim": "2026-11-20T15:00Z",
+   "tipo": "GAMET"
   }
  ],
  "sigmets": [
