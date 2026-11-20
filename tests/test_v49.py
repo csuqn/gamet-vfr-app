@@ -629,10 +629,19 @@ def test_151500_cb_com_janela_propria(eng):
         assert b.window == "15–18Z" and not b.janela_ambigua
     (b2,) = [b for b in bl if b.phenomenon == "BASE_AGL" and b.value == 200]
     assert b2.window == "18–21Z" and not b2.cb_solto and not _toda_fir(eng, b2.polygon)
-    # Principal igual com e sem a janela (pior caso de todo o período)
-    sem = eng.analisar_gamet(G151500, "manual", agora=datetime(2026, 11, 15, 16, 0,
-                                                                 tzinfo=timezone.utc))
-    assert sem["regioes"]
+    # A decisão principal é o pior caso de todo o período: igual às 16:00Z e às
+    # 19:30Z em todos os pontos, e o CB ISOL (toda a FIR) continua a pô-la em
+    # MARGINAL a sul de N3730, onde o GAMET não prevê mais nada (LPFR).
+    pts = _pontos(eng, True)
+
+    def _princ(h, mi):
+        regs = eng.analisar_gamet(G151500, "manual", agora=datetime(
+            2026, 11, 15, h, mi, tzinfo=timezone.utc))["regioes"]
+        return {k: (eng.find_region_for_point(regs, la, lo) or {}).get("decision")
+                for k, (la, lo) in pts}
+    d16, d19 = _princ(16, 0), _princ(19, 30)
+    assert d16 == d19
+    assert {_icao(k): v for k, v in d16.items()}["LPFR"] == "MARGINAL"
     # Resto do período: às 16:00Z o CB conta; às 19:30Z (18Z + 1 h) já não
     for hora, conta in ((16, True), (19.5, False)):
         h, mi = int(hora), int(round((hora - int(hora)) * 60))
