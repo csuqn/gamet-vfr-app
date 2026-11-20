@@ -34,7 +34,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "6.0"
+APP_VERSION = "6.0.1"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -2713,6 +2713,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
             # outros blocos da subentrada não mudam; toda a FIR contém a área
             # antiga, por isso nunca é mais permissivo.
             cb_ini = None
+            cb_janela = False   # (6.0.1) o CB abre a sua parte com janela própria
             mcb = _CB_GRUPO_RE.search(content) if _cb_solto else None
             if mcb and not poly.buffer(1e-9).contains(FIR_POLYGON):
                 toks = [t for t in re.findall(r"[^\s:,;.=]+", content[:mcb.start()])
@@ -2722,11 +2723,20 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
                 elif (all(_NAO_QUAL_PROPRIO_RE.fullmatch(t) for t in toks)
                       and (so_valores or conteudo_antes)):
                     cb_ini = mcb.start()            # área herdada de outra nuvem
+                    # (6.0.1, decisão h.2 do Duarte a 20-nov-2026) Se a parte
+                    # abre com a janela do próprio CB ("15/18 ISOL TCU/CB", GAMET
+                    # real 151500/152100), a janela é dele e conta: toda a FIR
+                    # (a área não foi dada), mas só nessa janela. Sem janela
+                    # própria fica todo o período, como na 4.9.
+                    cb_janela = (window is not None and not ambigua and
+                                 any(re.fullmatch(r"\d{2}/\d{2}", t) for t in toks))
 
             def _bloco_cld(fen, val, pos):
                 if cb_ini is not None and pos >= cb_ini:
                     q = "LCA" if re.search(r"\bLCA\b", content[cb_ini:]) else ""
-                    b = MetBlock(fen, FIR_POLYGON, val, q, janela_ambigua=True)
+                    b = (MetBlock(fen, FIR_POLYGON, val, q, window=window)
+                         if cb_janela else
+                         MetBlock(fen, FIR_POLYGON, val, q, janela_ambigua=True))
                     b.cb_solto = True
                     return b
                 return MetBlock(fen, poly, val, qualifier, surface=surface, window=window,

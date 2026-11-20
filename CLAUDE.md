@@ -370,7 +370,18 @@ Três pormenores que já causaram erros reais:
   já eram NO-GO por SIGMET). 12 GAMETs lidos de outra forma (também 100300,
   100900, 101500, sem mudar decisões nos 52 pontos); os testes do arquivo contra
   motores anteriores saltam-nos (`conftest.cb_49`; conjunto fixo em
-  `test_v49.test_arquivo_gamets_lidos_de_outra_forma`). `test_v472` passa a
+  `test_v49.test_arquivo_gamets_lidos_de_outra_forma`). **Janela própria do CB
+  (6.0.1, decisão h.2 do Duarte a 20-nov-2026: "como for mais lógico e real")**:
+  se a parte do CB abre com a sua própria janela (`15/18 ISOL TCU/CB 018-030/
+  XXXHFT AGL`, GAMET real 151500/152100, depois de `18/21 … LCA BKN 002…`), o CB
+  e a sua base continuam em toda a FIR (a área não foi dada) mas **só nessa
+  janela** (`janela_ambigua` False); sem janela própria — janela da outra nuvem,
+  como no 141500 — fica todo o período, como na 4.9. A decisão principal (pior
+  caso do período) não muda (`comparar_versoes.py` 6.0 → 6.0.1, com e sem
+  `--indice`: 0/0); só o resto do período do 151500 depois das 19:00Z (4 pontos
+  do sul com "Resto: GO"). `test_v49` verifica a janela com um modelo
+  independente (a parte abre com `HH/HH` e o grupo do CB) e o 151500 real às
+  16:00Z e 19:30Z. `test_v472` passa a
   esperar MARGINAL ("CB ISOL") a S de N3830 no caso `N OF N3830 BKN 002-008/010/
   015HFT AGL ISOL TCU/CB …` (era GO), e `test_v476.test_casos_iguais_a_4_7_5`
   compara a leitura sem a regra.
@@ -788,7 +799,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-2594 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 41 do `test_v476.py` + 65 do `test_v48.py` + 10 do `test_v481.py` + 49 do `test_v49.py` + 8 dos conjuntos fixos de 15/16-nov (#50) + 78 do `test_v51.py` + 135 do `test_v60.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2565 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
+2595 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 41 do `test_v476.py` + 65 do `test_v48.py` + 10 do `test_v481.py` + 50 do `test_v49.py` + 8 dos conjuntos fixos de 15/16-nov (#50) + 78 do `test_v51.py` + 135 do `test_v60.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2566 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**

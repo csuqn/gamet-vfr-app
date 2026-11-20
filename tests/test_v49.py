@@ -272,6 +272,23 @@ MUDAM = [
 ]
 
 
+# (6.0.1, decisão h.2 do Duarte a 20-nov-2026) Um CB que abre a sua parte com
+# janela própria ("11/15 ISOL TCU/CB") fica em toda a FIR, mas só nessa janela;
+# sem janela própria, todo o período (como na 4.9).
+JANELA_PROPRIA = {
+    "SIG CLD:09/11 N OF N4000 BKN 002HFT AGL 11/15 ISOL TCU/CB 020/XXXHFT AGL": "11–15Z",
+}
+_JANELA_CB_RE = re.compile(r"\s*(?:LCA\s+)?(\d{2})/(\d{2})\s+(?:LCA\s+)?"
+                           r"(?:ISOL|OCNL|FRQ|EMBD|CB|TCU)\b")
+
+
+def _janela_propria_esperada(parte):
+    """Modelo independente: a parte abre com HH/HH e logo a seguir o grupo do CB
+    (LCA pode estar antes ou depois da janela) → "HH–HHZ"; senão ""."""
+    m = _JANELA_CB_RE.match(parte or "")
+    return f"{m.group(1)}–{m.group(2)}Z" if m else ""
+
+
 @pytest.mark.parametrize("corpo,valor", MUDAM)
 def test_casos_que_mudam(eng, eng481, corpo, valor):
     t = _g(corpo)
@@ -281,7 +298,8 @@ def test_casos_que_mudam(eng, eng481, corpo, valor):
     (cbv,) = [b for b in velhos if b.phenomenon == "CB"]
     assert cb.value == cbv.value == valor
     assert not _toda_fir(eng, cbv.polygon)          # na 4.8.1 só na área da subentrada
-    assert _toda_fir(eng, cb.polygon) and cb.window == "" and cb.janela_ambigua
+    jan = JANELA_PROPRIA.get(corpo, "")
+    assert _toda_fir(eng, cb.polygon) and cb.window == jan and cb.janela_ambigua == (not jan)
     assert cb.surface == ""
     # Os blocos que não são do grupo do CB ficam iguais
     _resto_igual(blocos, velhos, corpo)
@@ -548,10 +566,13 @@ def test_linhas_geradas_contra_4_8_1(eng, eng481):
         assert all(GRAV[dn[k]] >= GRAV[dv[k]] for k in dn), corpo
         assert eng.campos_nao_interpretados(t) == eng481.campos_nao_interpretados(t), corpo
         assert eng.subentradas_sem_area(t) == eng481.subentradas_sem_area(t), corpo
-        # Um CB que muda está em toda a FIR, sem janela, e conta sempre
+        # Um CB que muda está em toda a FIR; sem janela própria a abrir a sua
+        # parte, sem janela e conta sempre; com ela, só nessa janela (6.0.1)
         for b in bn:
             if b.cb_solto:
-                assert _toda_fir(eng, b.polygon) and b.window == "" and b.janela_ambigua
+                jan = _janela_propria_esperada(b.parte)
+                assert _toda_fir(eng, b.polygon), corpo
+                assert b.window == jan and b.janela_ambigua == (not jan), (corpo, b.parte)
         mudou += any(b.cb_solto for b in bn)
     assert mudou > casos // 5
 
@@ -571,3 +592,53 @@ def test_sem_a_regra_e_a_4_8_1(eng, eng481):
         for kw in ({"_modo42": True}, {"_modo475": True}, {"_modo476": True}):
             assert _assin(eng.parse_gamet(t, **kw)[0]) == \
                 _assin(eng481.parse_gamet(t, **kw)[0]), (kw, t[:200])
+
+
+
+# ---------------------------------------------------------------- 6.0.1 (h.2)
+G151500 = (
+    'LPPC GAMET VALID 151500/152100 LPPT- LPPC LISBOA FIR/MAINLAND AREA BLW FL150 SECN I SFC '
+    'VIS:N OF N3730 LCA 3000-5000M RA 18/21 N OF N4000 AND E OF W00820 LCA 0800-5000 FG/BR SI'
+    'G CLD:N OF N3730 LCA BKN 006-010/012HFT AGL 18/21 N OF N4000 AND E OF W00820 LCA BKN 002'
+    '-008/010HFT AGL 15/18 ISOL TCU/CB 018-030/XXXHFT AGL SIGMET APPLICABLE: AT TIME OF ISSUE'
+    ' NIL SECN II PSYS:18 NIL CLD:SCT/BKN SC/CU 012-030/040HFT AGL FEW/SCT AC/AS 060-090/100-'
+    '130HFT AMSL WIND/T: BRAGANCA PORTO VISEU N4145 W00645 N4115 W00840 N4045 W00750 1000FT A'
+    'GL 260/023KT PS09 250/016KT PS14 250/014KT PS10 2000FT AGL 270/028KT PS07 260/019KT PS12'
+    ' 270/021KT PS09 5000FT AGL 280/040KT PS02 260/024KT PS07 270/030KT PS04 FL100 280/041KT '
+    'MS02 270/027KT MS02 270/030KT MS02 FL150 290/041KT MS09 290/037KT MS09 290/036KT MS09 FZ'
+    'LVL: 8800FT AMSL 9200FT AMSL 8400FT AMSL LISBOA EVORA FARO N3845 W00908 N3830 W00752 N37'
+    '00 W00800 1000FT AGL 250/012KT PS15 260/012KT PS14 290/007KT PS16 2000FT AGL 250/013KT P'
+    'S13 260/015KT PS12 320/005KT PS14 5000FT AGL 250/016KT PS08 280/015KT PS07 260/005KT PS1'
+    '0 FL100 270/021KT MS01 280/021KT MS01 280/019KT PS00 FL150 270/025KT MS06 290/024KT MS06'
+    ' 290/014KT MS06 FZLVL: 9100FT AMSL 9600FT AMSL 10600FT AMSL MNM QNH:1017HPA='
+)
+
+
+def test_151500_cb_com_janela_propria(eng):
+    """(6.0.1, decisão h.2 do Duarte a 20-nov-2026: "como for mais lógico e
+    real") GAMET real 151500/152100: `… 18/21 N OF N4000 AND E OF W00820 LCA BKN
+    002-008/010HFT AGL 15/18 ISOL TCU/CB 018-030/XXXHFT AGL`. O CB não tem área
+    (toda a FIR, 4.9) mas tem janela própria: só das 15 às 18Z. O BKN 002 fica
+    a N de N4000 das 18 às 21Z. A decisão principal (pior do período) não muda."""
+    from datetime import datetime, timezone
+    bl = eng.parse_gamet(G151500)[0]
+    (cb,) = [b for b in bl if b.phenomenon == "CB"]
+    (b18,) = [b for b in bl if b.phenomenon == "BASE_AGL" and b.value == 1800]
+    for b in (cb, b18):
+        assert b.cb_solto and _toda_fir(eng, b.polygon)
+        assert b.window == "15–18Z" and not b.janela_ambigua
+    (b2,) = [b for b in bl if b.phenomenon == "BASE_AGL" and b.value == 200]
+    assert b2.window == "18–21Z" and not b2.cb_solto and not _toda_fir(eng, b2.polygon)
+    # Principal igual com e sem a janela (pior caso de todo o período)
+    sem = eng.analisar_gamet(G151500, "manual", agora=datetime(2026, 11, 15, 16, 0,
+                                                                 tzinfo=timezone.utc))
+    assert sem["regioes"]
+    # Resto do período: às 16:00Z o CB conta; às 19:30Z (18Z + 1 h) já não
+    for hora, conta in ((16, True), (19.5, False)):
+        h, mi = int(hora), int(round((hora - int(hora)) * 60))
+        r = eng.analisar_gamet(G151500, "manual",
+                               agora=datetime(2026, 11, 15, h, mi, tzinfo=timezone.utc))
+        resto = r["resto"]
+        regs = resto["regioes"] if resto else r["regioes"]
+        tem_cb = any("CB" in m for x in regs for m in x["reasons"])
+        assert tem_cb == conta, (hora, resto and resto["janela"])
