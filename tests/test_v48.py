@@ -33,7 +33,7 @@ from conftest import build_gamet
 REF476 = Path(__file__).resolve().parent / "referencia" / "app_4_7_6.py"
 DADOS = Path(__file__).resolve().parent.parent / "dados"
 G091500_F = DADOS / "gamets/2026/11/20261109T1444Z_091500-092100_540ca00855.txt"
-GRAV = {"GO": 0, "MARGINAL": 1, "NO-GO": 2, None: -1}
+GRAV = {"GO": 0, "GO COND.": 0.5, "MARGINAL": 1, "NO-GO": 2, None: -1}
 VAL = "091500/092100"
 LINHA = "N3800 W01000 - N4000 W00630"
 

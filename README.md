@@ -9,9 +9,9 @@
 1 minuto — plano gratuito do Render).</sub>
 
 Uma app web que lê o GAMET da FIR de Lisboa, percebe o que ele diz e onde, e
-mostra num mapa onde se pode voar em VFR (**GO**), onde é preciso cautela
-(**MARGINAL**) e onde não se deve voar (**NO-GO**), zona a zona e aeródromo a
-aeródromo. Pensada para pilotos de ultraleves e de aviação geral em VFR.
+mostra num mapa onde se pode voar em VFR (**GO**), onde se pode voar abaixo de
+um tecto (**GO COND.**, a azul), onde é preciso cautela (**MARGINAL**) e onde não
+se deve voar (**NO-GO**), zona a zona e aeródromo a aeródromo. Pensada para pilotos de ultraleves e de aviação geral em VFR.
 
 > ⚠️ **Ferramenta de apoio à decisão, não de decisão.** Não substitui o
 > briefing oficial nem a leitura do GAMET, METAR, TAF e SIGMET pelo próprio
@@ -160,7 +160,8 @@ aeródromos que lá caem.
 
 **📊 Porquê · por fenómeno e zona.** Um quadro com uma linha por fenómeno
 (base, visibilidade, trovoada, CB, turbulência, gelo, vento…) e uma coluna por
-zona. Vermelho: dá NO-GO; amarelo: dá MARGINAL; azul: só informativo (ex.:
+zona. Vermelho: dá NO-GO; amarelo: dá MARGINAL; azul: dá GO COND. (abaixo do
+tecto); cinzento: só informativo (ex.:
 turbulência ou gelo moderados, vento a 1000 ft). Só aparecem os fenómenos que
 existem neste GAMET; `*` quer dizer "só em parte da zona".
 
@@ -208,6 +209,7 @@ Em cada zona, a app aplica estas regras. Fica a pior decisão que se aplicar.
 | Trovoada isolada (`ISOL TS`) | MARGINAL | Contornável com cuidado |
 | Trovoada ocasional, frequente ou embebida | NO-GO | Não contornável em segurança |
 | Turbulência ou gelo **severos** | NO-GO | A maioria dos ultraleves não tem margem estrutural nem degelo |
+| Turbulência, gelo ou onda de montanha severos **só a partir do FL100** (GAMET `ABV FL100`, ou SIGMET `FL120/210`) | GO COND. (desde a 7.0) | GO abaixo de um tecto 1000 ft abaixo do limite ("GO abaixo do FL110"): o voo VFR baixo não chega lá |
 | Turbulência ou gelo moderados | informativo | Mostrado, mas não muda a decisão |
 | Onda de montanha (`MTW`) severa | NO-GO | Risco severo |
 | Onda de montanha (`MTW`) moderada | MARGINAL | Descendentes junto ao relevo que podem exceder a razão de subida de uma aeronave com pouca potência |
@@ -296,7 +298,7 @@ Algarve não afecta Lisboa.
 
 ## 10. Qualidade e testes
 
-- **2659 testes automáticos** cobrem a leitura do texto, a geometria, as
+- **2751 testes automáticos** cobrem a leitura do texto, a geometria, as
   decisões, os dados aeronáuticos e a app completa. Cada erro alguma vez
   encontrado tem um teste que impede que volte a aparecer.
 - **Verificação cruzada:** em centenas de GAMETs gerados, a decisão de cada
@@ -316,7 +318,7 @@ Algarve não afecta Lisboa.
 pip install -r requirements.txt -r requirements-dev.txt
 streamlit run app.py               # a app principal (Streamlit)
 cd nicegui_app && python main.py   # a versão de reserva (NiceGUI), http://localhost:8080
-python3 -m pytest                  # os testes (2659)
+python3 -m pytest                  # os testes (2751)
 ```
 
 | Ficheiro / pasta | Conteúdo |

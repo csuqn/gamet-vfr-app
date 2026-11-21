@@ -388,7 +388,7 @@ import conftest  # noqa: E402
 from conftest import GRAUS_RE, indice_sem_graus, indice_sem_linhas  # noqa: E402
 
 REF44 = Path(__file__).resolve().parent / "referencia" / "app_4_4.py"
-GRAV = {"GO": 0, "MARGINAL": 1, "NO-GO": 2}
+GRAV = {"GO": 0, "GO COND.": 0.5, "MARGINAL": 1, "NO-GO": 2}
 
 
 @pytest.fixture(scope="module")

@@ -142,7 +142,7 @@ def analisar(eng, texto):
     area = eng.FIR_POLYGON.area
     r["resumo"] = {d: round(100 * sum(x["polygon"].area for x in regioes
                                       if x["decision"] == d) / area)
-                   for d in ("NO-GO", "MARGINAL", "GO")}
+                   for d in ("NO-GO", "MARGINAL", "GO COND.", "GO")}
     return r
 
 
@@ -179,7 +179,7 @@ def main():
             print(f"**Excepção:** `{r['excepcao']}`\n")
         else:
             s = r["resumo"]
-            print(f"NO-GO {s['NO-GO']}% · MARGINAL {s['MARGINAL']}% · GO {s['GO']}% · "
+            print(f"NO-GO {s['NO-GO']}% · MARGINAL {s['MARGINAL']}% · GO COND. {s['GO COND.']}% · GO {s['GO']}% · "
                   f"{len(r['regioes'])} regiões\n")
         for al in r["alertas"]:
             print(f"- {al}")

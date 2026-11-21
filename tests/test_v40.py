@@ -418,7 +418,7 @@ PONTOS = [(la, lo) for la, lo in
 
 
 def test_nunca_mais_permissivo(eng):
-    grav = {"GO": 0, "MARGINAL": 1, "NO-GO": 2, None: -1}
+    grav = {"GO": 0, "GO COND.": 0.5, "MARGINAL": 1, "NO-GO": 2, None: -1}
     agora = _t(20, 18)
     for g in GAMETS_BASE:
         ref = eng.parse_validity(g, agora)[0] or agora

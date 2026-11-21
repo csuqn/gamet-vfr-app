@@ -24,7 +24,7 @@ import pytest
 from conftest import build_gamet
 
 DADOS = Path(__file__).resolve().parent.parent / "dados"
-GRAV = {"GO": 0, "MARGINAL": 1, "NO-GO": 2}
+GRAV = {"GO": 0, "GO COND.": 0.5, "MARGINAL": 1, "NO-GO": 2}
 AGORA = datetime(2026, 11, 19, 17, 30, tzinfo=timezone.utc)
 VALIDADE = "191500/192100"
 
@@ -220,15 +220,16 @@ def test_u01_expirado_e_u02_em_vigor(eng):
 # O mesmo SIGMET com outros níveis/fenómeno: NO-GO na área, como antes
 # ---------------------------------------------------------------------
 
+# (7.0) "FL150/250", "FL195/300" e "SEV ICE FL100/190" (limite inferior
+# entre o FL100 e o FL195) passaram a GO COND. — decisão do Duarte a
+# 21-nov-2026; verificados em test_v70.py.
 @pytest.mark.parametrize("fen, niveis", [
-    ("SEV TURB", "FL150/250"),
-    ("SEV TURB", "FL195/300"),
     ("SEV TURB", "SFC/FL100"),
     ("SEV TURB", "TOP FL340"),
     ("SEV TURB", "TOP ABV FL300"),
     ("SEV TURB", ""),
     ("SEV TURB", "FL220/430 AND FL050/120"),
-    ("SEV ICE", "FL100/190"),
+    ("SEV TURB", "FL090/250"),
     ("SEV MTW", "FL080/160"),
     ("EMBD TS", "FL220/430"),
     ("VA CLD", "FL220/430"),

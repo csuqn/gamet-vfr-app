@@ -1,8 +1,8 @@
 # LPPC GAMET Decoder
 
 App Streamlit que descodifica GAMETs da FIR LPPC (Portugal Continental) e
-produz um briefing VFR com decisões **GO / MARGINAL / NO-GO** por região
-geográfica.
+produz um briefing VFR com decisões **GO / GO COND. / MARGINAL / NO-GO** por
+região geográfica (GO COND. desde a 7.0).
 
 Público-alvo: pilotos VFR e de ultraleves. **É uma ferramenta de apoio à
 decisão de voo** — um erro pode levar alguém a voar em condições inseguras.
@@ -430,6 +430,7 @@ definir `FIR_POLYGON` — não entram na decisão.
 | CB em SIG CLD, ISOL | MARGINAL (desde a 2.0) |
 | CB em SIG CLD, EMBD / OCNL / FRQ / sem qualificador | NO-GO (desde a 2.0; TCU sozinho não conta) |
 | TURB ou ICE **SEV** (ou HVY) | NO-GO |
+| TURB / ICE / MTW SEV com o limite inferior escrito a partir do FL100 (`ABV FL100`, `FL120/FL150`), sozinho na linha | **GO COND.** — "GO abaixo do FL090" (1000 ft abaixo do limite; desde a 7.0) |
 | TURB ou ICE MOD | informativo, não altera decisão |
 | MTW (onda de montanha) SEV | NO-GO |
 | MTW MOD | MARGINAL (≠ TURB MOD: descendentes junto ao relevo) |
@@ -439,6 +440,7 @@ definir `FIR_POLYGON` — não entram na decisão.
 | VA (cinzas vulcânicas) | NO-GO |
 | SIGMET activo com área legível (página do IPMA / arquivo) | NO-GO na área + 10 NM, estendida pelo MOV (desde a 3.0; `D OF LINE` como semiplano desde a 4.5) |
 | SIGMET só de TURB/ICE/MTW SEV com todos os níveis escritos acima do FL195 (`FL220/430`, `ABV FL250`) | informativo, não altera a decisão (desde a 6.0; SERA.5005(d)(2): o VFR não se faz acima do FL195) |
+| SIGMET só de TURB/ICE/MTW SEV com o limite inferior escrito entre o FL100 e o FL195 (`FL120/210`) | **GO COND.** na área + 10 NM e MOV — "GO abaixo do FL110" (desde a 7.0) |
 | SIGMET sem área legível, ENTIRE FIR, ou só o identificador no GAMET | NO-GO em toda a área |
 | SIGMET referido no GAMET que se sabe terminado (expirou / CNL) | não conta; aviso (desde a 3.2). Estado desconhecido → toda a área |
 | AIRMET em vigor (página do IPMA / arquivo) | as regras acima, na área do AIRMET, **sem margem**, estendida pelo MOV (desde a 4.0). Área/MOV ilegível → toda a FIR + aviso |
@@ -551,6 +553,61 @@ testes do arquivo contra motores anteriores tiram do índice os SIGMETs altos
 (`conftest.indice_sem_altos_60`) e repõem o texto antigo desse aviso
 (`conftest.avisos_redaccao_60`); `test_v51` passa a ignorar "INFO" no pior
 nível e verifica a descrição com o U01 a `SFC/FL100`.
+
+**GO condicional (7.0, decisão do Duarte a 21-nov-2026; mudança de regra).**
+"Não faz sentido nenhum dar NO-GO quando o piloto vai voar muito abaixo dessa
+altitude." Decisão nova **`GO COND.`** (`GO_COND`), entre GO e MARGINAL
+(GO < GO COND. < MARGINAL < NO-GO), **azul** no mapa (`#3B82F6`; o informativo
+do quadro passa a cinzento). Dá-a um fenómeno severo que só existe acima de um
+nível que o VFR baixo não atinge, com o **tecto 1000 ft abaixo** do limite
+inferior escrito (`_COND_MARGEM_FL`): "GO abaixo do FL090" para `ABV FL100`.
+Só a partir do **FL100** (`_COND_MIN_FL`): o tecto (FL090) fica sempre ≥ 1500 ft
+acima do relevo mais alto da FIR (MEF 7500 ft) e não é preciso olhar para o
+relevo — escolhas do Duarte (margem 1000 ft, ≥ FL100, entre GO e MARGINAL; GAMET
+também, com o mesmo limite). Onde:
+- **GAMET**: TURB/ICE/MTW SEV cuja camada é só `ABV FLnnn` ou `FLaaa/FLbbb`
+  (`inferior_camada`, com tendência opcional) e o limite ≥ FL100, **todas** as
+  SEV desse tipo na célula (uma SEV sem limite ou abaixo → NO-GO como antes).
+  Mais de um nível na mesma linha (`SEV ABV FL120 SFC/FL050`) → a camada guarda
+  todos (`_varios_niveis`) e nunca dá GO COND. MTW MOD continua MARGINAL.
+  **Lista branca do campo inteiro** (`campos_cond_ok`, revisão do agente
+  `parser`): só há GO COND. se, tirados os pares intensidade + camada (`MOD/SEV
+  ABV FL120`), a área, a superfície, LCA, as janelas, a tendência, `MOV` e a
+  pontuação, não sobrar nada no campo — uma forma de nível que a app não conhece
+  (`SFC/050`, `A030`, `1500M`, `FL 030/060`), um nível sem intensidade numa linha
+  de continuação, outro fenómeno (`FZRA`, `LLWS`) ou um campo desconhecido colado
+  → a camada fica "(nível por confirmar)" e dá NO-GO como na 6.1. Na garantia
+  das versões anteriores, um SEV condicional não domina (`_domina`) um SEV antigo
+  sem camada condicional ou mais baixa: o antigo entra como era (NO-GO). Casos
+  reais: `ICE: … MOD/SEV ABV FL100/FL120` (10 GAMETs do arquivo a 21-nov,
+  conjunto fixo em `test_v70`); `ABV FL090` (4 GAMETs) continua NO-GO. A TURB do
+  GAMET vem sempre desde a superfície: não muda.
+- **SIGMET**: a mesma lista branca da 6.0 (`nivel_sigmet_lista_branca`) com o
+  limite inferior entre o FL100 e o FL195 (`sigmet_condicional`) → bloco
+  `SIGMET_COND` (camada `FLnnn`) na área + 10 NM e MOV. Casos reais: I01 de
+  17-nov (`SEV ICE … FL120/210`), I01/I02 de 18-nov e I01 de 20-nov (FL100), U02
+  de 21-nov (`SEV TURB … FL170`) — 9 no arquivo. Faixa `≥ FLnnn` (azul) e aviso
+  `aviso` se todos os SIGMETs em vigor forem condicionais/altos; com um a dar
+  NO-GO, como antes. Só referido no GAMET sem o texto → toda a área NO-GO.
+`decision()` junta o motivo condicional ("ICE SEV ABV FL120 — risco severo — GO
+abaixo do FL110", "SIGMET I01 (SEV ICE) — … — GO abaixo do FL110") e só no fim,
+se a célula ainda for GO, passa a GO COND.; numa zona MARGINAL/NO-GO o motivo
+fica como condição extra. `classificar_motivo` dá-lhe o nível GO COND. e o
+limite (`FL110`). Os scripts conhecem a decisão (`comparar_versoes.py`,
+`comparar_piloto.py` — "GO COND.", "GO condicional", "GO-COND" —, `analisar.py`).
+Revisor do PR #66: o porquê do veredicto, em GO COND., diz o tecto **mais
+baixo** de todas as zonas (`tecto_regiao`) e o motivo que o dá; "O meu
+aeródromo", o painel da zona e os cartões da NiceGUI mostram "· abaixo do
+FLnnn" (só em GO COND.; ao lado de um NO-GO lia-se "NO-GO só abaixo do…"); o chip tem classe própria (`_classe_dec` → `gv-GO-COND`, azul); e o
+**AIRMET fica de fora** (decisão do Duarte: GAMET e SIGMET) — um AIRMET com
+TURB/ICE/MTW SEV continua NO-GO (a camada leva " (AIRMET)").
+Testes: `test_v70.py`. Os módulos que comparam com motores fixos anteriores
+correm com a regra **desligada** (`conftest._regra_70_desligada`:
+`_COND_MIN_FL` inatingível = a 6.1), e o `test_v70` verifica no arquivo
+(manual e `arquivo_hist`) que a 7.0 só é menos severa do que essa decisão onde
+há um motivo condicional, e nunca abaixo de GO COND. Três casos do
+`test_v60.test_continua_no_go_como_antes` (FL150/250, FL195/300, SEV ICE
+FL100/190) passaram para o `test_v70` como GO COND.
 
 **`D OF LINE …` (4.5, pedido do Duarte a 1-nov-2026).** Casos reais: SIGMET
 T01 311035/311330 (`SW OF LINE N3508 W01641 - N35 W01628 AND W OF LINE N35
@@ -829,7 +886,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-2659 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 41 do `test_v476.py` + 65 do `test_v48.py` + 10 do `test_v481.py` + 50 do `test_v49.py` + 8 dos conjuntos fixos de 15/16-nov (#50) + 78 do `test_v51.py` + 135 do `test_v60.py` + 31 do `test_comparar_piloto.py` + 7 do `test_v602.py` + 26 do `test_v61.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2630 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
+2751 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 41 do `test_v476.py` + 65 do `test_v48.py` + 10 do `test_v481.py` + 50 do `test_v49.py` + 8 dos conjuntos fixos de 15/16-nov (#50) + 78 do `test_v51.py` + 135 do `test_v60.py` + 31 do `test_comparar_piloto.py` + 7 do `test_v602.py` + 26 do `test_v61.py` + 94 do `test_v70.py` − 2 do `test_v60.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2722 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -1158,6 +1215,18 @@ python3 -m pytest
   logo depois de `SECN I`, vários, nomes conhecidos não avisam, fora da Secção I
   não avisa, conteúdo cortado, decisão igual, GAMET real 141500 e arquivo sem
   aviso, `analisar.py`, Streamlit (aviso em "A ter em conta")
+- `tests/test_v70.py` — GO condicional (7.0): `inferior_camada`; decision()
+  (ICE/TURB/MTW SEV ≥ FL100 → GO COND. e o tecto, abaixo do FL100/sem camada/dois
+  níveis → NO-GO, tecto mais baixo, outro motivo prevalece, MTW MOD); GAMET (toda
+  a FIR, só a norte, 6 formas que continuam NO-GO, real 170900); SIGMET (I01 real
+  de 17-nov: GO COND. só onde a 6.1 dava NO-GO, faixa `≥ FL120`, aviso; níveis
+  FL090–FL196, ICE/MTW, fora da lista, com outro NO-GO, com um alto, `SIGMET
+  APPLICABLE` com e sem texto); briefing (motivo, cor azul no mapa e legenda,
+  quadro, painel); `comparar_piloto`; os 25 caminhos optimistas do agente `parser`
+  iguais à regra desligada (garantia, cortes, formas de nível, continuação,
+  campo colado, AIRMET sintético); arquivo: conjunto fixo dos GAMETs com
+  `cond_70` e, manual e `arquivo_hist`, menos severo só onde há tecto e nunca
+  abaixo de GO COND.
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva

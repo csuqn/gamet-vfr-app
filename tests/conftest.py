@@ -338,6 +338,40 @@ def indice_sem_altos_60(indice):
                                   if alto(e.get("texto", "")) is None]}
 
 
+# 7.0 (decisão do Duarte a 21-nov-2026): TURB/ICE/MTW SEV (GAMET) e SIGMETs só de
+# TURB/ICE/MTW SEV com o limite inferior escrito a partir do FL100 dão GO COND.
+# em vez de NO-GO. Os módulos que comparam com motores fixos anteriores
+# verificam OUTRAS mudanças: correm com a regra DESLIGADA (`_COND_MIN_FL`
+# inatingível = o comportamento da 6.1), e a regra é verificada contra essa
+# mesma decisão desligada em test_v70.py (conjunto fixo dos GAMETs com cond_70).
+_MODULOS_SEM_70 = {
+    "test_v35_contra_34", "test_v40_contra_310", "test_v41", "test_v42", "test_v43",
+    "test_v45", "test_v452", "test_v46", "test_v46_margem", "test_v473", "test_v474",
+    "test_v475", "test_v476", "test_v48", "test_v49",
+}
+
+
+@pytest.fixture(autouse=True)
+def _regra_70_desligada(request, monkeypatch):
+    if request.module.__name__.rsplit(".", 1)[-1] in _MODULOS_SEM_70:
+        motores = [_motor_actual()]
+        if "eng" in request.fixturenames:
+            motores.append(request.getfixturevalue("eng"))
+        for m in motores:
+            if hasattr(m, "_COND_MIN_FL"):
+                monkeypatch.setattr(m, "_COND_MIN_FL", 10 ** 6)
+    yield
+
+
+def cond_70(eng, texto):
+    """True se a 7.0 (`eng`) lê alguma TURB/ICE/MTW SEV com limite ≥ FL100."""
+    if not hasattr(eng, "inferior_camada"):
+        return False
+    return any(b.phenomenon in ("TURB", "ICE", "MTW") and b.value == "SEV"
+               and (eng.inferior_camada(b.layer) or 0) >= eng._COND_MIN_FL
+               for b in eng.parse_gamet(texto)[0])
+
+
 # 4.6: qualificadores dos SIGMET/AIRMET só com graus ("S OF N33", "W OF W008",
 # "BTN N38 AND N39") passaram a ser lidos (até à 4.5.2: toda a área). Os testes
 # que comparam todo o arquivo com motores fixos anteriores (4.1, 4.2, 4.4,

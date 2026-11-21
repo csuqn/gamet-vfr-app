@@ -24,7 +24,7 @@ RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ / "tests"))
 import conftest  # noqa: E402
 
-GRAVIDADE = {"GO": 0, "MARGINAL": 1, "NO-GO": 2}
+GRAVIDADE = {"GO": 0, "GO COND.": 1, "MARGINAL": 2, "NO-GO": 3}   # GO COND. desde a 7.0
 
 
 def motor(app):

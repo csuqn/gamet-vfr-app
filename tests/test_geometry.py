@@ -174,7 +174,7 @@ def test_invariante_decisoes_validas(analyse, corpo):
 def test_invariante_ordenacao(analyse, corpo):
     """Regiões ordenadas da pior decisão para a melhor."""
     r = analyse(build_gamet(corpo))
-    ordem = {"NO-GO": 0, "MARGINAL": 1, "GO": 2}
+    ordem = {"NO-GO": 0, "MARGINAL": 1, "GO COND.": 1.5, "GO": 2}
     assert r["decisions"] == sorted(r["decisions"], key=lambda d: ordem[d])
 
 
