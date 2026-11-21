@@ -34,7 +34,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "6.0.1"
+APP_VERSION = "6.0.2"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -4107,7 +4107,21 @@ def sigmets_terminados(conhecidos, ref, periodo_gamet=(None, None)):
         # AMD 180030 a referir "T02" e o único T02 conhecido ser o do dia 17
         # → toda a área).
         if ini.date() != g_ini.date():
-            if (ini < g_fim and g_ini < fim and i not in cancelados
+            # (6.0.2, pedido do Duarte a 21-nov-2026) Um boletim de outro dia
+            # UTC que estava em vigor no início da validade do GAMET é o que o
+            # GAMET pode estar a referir (GAMET real 210300/210900 de 21-nov:
+            # "SIGMET APPLICABLE:U02", com o U02 202355/210355 de 20-nov em
+            # vigor às 03Z e nenhum U02 de 21-nov). Esse serve de prova como um
+            # do próprio dia: expirado ou cancelado → terminado; activo → por
+            # provar. Os outros boletins de outro dia ficam como na 4.8.1.
+            if ini <= g_ini < fim:
+                if i in cancelados:
+                    por_id[sid].append("cancelado")
+                elif fim <= ref:
+                    por_id[sid].append(f"expirou às {fim:%H%MZ}")
+                else:
+                    por_id[sid].append(None)
+            elif (ini < g_fim and g_ini < fim and i not in cancelados
                     and fim > ref):
                 por_id[sid].append(None)
             continue
