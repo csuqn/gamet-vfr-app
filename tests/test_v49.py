@@ -38,7 +38,7 @@ from conftest import build_gamet
 REF481 = Path(__file__).resolve().parent / "referencia" / "app_4_8_1.py"
 DADOS = Path(__file__).resolve().parent.parent / "dados"
 G141500_F = DADOS / "gamets/2026/11/20261114T1449Z_141500-142100_0b0ae4c2af.txt"
-GRAV = {"GO": 0, "MARGINAL": 1, "NO-GO": 2, None: -1}
+GRAV = {"GO": 0, "GO COND.": 0.5, "MARGINAL": 1, "NO-GO": 2, None: -1}
 VAL = "141500/142100"
 
 # O GAMET real, tal como foi recolhido (cópia, para correr sem `dados/`)

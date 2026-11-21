@@ -37,7 +37,7 @@ from test_v475 import G081500
 
 REF475 = Path(__file__).resolve().parent / "referencia" / "app_4_7_5.py"
 DADOS = Path(__file__).resolve().parent.parent / "dados"
-GRAV = {"GO": 0, "MARGINAL": 1, "NO-GO": 2, None: -1}
+GRAV = {"GO": 0, "GO COND.": 0.5, "MARGINAL": 1, "NO-GO": 2, None: -1}
 VAL = "081500/082100"
 LINHA_REAL = ("SIG CLD:LCA BKN 006-008/012HFT AGL MAR AND COT ISOL/EMBD TCU/CB "
               "020-035/XXXHFT AGL")

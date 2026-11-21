@@ -31,7 +31,7 @@ import pytest
 import conftest
 from conftest import build_gamet
 
-GRAV = {"GO": 0, "MARGINAL": 1, "NO-GO": 2}
+GRAV = {"GO": 0, "GO COND.": 0.5, "MARGINAL": 1, "NO-GO": 2}
 REF = Path(__file__).resolve().parent / "referencia" / "app_3_10.py"
 
 

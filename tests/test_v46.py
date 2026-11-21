@@ -34,7 +34,7 @@ from conftest import build_gamet
 
 DADOS = Path(__file__).resolve().parent.parent / "dados"
 REF452 = Path(__file__).resolve().parent / "referencia" / "app_4_5_2.py"
-GRAV = {"GO": 0, "MARGINAL": 1, "NO-GO": 2}
+GRAV = {"GO": 0, "GO COND.": 0.5, "MARGINAL": 1, "NO-GO": 2}
 
 # GAMETs reais (ramo dados, gamets/2026/11/)
 G010900 = (

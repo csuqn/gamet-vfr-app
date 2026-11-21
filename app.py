@@ -34,7 +34,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "6.1"
+APP_VERSION = "7.0"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -2878,6 +2878,8 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
 
         elif state == "MTW":
             layer_m = re.search(r"(SFC/FL\d+|FL\d+/FL\d+|ABV\s+FL\d+|BLW\s+FL\d+)", content)
+            if layer_m and _varios_niveis(content):
+                layer_m = re.match(r"(.*)", _varios_niveis(content))
             if "HVY" in content or "SEV" in content:
                 severity = "SEV"
             elif "MOD" in content:
@@ -2893,7 +2895,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
             layer = ""
             layer_m = re.search(r"(SFC/FL\d+|FL\d+/FL\d+|SFC/\d+FT|ABV\s+FL\d+|BLW\s+FL\d+)", content)
             if layer_m:
-                layer = layer_m.group(1)
+                layer = _varios_niveis(content) or layer_m.group(1)
             # HVY eleva para SEV
             if "HVY" in content or "SEV" in content:
                 severity = "SEV"
@@ -2924,7 +2926,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
             layer = ""
             layer_m = re.search(r"(ABV\s+FL\d+|FL\d+/FL\d+|SFC/FL\d+|BLW\s+FL\d+)", content)
             if layer_m:
-                layer = layer_m.group(1)
+                layer = _varios_niveis(content) or layer_m.group(1)
             # HVY eleva SEV
             if "HVY" in content or "SEV" in content:
                 severity = "SEV"
@@ -3012,7 +3014,7 @@ _PHENOM_LABEL = {
     "TS": "TS", "TURB": "TURB", "ICE": "ICE",
     "MT_OBSC": "MT OBSC", "VA": "VA",
     "WSPD": "SFC WSPD", "MTW": "MTW", "WX": "SIGWX", "CB": "CB",
-    "SIGMET": "SIGMET", "SIGMET_ALTO": "SIGMET", "AIRMET": "AIRMET",
+    "SIGMET": "SIGMET", "SIGMET_ALTO": "SIGMET", "SIGMET_COND": "SIGMET", "AIRMET": "AIRMET",
 }
 
 
@@ -3087,7 +3089,7 @@ def _motivos_por_origem(dec_result, por_origem):
     frente ("AIRMET 2 — VIS 200m < 1500m"). Devolve (resultado, origens que
     não deram motivo — informativas).
     """
-    ordem = {"GO": 0, "MARGINAL": 1, "NO-GO": 2}
+    ordem = {"GO": 0, GO_COND: 1, "MARGINAL": 2, "NO-GO": 3}
     nivel = dec_result[0]
     reasons = list(decision(por_origem.get("", []))[-1])
     informativas = []
@@ -3269,7 +3271,7 @@ def compute_dynamic_regions(blocks):
                 and b.phenomenon in ("VIS", "BASE_AGL", "BASE_AMSL", "TS",
                                        "TURB", "ICE", "MT_OBSC", "VA",
                                        "WSPD", "MTW", "WX", "CB", "SIGMET",
-                                       "SIGMET_ALTO", "AIRMET")]
+                                       "SIGMET_ALTO", "SIGMET_COND", "AIRMET")]
 
     def _empty_region():
         dec, vis, base, ts, turb, turb_layers, ice, ice_layers, mt_obsc, va, reasons = decision([])
@@ -3438,8 +3440,8 @@ def compute_dynamic_regions(blocks):
 
     # Ordenar da pior decisão para a melhor e, dentro da mesma decisão,
     # da maior área para a menor (as zonas mais relevantes primeiro)
-    _order = {"NO-GO": 0, "MARGINAL": 1, "GO": 2}
-    regions.sort(key=lambda r: (_order.get(r["decision"], 3), -r["polygon"].area))
+    _order = {"NO-GO": 0, "MARGINAL": 1, GO_COND: 2, "GO": 3}
+    regions.sort(key=lambda r: (_order.get(r["decision"], 4), -r["polygon"].area))
     return regions
 
 
@@ -4255,6 +4257,22 @@ def sigmet_acima_vfr(texto):
     um só grupo de níveis `FLaaa/bbb` ou `ABV FLaaa` acima do FL195, e nada
     mais no texto além do que está na lista branca. Senão None: na dúvida, o
     SIGMET conta."""
+    ni = nivel_sigmet_lista_branca(texto)
+    return ni if ni is not None and ni > _SIGMET_VFR_MAX_FL else None
+
+
+def sigmet_condicional(texto):
+    """(7.0) Limite inferior (FL) se o SIGMET passa a mesma lista branca da 6.0
+    com o limite inferior entre o FL100 e o FL195: GO condicional abaixo de
+    (limite − 1000 ft) na sua área. Senão None."""
+    ni = nivel_sigmet_lista_branca(texto)
+    return ni if ni is not None and _COND_MIN_FL <= ni <= _SIGMET_VFR_MAX_FL else None
+
+
+def nivel_sigmet_lista_branca(texto):
+    """(6.0/7.0) Limite inferior (FL) de um SIGMET SÓ de TURB/ICE/MTW severos,
+    com um só grupo de níveis `FLaaa/bbb` ou `ABV FLaaa` e nada mais no texto
+    além do que está na lista branca; senão None."""
     t = re.sub(r"\s+", " ", (texto or "")).strip()
     # 2.ª protecção: outro fenómeno em QUALQUER parte do texto → conta.
     if _OUTRO_FEN_RE.search(t.upper()):
@@ -4266,7 +4284,7 @@ def sigmet_acima_vfr(texto):
     if len(niveis) != 1:
         return None
     ni = nivel_inferior_sigmet(niveis[0])
-    if ni is None or ni <= _SIGMET_VFR_MAX_FL:
+    if ni is None:
         return None
     resto = _NIVEL_ALTO_RE.sub(" ", _SIGMET_ALTO_FEN_RE.sub(" ", corpo, count=1))
     for rx in _SIGMET_LISTA_BRANCA:
@@ -4292,6 +4310,21 @@ def blocos_sigmet(sigmets, has_sigmet, sigmet_text, ref=None, conhecidos=None,
             geom, d = None, "toda a área (SIGMET com formato inesperado)"
         fen = re.search(r"\b(EMBD TS|OBSC TS|FRQ TS|SQL TS|SEV TURB|SEV ICE|SEV MTW|HVY DS|HVY SS|VA|TC|RDOACT CLD)\b", s)
         rot = f"{sid}" + (f" ({fen.group(1)})" if fen else "")
+        cond = sigmet_condicional(s)
+        if cond is not None:
+            # (7.0) Limite inferior entre o FL100 e o FL195: GO condicional
+            # abaixo de (limite − 1000 ft) na sua área (+ margem e MOV).
+            if geom is not None and geom.is_empty:
+                descr.append(f"SIGMET {rot}: fora da área do GAMET")
+                continue
+            blocos.append(MetBlock("SIGMET_COND", geom if geom is not None else FIR_POLYGON,
+                                   f"{rot} — {d if geom is not None else 'toda a área'}",
+                                   "", f"FL{cond:03d}"))
+            blocos[-1].texto = s
+            descr.append(f"SIGMET {rot}: a partir do FL{cond:03d} — **GO condicional abaixo "
+                         f"do FL{cond - _COND_MARGEM_FL:03d}** na sua área "
+                         f"({d if geom is not None else 'toda a área'})")
+            continue
         alto = sigmet_acima_vfr(s)
         if alto is not None:
             # (6.0) Todo acima do FL195: informativo, não NO-GO.
@@ -4651,6 +4684,49 @@ TS_RISK = {
     "GEN":       2,   # NO-GO (genérico sem qualificador — conservador)
 }
 
+# (7.0, decisão do Duarte a 21-nov-2026) GO condicional: TURB/ICE/MTW severos
+# (GAMET) ou SIGMET só de TURB/ICE/MTW SEV (lista branca da 6.0) com o limite
+# inferior ESCRITO a partir do FL100 não tocam num voo VFR baixo — "não faz
+# sentido dar NO-GO quando o piloto vai voar muito abaixo dessa altitude".
+# A decisão passa a GO COND. (entre GO e MARGINAL) com o tecto 1000 ft abaixo
+# do limite inferior ("GO abaixo do FL090" para ABV FL100). Com o limite no
+# FL100, o tecto (FL090) fica sempre ≥ 1500 ft acima do relevo mais alto da
+# FIR (MEF 7500 ft): não é preciso olhar para o relevo. Abaixo do FL100, um
+# nível por ler, mais de um nível no texto, ou outro fenómeno → como até à 6.1.
+GO_COND = "GO COND."
+_COND_MIN_FL = 100
+_COND_MARGEM_FL = 10
+_COND_NOTA_RE = re.compile(r" — GO abaixo do FL(\d{3})$")
+_CAMADA_COND_RE = re.compile(r"(?:ABV FL(\d{3})|FL(\d{3})/FL(\d{3}))(?: (?:INTSF|WKN))?")
+
+
+# (7.0) Níveis escritos numa linha de TURB/ICE/MTW. Com mais de um, a camada
+# guarda-os todos ("ABV FL100 SFC/FL050"): não é só `ABV FLnnn`, por isso
+# nunca dá GO COND. (com um só, fica a camada de sempre).
+_NIVEIS_LINHA_RE = re.compile(r"SFC/FL\d+|FL\d+/FL\d+|FL\d+/\d+|SFC/\d+FT|ABV\s+FL\d+|BLW\s+FL\d+"
+                              r"|TOP\s+FL\d+|\bFL\d+\b|\b\d+\s*FT\b")
+
+
+def _varios_niveis(content):
+    niveis = list(dict.fromkeys(_NIVEIS_LINHA_RE.findall(content or "")))
+    return " ".join(niveis) if len(niveis) > 1 else ""
+
+
+def inferior_camada(layer):
+    """(7.0) Limite inferior (FL) de uma camada do GAMET que é SÓ `ABV FLnnn` ou
+    `FLaaa/FLbbb` (com tendência opcional); qualquer outra forma → None."""
+    m = _CAMADA_COND_RE.fullmatch((layer or "").strip())
+    if not m:
+        return None
+    if m.group(1):
+        return int(m.group(1))
+    return min(int(m.group(2)), int(m.group(3)))
+
+
+def _nota_cond(inferior):
+    return f" — GO abaixo do FL{inferior - _COND_MARGEM_FL:03d}"
+
+
 def _camadas_de(events, tipo, valor):
     """Camadas (sem repetições, pela ordem) dos eventos `tipo` com `valor` —
     para o texto do motivo mostrar só a camada do fenómeno que decide (4.7.1)."""
@@ -4742,22 +4818,33 @@ def decision(events):
 
     # ---- Turbulência severa — NO-GO (risco de perda de controlo/estrutural,
     # especialmente crítico em ultraleves) ----
+    # (7.0) Condicional se TODAS as TURB/ICE SEV da célula têm limite inferior
+    # escrito ≥ FL100; senão NO-GO como até à 6.1.
+    cond = []
     if "SEV" in turb_vals:
-        decision_level = "NO-GO"
         # (4.7.1) Só as camadas da TURB SEV: com uma TURB MOD na mesma
         # célula, a camada dela aparecia colada ao motivo da SEV
         # ("TURB SEV SFC/FL070/SFC/FL060"). turb_layers continua com todas.
         sev_l = _camadas_de(events, "TURB", "SEV")
         layer_note = f" {'/'.join(sev_l)}" if sev_l else ""
-        reasons.append(f"TURB SEV{layer_note} — risco severo")
+        infs = [inferior_camada(l) for t, v, q, l in events if t == "TURB" and v == "SEV"]
+        if all(i is not None and i >= _COND_MIN_FL for i in infs):
+            cond.append(f"TURB SEV{layer_note} — risco severo{_nota_cond(min(infs))}")
+        else:
+            decision_level = "NO-GO"
+            reasons.append(f"TURB SEV{layer_note} — risco severo")
 
     # ---- Gelo severo — NO-GO (a generalidade dos ultraleves não tem
     # sistemas de degelo) ----
     if "SEV" in ice_vals:
-        decision_level = "NO-GO"
         sev_l = _camadas_de(events, "ICE", "SEV")
         layer_note = f" {'/'.join(sev_l)}" if sev_l else ""
-        reasons.append(f"ICE SEV{layer_note} — risco severo")
+        infs = [inferior_camada(l) for t, v, q, l in events if t == "ICE" and v == "SEV"]
+        if all(i is not None and i >= _COND_MIN_FL for i in infs):
+            cond.append(f"ICE SEV{layer_note} — risco severo{_nota_cond(min(infs))}")
+        else:
+            decision_level = "NO-GO"
+            reasons.append(f"ICE SEV{layer_note} — risco severo")
 
     # ---- Vento generalizado à superfície (SFC WSPD) — NO-GO a partir de
     # 30 kt: fora dos limites de qualquer ultraleve ----
@@ -4773,13 +4860,17 @@ def decision(events):
     mtw_nivel = "SEV" if "SEV" in mtw_vals else "MOD"
     mtw_layers = _camadas_de(events, "MTW", mtw_nivel)
     mtw_note = f" {'/'.join(mtw_layers)}" if mtw_layers else ""
-    if "SEV" in mtw_vals:
+    mtw_infs = [inferior_camada(l) for t, v, q, l in events if t == "MTW" and v == "SEV"]
+    mtw_cond = bool(mtw_infs) and all(i is not None and i >= _COND_MIN_FL for i in mtw_infs)
+    if "SEV" in mtw_vals and not mtw_cond:
         decision_level = "NO-GO"
         reasons.append(f"MTW SEV{mtw_note} (onda de montanha) — risco severo")
     elif "MOD" in mtw_vals:
         if decision_level == "GO":
             decision_level = "MARGINAL"
         reasons.append(f"MTW MOD{mtw_note} (onda de montanha)")
+    if mtw_cond:
+        cond.append(f"MTW SEV{mtw_note} (onda de montanha) — risco severo{_nota_cond(min(mtw_infs))}")
 
     # ---- Cumulonimbos em SIG CLD (2.0) — mesma escala da trovoada:
     # ISOL → MARGINAL; EMBD / OCNL / FRQ (ou sem qualificador) → NO-GO ----
@@ -4812,6 +4903,9 @@ def decision(events):
     # muda a decisão — o VFR não se faz acima do FL195 (SERA.5005(d)(2)).
     for v in sorted({v for t, v, *_ in events if t == "SIGMET_ALTO"}):
         reasons.append(f"SIGMET {v} {_SIGMET_ALTO_NOTA}")
+    # (7.0) SIGMET só de TURB/ICE/MTW SEV a partir do FL100: GO condicional.
+    for v, l in sorted({(v, l) for t, v, q, l in events if t == "SIGMET_COND"}):
+        cond.append(f"SIGMET {v}{_nota_cond(int(l[2:]))}")
 
     # ---- AIRMET em vigor cujo fenómeno a app não leu (4.0): MARGINAL na área
     # do AIRMET, por precaução — nunca GO em silêncio. Os AIRMETs lidos entram
@@ -4822,6 +4916,13 @@ def decision(events):
             decision_level = "MARGINAL"
         for v in air_vals:
             reasons.append(f"AIRMET {v} não interpretado (MARGINAL por precaução)")
+
+    # (7.0) No fim: os motivos condicionais contam sempre (o tecto é uma
+    # condição extra também numa zona MARGINAL); só um GO passa a GO COND.
+    if cond:
+        reasons += cond
+        if decision_level == "GO":
+            decision_level = GO_COND
 
     return decision_level, vis, base, ts_vals, turb_vals, turb_layers, ice_vals, ice_layers, mt_obsc, va_vals, reasons
 
@@ -4843,13 +4944,13 @@ def _pdf_briefing_page(pdf, regions, gamet_text, validity_label, wind=None, bloc
     por_dec = defaultdict(float)
     for g in regions:
         por_dec[g["decision"]] += g["polygon"].area
-    pior = next((d for d in ("NO-GO", "MARGINAL", "GO") if por_dec.get(d)), "GO")
+    pior = next((d for d in ("NO-GO", "MARGINAL", GO_COND, "GO") if por_dec.get(d)), "GO")
     titulo = ("GO — condições favoráveis em toda a FIR" if pior == "GO"
               else f"{pior} em {100 * por_dec[pior] / area:.0f}% da FIR")
     fig.text(0.06, 0.925, titulo, va="top", fontsize=15, fontweight="bold",
              color=_PDF_COR.get(pior, "#333"))
     resumo = "   ".join(f"{d} {100 * por_dec[d] / area:.0f}%"
-                        for d in ("NO-GO", "MARGINAL", "GO") if por_dec.get(d))
+                        for d in ("NO-GO", "MARGINAL", GO_COND, "GO") if por_dec.get(d))
     fig.text(0.94, 0.925, resumo, va="top", ha="right", fontsize=8.5, color="#555")
     porque = porque_veredicto(regions, blocos)
     if porque:
@@ -4888,7 +4989,7 @@ def _pdf_briefing_page(pdf, regions, gamet_text, validity_label, wind=None, bloc
     axm.grid(True, linestyle="--", alpha=0.3)
     presentes = {r["decision"] for r in regions}
     axm.legend(handles=[Patch(facecolor=_PDF_COR[d], alpha=0.35, label=d)
-                        for d in ("GO", "MARGINAL", "NO-GO") if d in presentes],
+                        for d in ("GO", GO_COND, "MARGINAL", "NO-GO") if d in presentes],
                fontsize=7, loc="lower left")
 
     # Quadro por fenómeno
@@ -4936,7 +5037,8 @@ def _pdf_briefing_page(pdf, regions, gamet_text, validity_label, wind=None, bloc
             notas.append("Sem trovoada nem CB neste GAMET.")
         if any(c and c["parcial"] for _, cels in linhas for c in cels):
             notas.append("* só em parte da zona.")
-        notas.append("Vermelho: dá NO-GO · laranja: dá MARGINAL · azul: só informativo · "
+        notas.append("Vermelho: dá NO-GO · laranja: dá MARGINAL · azul: dá GO COND. (abaixo do tecto) · "
+                     "cinzento: só informativo · "
                      "(local) = LCA no GAMET. Detalhe de cada zona na página seguinte.")
         axq.text(0.0, 0.92 - alt * (len(linhas) + 1), "\n".join(notas), va="top",
                  fontsize=7, color="#666", transform=axq.transAxes)
@@ -4953,8 +5055,8 @@ def _pdf_briefing_page(pdf, regions, gamet_text, validity_label, wind=None, bloc
 # aeródromos) e o texto do GAMET; página 3 — Secção II. As funções do quadro
 # (zonas_ordem, quadro_zonas, motivo_legivel…) estão na secção "BRIEFING 5.1".
 
-_PDF_COR = {"GO": "#2ecc71", "MARGINAL": "#e67e22", "NO-GO": "#e74c3c"}
-_PDF_TXT = {"NO-GO": "#c0392b", "MARGINAL": "#b9770e", "INFO": "#2471a3"}
+_PDF_COR = {"GO": "#2ecc71", GO_COND: "#3b82f6", "MARGINAL": "#e67e22", "NO-GO": "#e74c3c"}
+_PDF_TXT = {"NO-GO": "#c0392b", "MARGINAL": "#b9770e", GO_COND: "#1d4ed8", "INFO": "#5d6d7e"}
 
 
 def _pdf_zonas_page(pdf, regions, gamet_text, blocos=None):
@@ -5201,7 +5303,7 @@ def _aviso_nuvens_baixas(texto):
 # os que ainda não começaram contam; SIGMET/AIRMET contam sempre; um bloco
 # cuja linha tem outra janela (MetBlock.janela_ambigua) conta sempre. Mesmas
 # decision()/regiões, mesmos limiares. Nunca substitui o veredicto principal.
-_DEC_GRAV = {"GO": 0, "MARGINAL": 1, "NO-GO": 2}
+_DEC_GRAV = {"GO": 0, GO_COND: 1, "MARGINAL": 2, "NO-GO": 3}
 
 
 # Margem (decisão do Duarte, 28-out-2026): uma janela só deixa de contar no
@@ -5386,7 +5488,21 @@ def analisar_gamet(texto, fonte="manual", boletins=None, boletins_at=None,
     # informativo — não decidem, por isso não aparecem como erro.
     so_altos = (bool(sig) and all(sigmet_acima_vfr(x) is not None for x in sig)
                 and not any(b.phenomenon == "SIGMET" for b in sblocos))
-    if so_altos:
+    # (7.0) Nenhum SIGMET a dar NO-GO e pelo menos um condicional (FL100–195).
+    conds = [sigmet_condicional(x) for x in sig if sigmet_condicional(x) is not None]
+    so_cond = (bool(conds) and not so_altos
+               and all(sigmet_acima_vfr(x) is not None or sigmet_condicional(x) is not None
+                       for x in sig)
+               and not any(b.phenomenon == "SIGMET" for b in sblocos))
+    if so_cond:
+        av.append(("aviso",
+                   f"⚠️ **{len(sig)} SIGMET {onde} — a partir do FL{min(conds):03d}: GO "
+                   f"condicional abaixo do FL{min(conds) - _COND_MARGEM_FL:03d}** na área do "
+                   "SIGMET (turbulência, gelo ou onda de montanha severos só acima desse "
+                   "nível). Não voes acima do tecto nessa área.\n\n"
+                   + "\n".join(f"- {d}" for d in sdescr)
+                   + "\n\nLê o SIGMET completo:\n\n" + "\n\n".join(f"`{b}`" for b in sig)))
+    elif so_altos:
         av.append(("info",
                    f"ℹ️ **{len(sig)} SIGMET {onde} — acima dos níveis VFR** (limite inferior "
                    "acima do FL195; o VFR não se faz acima do FL195, SERA.5005). Não "
@@ -5444,6 +5560,12 @@ def analisar_gamet(texto, fonte="manual", boletins=None, boletins_at=None,
             av.append(("aviso",
                        f"⚠️ **O GAMET refere o SIGMET {sigmet_text}, que já não está em vigor.** "
                        + " ".join(terminado) + ". Confirma no IPMA que não há outro SIGMET."))
+        elif so_cond and coberto:
+            av.append(("aviso",
+                       f"⚠️ **O GAMET refere o SIGMET {sigmet_text}, a partir do "
+                       f"FL{min(conds):03d}.** GO condicional abaixo do "
+                       f"FL{min(conds) - _COND_MARGEM_FL:03d} na sua área — ver acima. "
+                       "Consulta o SIGMET completo antes de voar; esta app não o substitui."))
         elif so_altos and coberto:
             av.append(("aviso",
                        f"⚠️ **O GAMET refere o SIGMET {sigmet_text}, todo acima dos níveis VFR "
@@ -5458,7 +5580,9 @@ def analisar_gamet(texto, fonte="manual", boletins=None, boletins_at=None,
                        + "Consulta o SIGMET completo antes de voar; esta app não o substitui."))
 
     # A faixa nunca diz NIL se os SIGMETs não foram verificados
-    if so_altos:
+    if so_cond:
+        r["faixa_sig"] = (f"≥ FL{min(conds):03d}", GO_COND)   # (7.0) só condicionais
+    elif so_altos:
         r["faixa_sig"] = ("ACIMA FL195", None)       # (6.0) só informativos
     elif sig or any(b.phenomenon == "SIGMET" for b in sblocos):
         r["faixa_sig"] = ("ACTIVO", "NO-GO")
@@ -5511,10 +5635,11 @@ def analisar_gamet(texto, fonte="manual", boletins=None, boletins_at=None,
 # Todo o texto vindo do GAMET passa por html.escape. As classes gv-* estão
 # em _CSS, no início da app.
 
-_DEC_ORDEM = ("NO-GO", "MARGINAL", "GO")
-_DEC_BARRA = {"NO-GO": "#E5534B", "MARGINAL": "#E3B341", "GO": "#3FB970"}
+_DEC_ORDEM = ("NO-GO", "MARGINAL", GO_COND, "GO")
+_DEC_BARRA = {"NO-GO": "#E5534B", "MARGINAL": "#E3B341", GO_COND: "#3B82F6", "GO": "#3FB970"}
 _DEC_FUNDO = {"NO-GO": ("#3A1414", "#7A2A26", "#FF8A80"),
               "MARGINAL": ("#3D3110", "#7A6420", "#F5CF6B"),
+              GO_COND: ("#10223F", "#2B4F8F", "#8DB6FF"),
               "GO": ("#11301F", "#23683F", "#6FD39A")}
 
 
@@ -5663,7 +5788,7 @@ def html_aerodromo(nome, region, resto=None):
 #   · A base das nuvens diz sempre "AGL" (5.1.1, pedido do Duarte a 18-nov-2026):
 #     a base que decide é AGL — as AMSL já vêm convertidas contra o MEF.
 
-_NIVEL_GRAV = {"INFO": 0, "MARGINAL": 1, "NO-GO": 2}
+_NIVEL_GRAV = {"INFO": 0, GO_COND: 1, "MARGINAL": 2, "NO-GO": 3}
 
 # (chave, rótulo da linha) — pela ordem do quadro
 _QUADRO_LINHAS = (
@@ -5709,6 +5834,15 @@ def classificar_motivo(motivo):
         origem, t = mo.group(1), mo.group(2)
     c = {"linha": "OUTRO", "nivel": None, "valor": t, "limite": "",
          "parcial": parcial, "origem": origem, "texto": texto}
+    # (7.0) "… — GO abaixo do FLnnn": o mesmo motivo, mas dá GO COND.
+    mc = _COND_NOTA_RE.search(t)
+    if mc:
+        c = classificar_motivo(texto[:len(texto) - len(mc.group(0))])
+        if c["nivel"] == "NO-GO":
+            c.update(nivel=GO_COND, limite=f"FL{mc.group(1)}", texto=texto)
+        else:
+            c.update(nivel=None, texto=texto)   # forma inesperada → desconhecido
+        return c
 
     m = re.match(r"VIS(?: \(LCA\)| LCA)? (\d+)m < (\d+)m", t)
     if m:
@@ -5926,7 +6060,10 @@ def _com_info_sigmet(c, blocos):
     alto = resto.endswith(" " + _SIGMET_ALTO_NOTA)
     if alto:
         resto = resto[:-len(" " + _SIGMET_ALTO_NOTA)]
-    texto = next((b.texto for b in blocos or () if b.phenomenon in ("SIGMET", "SIGMET_ALTO")
+    mcond = _COND_NOTA_RE.search(resto)
+    if mcond:
+        resto = resto[:mcond.start()]
+    texto = next((b.texto for b in blocos or () if b.phenomenon in ("SIGMET", "SIGMET_ALTO", "SIGMET_COND")
                   and b.texto and b.value == resto), "")
     if not texto and "(GAMET, sem área)" in resto:
         c["longo"] = f"{sid} — referido no GAMET, sem o texto completo: conta em toda a área"
@@ -5942,6 +6079,9 @@ def _com_info_sigmet(c, blocos):
     if alto:
         c["longo"] = (f"{sid} — {d + ' — ' if d else ''}acima dos níveis VFR (o VFR não se "
                       f"faz acima do FL195): informativo, não entra na decisão")
+    elif mcond:
+        c["longo"] = (f"{sid} — {d + ' — ' if d else ''}GO condicional (tecto 1000 ft "
+                      f"abaixo do limite inferior do SIGMET)")
     elif d:
         c["longo"] = f"{sid} — {d}"
     return c
@@ -5972,8 +6112,8 @@ def motivo_legivel(c, com_nivel=True):
 
 
 def _celula_mais_grave(a, b):
-    ga = _NIVEL_GRAV.get(a["nivel"], 3)
-    gb = _NIVEL_GRAV.get(b["nivel"], 3)
+    ga = _NIVEL_GRAV.get(a["nivel"], 4)
+    gb = _NIVEL_GRAV.get(b["nivel"], 4)
     if gb != ga:
         return b if gb > ga else a
     return a if not a["parcial"] else b       # pleno antes de parcial
@@ -6054,7 +6194,8 @@ def porque_veredicto(regions, blocos=None):
 
 
 _QUADRO_COR = {"NO-GO": ("#FF8A80", 600), "MARGINAL": ("#F5CF6B", 600),
-               "INFO": ("#9CD2FF", 400)}
+               GO_COND: ("#8DB6FF", 600),
+               "INFO": ("#AAB4BE", 400)}
 
 
 def html_quadro(regions, ordem=None, sel=None, wind=None, blocos=None):
@@ -6095,7 +6236,8 @@ def html_quadro(regions, ordem=None, sel=None, wind=None, blocos=None):
     if parcial:
         notas.append("* só em parte da zona.")
     notas.append("Cabeçalho: decisão da zona · vermelho dá NO-GO · amarelo dá MARGINAL · "
-                 "azul é só informativo · (local) = LCA no GAMET.")
+                 "azul dá GO COND. (abaixo do tecto) · cinzento é só informativo · "
+                 "(local) = LCA no GAMET.")
     return ('<div class="gv-quadro" role="table" aria-label="Fenómenos por zona">'
             f'<div class="gv-qgrid" style="{grid}">' + "".join(cab) + "".join(corpo) + "</div></div>"
             + '<div class="gv-qnota">' + "<br>".join(_e(x) for x in notas) + "</div>")
@@ -6266,8 +6408,8 @@ def html_legenda_mapa():
     """(5.1.1, pedido do Duarte a 18-nov-2026) Legenda por baixo do mapa:
     só as três cores da decisão, numa caixa pequena (como na maqueta)."""
     cor = "".join(f'<span><i style="background:{_DEC_BARRA[d]}"></i>{d}</span>'
-                  for d in ("NO-GO", "MARGINAL", "GO"))
-    return f'<div class="gv-legmapa" role="img" aria-label="Legenda: NO-GO, MARGINAL, GO">{cor}</div>'
+                  for d in ("NO-GO", "MARGINAL", GO_COND, "GO"))
+    return f'<div class="gv-legmapa" role="img" aria-label="Legenda: NO-GO, MARGINAL, GO COND., GO">{cor}</div>'
 
 
 _AVISO_EMOJI_RE = re.compile(r"^(?:[^\w«(\"']|[\u2139\ufe0f])+", re.U)   # ℹ️ é "letra"
@@ -6535,6 +6677,7 @@ if st.session_state.get("_active_gamet_text"):
 
 **Decisão VFR:**
 - 🟢 GO – Condições VFR aceitáveis
+- 🔵 GO COND. – GO abaixo de um tecto: TURB/ICE/MTW severos (GAMET ou SIGMET) só a partir do FL100; voar 1000 ft abaixo do limite inferior (ex.: ABV FL120 → GO abaixo do FL110)
 - 🟠 MARGINAL – Próximo dos mínimos (precaução)
 - 🔴 NO-GO – Abaixo dos mínimos ou TS de risco alto
 
@@ -6549,7 +6692,7 @@ if st.session_state.get("_active_gamet_text"):
 - VIS < 1500 m → NO-GO (MARGINAL se LCA) · VIS < 5000 m → MARGINAL
 - BASE < 500 ft AGL → NO-GO · BASE < 1000 ft AGL → MARGINAL
 - TS ISOL → MARGINAL · TS OCNL / GEN / ISOL/EMBD / EMBD / FRQ → NO-GO
-- TURB ou ICE SEV/HVY → NO-GO (MOD é só informativo)
+- TURB ou ICE SEV/HVY → NO-GO; com limite inferior escrito a partir do FL100 (ABV FL100, FL120/FL150) → GO COND. abaixo de 1000 ft desse limite (MOD é só informativo)
 - MTW (onda de montanha) SEV → NO-GO · MOD → MARGINAL
 - SFC WSPD ≥ 30 kt → NO-GO
 - SIGWX: SQL, FZRA, FZDZ, DS, SS, GR, FC → NO-GO
@@ -6561,6 +6704,7 @@ if st.session_state.get("_active_gamet_text"):
 
 **Decisão:**
 - 🟢 GO – As condições estão dentro dos mínimos. Voo VFR possível com atenção normal.
+- 🔵 GO COND. – Podes voar, mas só abaixo do tecto indicado (ex.: "GO abaixo do FL110"): há turbulência, gelo ou onda de montanha severos acima dele. Planeia a altitude de cruzeiro com margem.
 - 🟠 MARGINAL – As condições estão no limite. Voa apenas se tiveres experiência e alternativas claras. Monitoriza a meteorologia em voo.
 - 🔴 NO-GO – Não descolares em VFR. As condições estão abaixo dos mínimos legais ou há trovoadas significativas.
 

@@ -18,8 +18,8 @@ coluna com o ponto e uma coluna "Decisão"; pode vir partida em várias
 tabelas com o mesmo cabeçalho. Cada ponto é reconhecido pelo indicativo
 (`LPPT`, `LP48`), em qualquer forma (`Lisboa (LPPT)`, `**LPPT**`), ou pelo
 nome exacto da app. **Falhar em voz alta**: um ponto em falta, repetido ou
-desconhecido, ou uma decisão que não é exactamente uma de GO / MARGINAL /
-NO-GO, é um problema da tabela — sai com código 2 e não se dá a comparação
+desconhecido, ou uma decisão que não é exactamente uma de GO / GO COND. /
+MARGINAL / NO-GO, é um problema da tabela — sai com código 2 e não se dá a comparação
 por boa.
 
 Uso:
@@ -42,9 +42,9 @@ RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ / "tests"))
 import conftest  # noqa: E402  (reutiliza a extracção do motor dos testes)
 
-GRAVIDADE = {"GO": 0, "MARGINAL": 1, "NO-GO": 2}
+GRAVIDADE = {"GO": 0, "GO COND.": 1, "MARGINAL": 2, "NO-GO": 3}   # GO COND. desde a 7.0
 _CODIGO_RE = re.compile(r"\bLP(?:[A-Z]{2}|\d{2})\b")
-_DECISAO_RE = re.compile(r"NO[\s\-‐‑–—]*GO|MARGINAL|\bGO\b")
+_DECISAO_RE = re.compile(r"NO[\s\-‐‑–—]*GO|MARGINAL|\bGO[\s\-]*COND(?:ICIONAL|\.)?|\bGO\b")
 
 
 def carregar_motor(app=RAIZ / "app.py"):
@@ -77,9 +77,9 @@ def _e_separador(cels):
 
 
 def ler_decisao(celula):
-    """'GO' / 'MARGINAL' / 'NO-GO', ou None se a célula não tem exactamente
+    """'GO' / 'GO COND.' / 'MARGINAL' / 'NO-GO', ou None se a célula não tem exactamente
     uma decisão (vazia, outra palavra, ou duas — 'GO / MARGINAL')."""
-    achadas = {("NO-GO" if t.upper().startswith("NO") else t.upper())
+    achadas = {("NO-GO" if t.startswith("NO") else "GO COND." if "COND" in t else t)
                for t in _DECISAO_RE.findall(_limpa(celula).upper())}
     return achadas.pop() if len(achadas) == 1 else None
 
@@ -134,7 +134,7 @@ def ler_tabela_piloto(texto, pontos):
         dec = ler_decisao(cels[col_dec])
         if dec is None:
             problemas.append(f"linha {n}: decisão ilegível para {nome} → `{cels[col_dec]}` "
-                             "(tem de ser exactamente uma de GO / MARGINAL / NO-GO)")
+                             "(tem de ser exactamente uma de GO / GO COND. / MARGINAL / NO-GO)")
             continue
         if nome in decisoes:
             if decisoes[nome][0] != dec:

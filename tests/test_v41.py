@@ -32,7 +32,7 @@ from shapely.geometry import Point
 import conftest
 from conftest import build_gamet
 
-GRAV = {"GO": 0, "MARGINAL": 1, "NO-GO": 2}
+GRAV = {"GO": 0, "GO COND.": 0.5, "MARGINAL": 1, "NO-GO": 2}
 RAIZ = Path(__file__).resolve().parent.parent
 REF = Path(__file__).resolve().parent / "referencia" / "app_4_0.py"
 ARQUIVO = RAIZ / "dados" / "gamets"

@@ -25,7 +25,7 @@ from conftest import build_gamet
 from test_geometry import GAMETS_VARIADOS
 
 DADOS = Path(__file__).resolve().parent.parent / "dados"
-GRAV = {"GO": -1, "MARGINAL": 1, "NO-GO": 2}
+GRAV = {"GO": -1, "GO COND.": 0.5, "MARGINAL": 1, "NO-GO": 2}
 
 # GAMET real 180900/181500 de 18-nov-2026 (recolhido do arquivo)
 G180900 = (
@@ -306,7 +306,7 @@ def test_pdf_segue_o_ecra(eng, tmp_path):
 # ---------------------------------------------------------------- 5.1.1
 
 def test_legenda_do_mapa(eng, app_path):
-    assert _texto(eng.html_legenda_mapa()) == "NO-GO MARGINAL GO"
+    assert _texto(eng.html_legenda_mapa()) == "NO-GO MARGINAL GO COND. GO"   # 7.0
     at = _app(app_path, _gamet_em_vigor("SECN I SFC VIS: N OF N4100 800M FG"))
     md = [m.value for m in at.markdown]
     leg = [k for k, m in enumerate(md) if 'class="gv-legmapa"' in m]
@@ -492,8 +492,10 @@ def test_sigmets_do_arquivo_descritos(eng):
                 if c["linha"] != "SIGMET" or "GAMET, sem área" in m:
                     continue
                 vistos += 1
-                # 6.0: acima do FL195 (TURB/ICE/MTW SEV) é informativo
-                assert c["nivel"] == ("INFO" if m.endswith("(acima dos níveis VFR)") else "NO-GO")
+                # 6.0: acima do FL195 (TURB/ICE/MTW SEV) é informativo;
+                # 7.0: a partir do FL100 dá GO COND.
+                assert c["nivel"] == ("INFO" if m.endswith("(acima dos níveis VFR)") else
+                                      "GO COND." if " — GO abaixo do FL" in m else "NO-GO")
                 assert c.get("longo", "").startswith(c["valor"].split()[0] + " — "), (f.name, m)
                 assert eng._fen_sigmet_pt(c["longo"])[0] is None  # já em português
     assert vistos > 0

@@ -331,11 +331,32 @@ def _motor_actual():
 
 
 def indice_sem_altos_60(indice):
+    """Tira do índice os SIGMETs que deixaram de dar NO-GO por causa dos níveis:
+    todo acima do FL195 (6.0, informativos) e, desde a 7.0, a partir do FL100
+    (GO COND.). Verificados à parte em test_v60.py e test_v70.py."""
     if not indice:
         return indice
-    alto = _motor_actual().sigmet_acima_vfr
+    eng = _motor_actual()
+    nivel = getattr(eng, "nivel_sigmet_lista_branca", None)
+    if nivel is None:
+        alto = eng.sigmet_acima_vfr
+        return {**indice, "sigmets": [e for e in indice.get("sigmets", [])
+                                      if alto(e.get("texto", "")) is None]}
     return {**indice, "sigmets": [e for e in indice.get("sigmets", [])
-                                  if alto(e.get("texto", "")) is None]}
+                                  if (nivel(e.get("texto", "")) or 0) < eng._COND_MIN_FL]}
+
+
+# 7.0 (decisão do Duarte a 21-nov-2026): TURB/ICE/MTW SEV do GAMET com o limite
+# inferior escrito a partir do FL100 dão GO COND. em vez de NO-GO. Os testes que
+# comparam o arquivo com motores fixos anteriores verificam OUTRAS mudanças:
+# saltam esses GAMETs (conjunto fixo em test_v70.py), como o cb_49 da 4.9.
+def cond_70(eng, texto):
+    """True se a 7.0 (`eng`) lê alguma TURB/ICE/MTW SEV com limite ≥ FL100."""
+    if not hasattr(eng, "inferior_camada"):
+        return False
+    return any(b.phenomenon in ("TURB", "ICE", "MTW") and b.value == "SEV"
+               and (eng.inferior_camada(b.layer) or 0) >= eng._COND_MIN_FL
+               for b in eng.parse_gamet(texto)[0])
 
 
 # 4.6: qualificadores dos SIGMET/AIRMET só com graus ("S OF N33", "W OF W008",

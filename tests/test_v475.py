@@ -30,7 +30,7 @@ import analisar  # noqa: E402
 
 REF474 = Path(__file__).resolve().parent / "referencia" / "app_4_7_4.py"
 DADOS = Path(__file__).resolve().parent.parent / "dados"
-RANK = {"GO": 0, "MARGINAL": 1, "NO-GO": 2}
+RANK = {"GO": 0, "GO COND.": 0.5, "MARGINAL": 1, "NO-GO": 2}
 
 G081500 = (
     "LPPC GAMET VALID 081500/082100 LPPT- LPPC LISBOA FIR/MAINLAND AREA BLW FL150 SECN I "
