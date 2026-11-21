@@ -414,6 +414,13 @@ CB_SOLTO = {
     # para toda a FIR e todo o período, com a base de 1800 ft. Verificado pelos
     # testes do arquivo contra a 4.8.1: nunca mais permissivo, blocos dominados.
     "20261115T1454Z_151500-152100_6bcff7cc11.txt",
+    # Acrescentado a 21-nov-2026: GAMET real 202100/210300 de 20-nov. `SIG CLD:N OF
+    # N3900 LCA BKN 002-008/010HFT AGL 21/24 ISOL TCU/CB 020-030/XXXHFT AGL` — CB
+    # colado à nuvem baixa, numa parte aberta pela sua própria janela: toda a FIR
+    # só das 21 às 24Z (6.0.1), com a base de 2000 ft. Mais severo do que a 4.8.1
+    # (os 5 pontos a S de N3800: GO → MARGINAL sem SIGMET); o piloto às cegas fez a
+    # mesma leitura.
+    "20261120T2050Z_202100-210300_52ea468f91.txt",
 }
 
 
