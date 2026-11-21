@@ -337,3 +337,62 @@ def test_arquivo_hist_so_menos_severo_onde_ha_tecto(eng, monkeypatch):
         if (DADOS / "indice.json").exists() else pytest.skip("sem dados/")
     menos = _comparar(eng, monkeypatch, "arquivo_hist", indice)
     assert menos      # há SIGMETs FL100–FL195 no arquivo (I01 17-nov, U02 21-nov…)
+
+
+# ---------------------------------------------------------------- revisão do agente parser
+# Caminhos optimistas encontrados na 1.ª versão: todos têm de ficar iguais à
+# regra desligada (a 6.1), nos 52 pontos.
+_OPTIMISTAS = [
+    "ICE: SEV ABV FL120 10/12 SFC/FL050",          # garantia (_domina)
+    "ICE: SEV ABV FL120 LAN FL030/FL060",          # corte por superfície
+    "ICE: SEV ABV FL120 MAR SFC/FL050 LCA",
+] + [f"ICE: SEV ABV FL120 {x}" for x in (
+    "SFC/050", "SFC/F050", "SFC-050", "030/060", "FL 030/060", "ABV FL 030", "F030/F060",
+    "A030", "BLW A050", "SFC/A050", "SFC/1500M", "1500M", "SFC", "FRM SFC", "FZLVL SFC",
+    "FZRA", "LLWS")] + [
+    "TURB: SEV ABV FL100 BLW 300M",
+    "ICE: SEV ABV FL120\n SFC/FL050",              # linha de continuação sem intensidade
+    "ICE: N OF N4000 SEV ABV FL120 S OF N4000 SFC/FL050",
+    "ICE: SEV ABV FL120 SFC WINDS: 35KT",          # campo desconhecido colado
+]
+
+
+@pytest.mark.parametrize("campo", _OPTIMISTAS)
+def test_revisao_parser_igual_a_regra_desligada(eng, monkeypatch, campo):
+    g = build_gamet("SECN I " + campo)
+    d, r = _pontos_dec(eng, g)
+    with monkeypatch.context() as mp:
+        _desligada(eng, mp)
+        df, _ = _pontos_dec(eng, g)
+    assert d == df, {p: (df[p], d[p]) for p in d if d[p] != df[p]}
+    assert "GO COND." not in d.values()
+
+
+def test_revisao_parser_airmet_sintetico(eng, monkeypatch):
+    from datetime import datetime, timezone
+    agora = datetime(2026, 11, 17, 18, 0, tzinfo=timezone.utc)
+    air = ("LPPC AIRMET 1 VALID 171800/172200 LPPT- LPPC LISBOA FIR SEV ICE FCST N OF N4000 "
+           "ABV FL120 SFC/050 STNR NC=")
+    g = build_gamet("SECN I SIGWX: NIL", validity="171500/172100")
+    def dec():
+        r = eng.analisar_gamet(g, "ipma", boletins=[air], boletins_at=agora, agora=agora)
+        return _decisoes(eng, r["regioes"])
+    d = dec()
+    with monkeypatch.context() as mp:
+        _desligada(eng, mp)
+        df = dec()
+    assert d == df and "GO COND." not in d.values()
+
+
+def test_campos_cond_ok(eng):
+    assert eng.campos_cond_ok(build_gamet("SECN I ICE: N OF N3900 LCA MOD/SEV ABV FL120")) == {"ICE": True}
+    assert eng.campos_cond_ok(build_gamet("SECN I ICE: LCA MOD/SEV ABV FL120 TURB: LCA MOD SFC/FL050")) \
+        == {"ICE": True, "TURB": True}
+    assert eng.campos_cond_ok(build_gamet("SECN I ICE: SEV ABV FL120 SFC/050")) == {"ICE": False}
+    assert eng.campos_cond_ok(build_gamet("SECN I SIGWX: NIL")) == {}
+
+
+def test_mtw_mod_com_a_sua_camada(eng):
+    d, *_, motivos = _dec(eng, [("MTW", "SEV", "", "ABV FL100"), ("MTW", "MOD", "", "SFC/FL050")])
+    assert d == "MARGINAL"
+    assert "MTW MOD SFC/FL050 (onda de montanha)" in motivos

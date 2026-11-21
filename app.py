@@ -2098,6 +2098,13 @@ def _domina(n, v):
         d = 1 if f == "TS" else 2
         return TS_RISK.get(n.value, d) >= TS_RISK.get(v.value, d)
     if f in ("TURB", "ICE", "MTW"):
+        # (7.0, agente parser) Um SEV com camada condicional (≥ FL100) não
+        # cobre um SEV antigo sem essa camada (ou mais baixa): o antigo dava
+        # NO-GO e tem de entrar como era.
+        if v.value == "SEV" and n.value == "SEV":
+            ci_n, ci_v = inferior_camada(n.layer), inferior_camada(v.layer)
+            if ci_n is not None and (ci_v is None or ci_v < ci_n):
+                return False
         return n.value == v.value or n.value == "SEV"
     if f == "WX":
         return set(v.value.split("/")) <= set(n.value.split("/"))
@@ -2122,6 +2129,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
     _lr = (lambda x: None) if _modo476 else _LINE_RE.search
 
     text = normalize(text)
+    _cond_ok = campos_cond_ok(text)          # (7.0)
 
     # ---- Separar Secções I e II ----
     secn_split = re.split(r"SECN\s+II", text, maxsplit=1)
@@ -2888,7 +2896,8 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
                 severity = None
             if severity:
                 blocks.append(MetBlock("MTW", poly, severity, qualifier,
-                                       layer_m.group(1) if layer_m else "",
+                                       _camada_cond_gate(layer_m.group(1) if layer_m else "",
+                                                         severity, _cond_ok.get("MTW")),
                                        surface=surface, window=window, janela_ambigua=ambigua))
 
         elif state == "TURB":
@@ -2920,7 +2929,8 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
             if severity:
                 extra = " ".join(filter(None, [mov, trend]))
                 blocks.append(MetBlock("TURB", poly, severity, qualifier,
-                                       layer + (f" {extra}" if extra else ""), surface=surface, window=window, janela_ambigua=ambigua))
+                                       _camada_cond_gate(layer + (f" {extra}" if extra else ""),
+                                                         severity, _cond_ok.get("TURB")), surface=surface, window=window, janela_ambigua=ambigua))
 
         elif state == "ICE":
             layer = ""
@@ -2941,7 +2951,10 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
             elif "WKN" in content:
                 trend = "WKN"
             if severity:
-                blocks.append(MetBlock("ICE", poly, severity, qualifier, layer + (f" {trend}" if trend else ""), surface=surface, window=window, janela_ambigua=ambigua))
+                blocks.append(MetBlock("ICE", poly, severity, qualifier,
+                                       _camada_cond_gate(layer + (f" {trend}" if trend else ""),
+                                                         severity, _cond_ok.get("ICE")),
+                                       surface=surface, window=window, janela_ambigua=ambigua))
 
         elif state in ("MT_OBSC", "VA"):
             # Montanhas obscurecidas / cinzas vulcânicas — sempre NO-GO.
@@ -4707,6 +4720,64 @@ _NIVEIS_LINHA_RE = re.compile(r"SFC/FL\d+|FL\d+/FL\d+|FL\d+/\d+|SFC/\d+FT|ABV\s+
                               r"|TOP\s+FL\d+|\bFL\d+\b|\b\d+\s*FT\b")
 
 
+# (7.0, agente parser) Lista branca do CAMPO inteiro (TURB/ICE/MTW da Secção I):
+# só há GO COND. se, tirados os pares intensidade + camada ("MOD/SEV ABV
+# FL120"), a área, a superfície, LCA, as janelas, a tendência e a pontuação,
+# não sobrar nada. Uma forma de nível que a app não conhece ("SFC/050", "A030",
+# "1500M", "FL 030/060"), um nível sem intensidade numa linha de continuação,
+# outro fenómeno ("FZRA", "LLWS") ou um campo desconhecido colado → o campo não
+# dá GO COND. (como até à 6.1).
+_UNIDADE_COND_RE = re.compile(r"\b(?:MOD/SEV|MOD/HVY|SEV|HVY|MOD)\s+(?:ABV\s+FL\d{3}|FL\d{3}/FL\d{3}|SFC/FL\d{3})\b")
+_CORPO_COND_BRANCA = [
+    re.compile(r"\bMOV\s+(?:N|NNE|NE|ENE|E|ESE|SE|SSE|S|SSW|SW|WSW|W|WNW|NW|NNW)\s+\d{1,3}\s*KT\b"),
+    re.compile(r"\b\d{2}/\d{2}\b"),
+    re.compile(r"\b[NS]\d{2}(?:\d{2})?\b|\b[EW]\d{3}(?:\d{2})?\b"),
+    re.compile(r"\b\d{1,3}\s*NM\b"),
+    re.compile(r"\b(?:OF|AND|BTN|WI|ENTIRE|FIR|PART|ALONG|LINE|N|S|E|W|NE|NW|SE|SW|MAR|LAN|COT|LCA"
+               r"|INTSF|WKN|NC|STNR|NIL)\b"),
+    re.compile(r"[-,.=:]"),
+]
+_CAMPO_SEGUINTE_RE = re.compile(r"\b(?:(?:SFC\s+VIS|SIG\s+VIS|SIG\s+CLD|SIGWX|TURB|ICE|MT\s+OBSC"
+                                r"|SFC\s+(?:WSPD|WIND)|VA|SIGMET\s+APPLICABLE|SECN\s+II)\b"
+                                r"|VIS\s*:|CLD\s*:|MTW\s*:)")
+_CAMPO_COND_INI = {"TURB": r"\bTURB\b\s*:?", "ICE": r"\bICE\b\s*:?", "MTW": r"\bMTW\s*:"}
+
+
+def _corpo_cond_ok(corpo):
+    r = _UNIDADE_COND_RE.sub(" ", corpo)
+    for rx in _CORPO_COND_BRANCA:
+        r = rx.sub(" ", r)
+    return not r.strip()
+
+
+def campos_cond_ok(text):
+    """(7.0) {"TURB"/"ICE"/"MTW": True} para os campos da Secção I cujo texto
+    inteiro passa a lista branca; um campo que não aparece fica de fora
+    (→ nunca GO COND.)."""
+    t = re.sub(r"\s+", " ", normalize(text or ""))
+    m = re.search(r"\bSECN\s+I\b", t)
+    if not m:
+        return {}
+    s1, ok = t[m.end():], {}
+    for campo, rx in _CAMPO_COND_INI.items():
+        for mm in re.finditer(rx, s1):
+            fim = _CAMPO_SEGUINTE_RE.search(s1, mm.end())
+            corpo = s1[mm.end():fim.start() if fim else len(s1)]
+            ok[campo] = ok.get(campo, True) and _corpo_cond_ok(corpo)
+    return ok
+
+
+_POR_CONFIRMAR = " (nível por confirmar)"
+
+
+def _camada_cond_gate(layer, severity, ok):
+    """(7.0) Se o campo não passou a lista branca, uma camada que daria GO
+    COND. fica marcada e deixa de o dar (o motivo diz porquê)."""
+    if severity == "SEV" and not ok and inferior_camada(layer) is not None:
+        return layer + _POR_CONFIRMAR
+    return layer
+
+
 def _varios_niveis(content):
     niveis = list(dict.fromkeys(_NIVEIS_LINHA_RE.findall(content or "")))
     return " ".join(niveis) if len(niveis) > 1 else ""
@@ -4868,7 +4939,11 @@ def decision(events):
     elif "MOD" in mtw_vals:
         if decision_level == "GO":
             decision_level = "MARGINAL"
-        reasons.append(f"MTW MOD{mtw_note} (onda de montanha)")
+        if mtw_cond:            # (7.0) a camada do MOD, não a do SEV condicional
+            mod_l = _camadas_de(events, "MTW", "MOD")
+            reasons.append(f"MTW MOD{' ' + '/'.join(mod_l) if mod_l else ''} (onda de montanha)")
+        else:
+            reasons.append(f"MTW MOD{mtw_note} (onda de montanha)")
     if mtw_cond:
         cond.append(f"MTW SEV{mtw_note} (onda de montanha) — risco severo{_nota_cond(min(mtw_infs))}")
 
