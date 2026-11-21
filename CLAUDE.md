@@ -569,7 +569,16 @@ também, com o mesmo limite). Onde:
   (`inferior_camada`, com tendência opcional) e o limite ≥ FL100, **todas** as
   SEV desse tipo na célula (uma SEV sem limite ou abaixo → NO-GO como antes).
   Mais de um nível na mesma linha (`SEV ABV FL120 SFC/FL050`) → a camada guarda
-  todos (`_varios_niveis`) e nunca dá GO COND. MTW MOD continua MARGINAL. Casos
+  todos (`_varios_niveis`) e nunca dá GO COND. MTW MOD continua MARGINAL.
+  **Lista branca do campo inteiro** (`campos_cond_ok`, revisão do agente
+  `parser`): só há GO COND. se, tirados os pares intensidade + camada (`MOD/SEV
+  ABV FL120`), a área, a superfície, LCA, as janelas, a tendência, `MOV` e a
+  pontuação, não sobrar nada no campo — uma forma de nível que a app não conhece
+  (`SFC/050`, `A030`, `1500M`, `FL 030/060`), um nível sem intensidade numa linha
+  de continuação, outro fenómeno (`FZRA`, `LLWS`) ou um campo desconhecido colado
+  → a camada fica "(nível por confirmar)" e dá NO-GO como na 6.1. Na garantia
+  das versões anteriores, um SEV condicional não domina (`_domina`) um SEV antigo
+  sem camada condicional ou mais baixa: o antigo entra como era (NO-GO). Casos
   reais: `ICE: … MOD/SEV ABV FL100/FL120` (10 GAMETs do arquivo a 21-nov,
   conjunto fixo em `test_v70`); `ABV FL090` (4 GAMETs) continua NO-GO. A TURB do
   GAMET vem sempre desde a superfície: não muda.
@@ -860,7 +869,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-2652 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 41 do `test_v476.py` + 65 do `test_v48.py` + 10 do `test_v481.py` + 50 do `test_v49.py` + 8 dos conjuntos fixos de 15/16-nov (#50) + 78 do `test_v51.py` + 135 do `test_v60.py` + 31 do `test_comparar_piloto.py` + 26 do `test_v61.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2623 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
+2736 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 41 do `test_v476.py` + 65 do `test_v48.py` + 10 do `test_v481.py` + 50 do `test_v49.py` + 8 dos conjuntos fixos de 15/16-nov (#50) + 78 do `test_v51.py` + 135 do `test_v60.py` + 31 do `test_comparar_piloto.py` + 26 do `test_v61.py` + 86 do `test_v70.py` − 2 do `test_v60.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2707 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -1185,6 +1194,18 @@ python3 -m pytest
   logo depois de `SECN I`, vários, nomes conhecidos não avisam, fora da Secção I
   não avisa, conteúdo cortado, decisão igual, GAMET real 141500 e arquivo sem
   aviso, `analisar.py`, Streamlit (aviso em "A ter em conta")
+- `tests/test_v70.py` — GO condicional (7.0): `inferior_camada`; decision()
+  (ICE/TURB/MTW SEV ≥ FL100 → GO COND. e o tecto, abaixo do FL100/sem camada/dois
+  níveis → NO-GO, tecto mais baixo, outro motivo prevalece, MTW MOD); GAMET (toda
+  a FIR, só a norte, 6 formas que continuam NO-GO, real 170900); SIGMET (I01 real
+  de 17-nov: GO COND. só onde a 6.1 dava NO-GO, faixa `≥ FL120`, aviso; níveis
+  FL090–FL196, ICE/MTW, fora da lista, com outro NO-GO, com um alto, `SIGMET
+  APPLICABLE` com e sem texto); briefing (motivo, cor azul no mapa e legenda,
+  quadro, painel); `comparar_piloto`; os 25 caminhos optimistas do agente `parser`
+  iguais à regra desligada (garantia, cortes, formas de nível, continuação,
+  campo colado, AIRMET sintético); arquivo: conjunto fixo dos GAMETs com
+  `cond_70` e, manual e `arquivo_hist`, menos severo só onde há tecto e nunca
+  abaixo de GO COND.
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores
   antes/depois do cardinal, AND/espaço, MAR/LAN/COT, janela, diagonais):
   nos 52 aeródromos e numa grelha de 0,2°, a decisão nunca é mais permissiva

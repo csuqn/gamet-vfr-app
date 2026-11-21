@@ -2103,7 +2103,7 @@ def _domina(n, v):
         # NO-GO e tem de entrar como era.
         if v.value == "SEV" and n.value == "SEV":
             ci_n, ci_v = inferior_camada(n.layer), inferior_camada(v.layer)
-            if ci_n is not None and (ci_v is None or ci_v < ci_n):
+            if ci_n is not None and ci_n >= _COND_MIN_FL and (ci_v is None or ci_v < ci_n):
                 return False
         return n.value == v.value or n.value == "SEV"
     if f == "WX":
