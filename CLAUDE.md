@@ -598,7 +598,7 @@ limite (`FL110`). Os scripts conhecem a decisão (`comparar_versoes.py`,
 Revisor do PR #66: o porquê do veredicto, em GO COND., diz o tecto **mais
 baixo** de todas as zonas (`tecto_regiao`) e o motivo que o dá; "O meu
 aeródromo", o painel da zona e os cartões da NiceGUI mostram "· abaixo do
-FLnnn"; o chip tem classe própria (`_classe_dec` → `gv-GO-COND`, azul); e o
+FLnnn" (só em GO COND.; ao lado de um NO-GO lia-se "NO-GO só abaixo do…"); o chip tem classe própria (`_classe_dec` → `gv-GO-COND`, azul); e o
 **AIRMET fica de fora** (decisão do Duarte: GAMET e SIGMET) — um AIRMET com
 TURB/ICE/MTW SEV continua NO-GO (a camada leva " (AIRMET)").
 Testes: `test_v70.py`. Os módulos que comparam com motores fixos anteriores
@@ -875,7 +875,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-2743 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 41 do `test_v476.py` + 65 do `test_v48.py` + 10 do `test_v481.py` + 50 do `test_v49.py` + 8 dos conjuntos fixos de 15/16-nov (#50) + 78 do `test_v51.py` + 135 do `test_v60.py` + 31 do `test_comparar_piloto.py` + 26 do `test_v61.py` + 93 do `test_v70.py` − 2 do `test_v60.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2714 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
+2744 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 41 do `test_v476.py` + 65 do `test_v48.py` + 10 do `test_v481.py` + 50 do `test_v49.py` + 8 dos conjuntos fixos de 15/16-nov (#50) + 78 do `test_v51.py` + 135 do `test_v60.py` + 31 do `test_comparar_piloto.py` + 26 do `test_v61.py` + 94 do `test_v70.py` − 2 do `test_v60.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2715 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**

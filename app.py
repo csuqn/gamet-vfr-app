@@ -6260,6 +6260,10 @@ def tecto_regiao(region):
 
 
 def _txt_tecto(region):
+    # Só em GO COND.: ao lado de um NO-GO/MARGINAL lia-se "NO-GO só abaixo do
+    # FL110" (revisor do PR #66); aí o tecto fica nos motivos.
+    if region.get("decision") != GO_COND:
+        return ""
     t = tecto_regiao(region)
     return f" · abaixo do FL{t:03d}" if t is not None else ""
 

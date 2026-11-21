@@ -445,3 +445,11 @@ def test_airmet_com_sev_continua_no_go(eng, monkeypatch, fen):
         _desligada(eng, mp)
         df = dec()
     assert d == df and "GO COND." not in d.values() and "NO-GO" in d.values()
+
+
+def test_tecto_so_ao_lado_de_go_cond(eng):
+    r = eng.analisar_gamet(build_gamet("SECN I ICE: LCA MOD/SEV ABV FL120 SIG CLD: BKN 003/010HFT AGL"),
+                           "manual")
+    reg = r["regioes"][0]
+    assert reg["decision"] == "NO-GO" and eng.tecto_regiao(reg) == 110
+    assert "abaixo do FL" not in eng.html_meu_aerodromo("Lisboa (LPPT)", 1, reg)
