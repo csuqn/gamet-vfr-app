@@ -167,9 +167,13 @@ def test_h_gamet_depois_da_meia_noite_nao_usa_o_t02_da_vespera(eng):
     assert {x["decision"] for x in r["regioes"]} == {"NO-GO"}
     # O T02 do dia 17 em vigor às 00:30 e ainda activo: continua a contar
     t02_17_activo = T02.replace("171400/171800", "172045/180145")
-    r = eng.analisar_gamet(g, "ipma", boletins=[t02_17_activo], boletins_at=agora, agora=agora,
+    # (só no arquivo: a página não o traz, por isso só a referência do GAMET conta)
+    assert "T02" not in eng.sigmets_terminados(
+        [t02_17_activo], agora, (datetime(2026, 10, 18, 0, 30, tzinfo=timezone.utc),
+                                 datetime(2026, 10, 18, 3, 0, tzinfo=timezone.utc)))
+    r = eng.analisar_gamet(g, "ipma", boletins=[], boletins_at=agora, agora=agora,
                            boletins_arquivo=[t02_17_activo])
-    assert r["faixa_sig"] == ("ACTIVO", "NO-GO")
+    assert {x["decision"] for x in r["regioes"]} == {"NO-GO"}
     # Mas um GAMET que começou no dia 17 e refere o T02 do dia 17 já expirado: deixa de contar
     g = build_gamet("SECN I SFC VIS: N OF N4100 5000M BR", validity="172100/180300", sigmet="T02")
     r = eng.analisar_gamet(g, "ipma", boletins=[], boletins_at=agora, agora=agora,
