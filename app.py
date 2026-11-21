@@ -71,6 +71,7 @@ h3 { font-size: 0.8rem !important; letter-spacing: 0.1em; text-transform: upperc
   letter-spacing:.04em; border:1px solid; white-space:nowrap; }
 .gv-GO       { background:#11301F; color:#6FD39A; border-color:#23683F; }
 .gv-MARGINAL { background:#3D3110; color:#F5CF6B; border-color:#7A6420; }
+.gv-GO-COND  { background:#10223F; color:#8DB6FF; border-color:#2B4F8F; }
 .gv-NO-GO    { background:#3A1414; color:#FF8A80; border-color:#7A2A26; }
 .gv-regioes { display:grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap:12px; }
 .gv-rtop { display:flex; align-items:center; justify-content:space-between; gap:10px;
@@ -4571,6 +4572,13 @@ def ler_airmet(texto, ref=None):
             # 0/1000FT"). Só no AIRMET — no GAMET podia ser uma janela "06/".
             cont = re.sub(r"(?<![\d/])(\d{1,2})(?=\s*/)", lambda x: x.group(1).zfill(3), cont)
         blocos_c, *_ = parse_gamet(f"SECN I {campo}: {' '.join(cont.split())}")
+        # (7.0, revisor do PR #66) O GO COND. é só para o GAMET e os SIGMETs
+        # (decisão do Duarte): um AIRMET com TURB/ICE/MTW SEV fica NO-GO como
+        # na 6.1 — a camada deixa de ser só "ABV FLnnn".
+        for b in blocos_c:
+            if (b.phenomenon in ("TURB", "ICE", "MTW") and b.value == "SEV"
+                    and inferior_camada(b.layer) is not None):
+                b.layer += " (AIRMET)"
         if blocos_c:
             lidos.extend(blocos_c)
         else:
@@ -5722,8 +5730,13 @@ def _e(txt):
     return html.escape(str(txt), quote=True)
 
 
+def _classe_dec(dec):
+    """Classe CSS de uma decisão ("GO COND." → "GO-COND")."""
+    return re.sub(r"[^A-Z0-9-]", "", str(dec).upper().replace(" ", "-"))
+
+
 def html_chip(dec):
-    return f'<span class="gv-chip gv-{_e(dec)}">{_e(dec)}</span>'
+    return f'<span class="gv-chip gv-{_classe_dec(dec)}">{_e(dec)}</span>'
 
 
 def html_faixa(validade, expira, sigmet, sigmet_dec=None):
@@ -5841,7 +5854,8 @@ def html_aerodromo(nome, region, resto=None):
     motivos = "; ".join(region.get("reasons") or []) or "sem fenómenos significativos"
     return (
         '<div class="gv-ad"><div style="display:flex;flex-direction:column;gap:2px;min-width:0">'
-        f'<span style="font-size:14px;color:#E6EDF3">{_e(nome)}: {_e(region["decision"])}</span>'
+        f'<span style="font-size:14px;color:#E6EDF3">{_e(nome)}: {_e(region["decision"])}'
+        f'{_e(_txt_tecto(region))}</span>'
         f'<span class="gv-mono" style="font-size:12px;color:#8FA3B5">{_e(motivos)}</span>'
         f'{html_resto(resto, region["decision"])}</div>'
         f'{html_chip(region["decision"])}</div>')
@@ -6237,6 +6251,19 @@ def quadro_zonas(regions, ordem=None, wind=None, blocos=None):
     return linhas, ordem
 
 
+def tecto_regiao(region):
+    """(7.0) O tecto mais baixo (FL) dos motivos condicionais da região ("… —
+    GO abaixo do FL110" → 110), também os parciais; None se não houver."""
+    t = [int(m.group(1)) for x in region.get("reasons") or ()
+         for m in [_COND_NOTA_RE.search(_sem_parcial(x))] if m]
+    return min(t) if t else None
+
+
+def _txt_tecto(region):
+    t = tecto_regiao(region)
+    return f" · abaixo do FL{t:03d}" if t is not None else ""
+
+
 def porque_veredicto(regions, blocos=None):
     """(5.1) Uma frase com o porquê do veredicto: os motivos que causam a pior
     decisão e que valem em TODAS as regiões com essa decisão; se não houver
@@ -6255,6 +6282,20 @@ def porque_veredicto(regions, blocos=None):
             if c["nivel"] == pior and not c["parcial"]:
                 out.append(c)
         return out
+
+    if pior == GO_COND:
+        # (7.0, revisor do PR #66) Em GO COND. o tecto é a própria decisão:
+        # o porquê mostra o MAIS BAIXO de todas as zonas, e o motivo que o dá.
+        t = min(tecto_regiao(g) for g in regs if tecto_regiao(g) is not None)
+        cs = [c for g in regs for c in causas(g) if c["limite"] == f"FL{t:03d}"]
+        vistos, esc = set(), []
+        for c in cs:
+            k = (c["linha"], c["valor"], c["origem"])
+            if k not in vistos:
+                vistos.add(k)
+                esc.append(c)
+        return f"GO abaixo do FL{t:03d} — " + " · ".join(
+            motivo_legivel(c, com_nivel=False) for c in esc[:2])
 
     comuns = None
     for g in regs:
@@ -6347,7 +6388,8 @@ def html_zona(n, region, pct, regions, notas=(), resto=None, blocos=None):
     return (
         '<div class="gv-zona">'
         '<div class="gv-rtop" style="padding:0"><div style="display:flex;flex-direction:column;gap:2px">'
-        f'<span class="gv-znome">Zona {n}</span><span class="gv-k">{pct:.0f}% DA FIR</span>'
+        f'<span class="gv-znome">Zona {n}</span><span class="gv-k">{pct:.0f}% DA FIR'
+        f'{_e(_txt_tecto(region).upper())}</span>'
         f'{html_resto(resto, region["decision"])}</div>{html_chip(region["decision"])}</div>'
         f'<ul class="gv-mot">{itens}{alc}</ul>{lista}</div>')
 
@@ -6360,7 +6402,8 @@ def html_meu_aerodromo(nome, n_zona, region, resto=None):
     return (
         '<div class="gv-meu"><div class="gv-ad" style="padding:0">'
         '<div style="display:flex;flex-direction:column;gap:2px;min-width:0">'
-        f'<span style="font-size:15px;color:#E6EDF3"><b>{_e(nome)}: {_e(region["decision"])}</b>'
+        f'<span style="font-size:15px;color:#E6EDF3"><b>{_e(nome)}: {_e(region["decision"])}'
+        f'{_e(_txt_tecto(region))}</b>'
         f' <span class="gv-k">· ZONA {_e(n_zona)}</span></span>'
         f'{html_resto(resto, region["decision"])}</div>{html_chip(region["decision"])}</div></div>')
 

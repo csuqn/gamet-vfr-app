@@ -396,3 +396,52 @@ def test_mtw_mod_com_a_sua_camada(eng):
     d, *_, motivos = _dec(eng, [("MTW", "SEV", "", "ABV FL100"), ("MTW", "MOD", "", "SFC/FL050")])
     assert d == "MARGINAL"
     assert "MTW MOD SFC/FL050 (onda de montanha)" in motivos
+
+
+# ---------------------------------------------------------------- revisor do PR #66
+def test_porque_mostra_o_tecto_mais_baixo(eng):
+    """Duas zonas GO COND. com tectos diferentes: o porquê do veredicto diz o
+    mais baixo (FL090), não o motivo comum (FL110)."""
+    g = build_gamet("SECN I TURB: N OF N3900 SEV ABV FL120 ICE: N OF N4000 SEV ABV FL100")
+    r = eng.analisar_gamet(g, "manual")
+    tectos = {eng.tecto_regiao(x) for x in r["regioes"] if x["decision"] == "GO COND."}
+    assert tectos == {90, 110}
+    p = eng.porque_veredicto(r["regioes"], r["blocos"])
+    assert p.startswith("GO abaixo do FL090 — ") and "FL110" not in p
+
+
+def test_meu_aerodromo_e_zona_mostram_o_tecto(eng):
+    r = eng.analisar_gamet(build_gamet("SECN I ICE: LCA MOD/SEV ABV FL120"), "manual")
+    reg = r["regioes"][0]
+    assert "GO COND. · abaixo do FL110" in eng.html_meu_aerodromo("Lisboa (LPPT)", 1, reg)
+    assert "ABAIXO DO FL110" in eng.html_zona(1, reg, 100, r["regioes"])
+    assert "abaixo do FL110" in eng.html_aerodromo("Lisboa (LPPT)", reg)
+
+
+def test_chip_azul(eng):
+    h = eng.html_chip("GO COND.")
+    assert 'class="gv-chip gv-GO-COND"' in h
+    assert ".gv-GO-COND" in eng._CSS if hasattr(eng, "_CSS") else True
+
+
+def test_chip_azul_no_css(app_path):
+    src = app_path.read_text(encoding="utf-8")
+    assert ".gv-GO-COND  { background:#10223F; color:#8DB6FF;" in src
+
+
+@pytest.mark.parametrize("fen", ["SEV ICE", "SEV TURB", "SEV MTW"])
+def test_airmet_com_sev_continua_no_go(eng, monkeypatch, fen):
+    """A regra é só para o GAMET e os SIGMETs (decisão do Duarte)."""
+    from datetime import datetime, timezone
+    agora = datetime(2026, 11, 17, 18, 0, tzinfo=timezone.utc)
+    air = (f"LPPC AIRMET 1 VALID 171800/172200 LPPT- LPPC LISBOA FIR {fen} FCST N OF N4000 "
+           "ABV FL120 STNR NC=")
+    g = build_gamet("SECN I SIGWX: NIL", validity="171500/172100")
+    def dec():
+        r = eng.analisar_gamet(g, "ipma", boletins=[air], boletins_at=agora, agora=agora)
+        return _decisoes(eng, r["regioes"])
+    d = dec()
+    with monkeypatch.context() as mp:
+        _desligada(eng, mp)
+        df = dec()
+    assert d == df and "GO COND." not in d.values() and "NO-GO" in d.values()
