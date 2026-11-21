@@ -331,25 +331,38 @@ def _motor_actual():
 
 
 def indice_sem_altos_60(indice):
-    """Tira do índice os SIGMETs que deixaram de dar NO-GO por causa dos níveis:
-    todo acima do FL195 (6.0, informativos) e, desde a 7.0, a partir do FL100
-    (GO COND.). Verificados à parte em test_v60.py e test_v70.py."""
     if not indice:
         return indice
-    eng = _motor_actual()
-    nivel = getattr(eng, "nivel_sigmet_lista_branca", None)
-    if nivel is None:
-        alto = eng.sigmet_acima_vfr
-        return {**indice, "sigmets": [e for e in indice.get("sigmets", [])
-                                      if alto(e.get("texto", "")) is None]}
+    alto = _motor_actual().sigmet_acima_vfr
     return {**indice, "sigmets": [e for e in indice.get("sigmets", [])
-                                  if (nivel(e.get("texto", "")) or 0) < eng._COND_MIN_FL]}
+                                  if alto(e.get("texto", "")) is None]}
 
 
-# 7.0 (decisão do Duarte a 21-nov-2026): TURB/ICE/MTW SEV do GAMET com o limite
-# inferior escrito a partir do FL100 dão GO COND. em vez de NO-GO. Os testes que
-# comparam o arquivo com motores fixos anteriores verificam OUTRAS mudanças:
-# saltam esses GAMETs (conjunto fixo em test_v70.py), como o cb_49 da 4.9.
+# 7.0 (decisão do Duarte a 21-nov-2026): TURB/ICE/MTW SEV (GAMET) e SIGMETs só de
+# TURB/ICE/MTW SEV com o limite inferior escrito a partir do FL100 dão GO COND.
+# em vez de NO-GO. Os módulos que comparam com motores fixos anteriores
+# verificam OUTRAS mudanças: correm com a regra DESLIGADA (`_COND_MIN_FL`
+# inatingível = o comportamento da 6.1), e a regra é verificada contra essa
+# mesma decisão desligada em test_v70.py (conjunto fixo dos GAMETs com cond_70).
+_MODULOS_SEM_70 = {
+    "test_v35_contra_34", "test_v40_contra_310", "test_v41", "test_v42", "test_v43",
+    "test_v45", "test_v452", "test_v46", "test_v46_margem", "test_v473", "test_v474",
+    "test_v475", "test_v476", "test_v48", "test_v49",
+}
+
+
+@pytest.fixture(autouse=True)
+def _regra_70_desligada(request, monkeypatch):
+    if request.module.__name__.rsplit(".", 1)[-1] in _MODULOS_SEM_70:
+        motores = [_motor_actual()]
+        if "eng" in request.fixturenames:
+            motores.append(request.getfixturevalue("eng"))
+        for m in motores:
+            if hasattr(m, "_COND_MIN_FL"):
+                monkeypatch.setattr(m, "_COND_MIN_FL", 10 ** 6)
+    yield
+
+
 def cond_70(eng, texto):
     """True se a 7.0 (`eng`) lê alguma TURB/ICE/MTW SEV com limite ≥ FL100."""
     if not hasattr(eng, "inferior_camada"):

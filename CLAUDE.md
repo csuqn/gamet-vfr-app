@@ -1,8 +1,8 @@
 # LPPC GAMET Decoder
 
 App Streamlit que descodifica GAMETs da FIR LPPC (Portugal Continental) e
-produz um briefing VFR com decisões **GO / MARGINAL / NO-GO** por região
-geográfica.
+produz um briefing VFR com decisões **GO / GO COND. / MARGINAL / NO-GO** por
+região geográfica (GO COND. desde a 7.0).
 
 Público-alvo: pilotos VFR e de ultraleves. **É uma ferramenta de apoio à
 decisão de voo** — um erro pode levar alguém a voar em condições inseguras.
@@ -430,6 +430,7 @@ definir `FIR_POLYGON` — não entram na decisão.
 | CB em SIG CLD, ISOL | MARGINAL (desde a 2.0) |
 | CB em SIG CLD, EMBD / OCNL / FRQ / sem qualificador | NO-GO (desde a 2.0; TCU sozinho não conta) |
 | TURB ou ICE **SEV** (ou HVY) | NO-GO |
+| TURB / ICE / MTW SEV com o limite inferior escrito a partir do FL100 (`ABV FL100`, `FL120/FL150`), sozinho na linha | **GO COND.** — "GO abaixo do FL090" (1000 ft abaixo do limite; desde a 7.0) |
 | TURB ou ICE MOD | informativo, não altera decisão |
 | MTW (onda de montanha) SEV | NO-GO |
 | MTW MOD | MARGINAL (≠ TURB MOD: descendentes junto ao relevo) |
@@ -439,6 +440,7 @@ definir `FIR_POLYGON` — não entram na decisão.
 | VA (cinzas vulcânicas) | NO-GO |
 | SIGMET activo com área legível (página do IPMA / arquivo) | NO-GO na área + 10 NM, estendida pelo MOV (desde a 3.0; `D OF LINE` como semiplano desde a 4.5) |
 | SIGMET só de TURB/ICE/MTW SEV com todos os níveis escritos acima do FL195 (`FL220/430`, `ABV FL250`) | informativo, não altera a decisão (desde a 6.0; SERA.5005(d)(2): o VFR não se faz acima do FL195) |
+| SIGMET só de TURB/ICE/MTW SEV com o limite inferior escrito entre o FL100 e o FL195 (`FL120/210`) | **GO COND.** na área + 10 NM e MOV — "GO abaixo do FL110" (desde a 7.0) |
 | SIGMET sem área legível, ENTIRE FIR, ou só o identificador no GAMET | NO-GO em toda a área |
 | SIGMET referido no GAMET que se sabe terminado (expirou / CNL) | não conta; aviso (desde a 3.2). Estado desconhecido → toda a área |
 | AIRMET em vigor (página do IPMA / arquivo) | as regras acima, na área do AIRMET, **sem margem**, estendida pelo MOV (desde a 4.0). Área/MOV ilegível → toda a FIR + aviso |
@@ -551,6 +553,46 @@ testes do arquivo contra motores anteriores tiram do índice os SIGMETs altos
 (`conftest.indice_sem_altos_60`) e repõem o texto antigo desse aviso
 (`conftest.avisos_redaccao_60`); `test_v51` passa a ignorar "INFO" no pior
 nível e verifica a descrição com o U01 a `SFC/FL100`.
+
+**GO condicional (7.0, decisão do Duarte a 21-nov-2026; mudança de regra).**
+"Não faz sentido nenhum dar NO-GO quando o piloto vai voar muito abaixo dessa
+altitude." Decisão nova **`GO COND.`** (`GO_COND`), entre GO e MARGINAL
+(GO < GO COND. < MARGINAL < NO-GO), **azul** no mapa (`#3B82F6`; o informativo
+do quadro passa a cinzento). Dá-a um fenómeno severo que só existe acima de um
+nível que o VFR baixo não atinge, com o **tecto 1000 ft abaixo** do limite
+inferior escrito (`_COND_MARGEM_FL`): "GO abaixo do FL090" para `ABV FL100`.
+Só a partir do **FL100** (`_COND_MIN_FL`): o tecto (FL090) fica sempre ≥ 1500 ft
+acima do relevo mais alto da FIR (MEF 7500 ft) e não é preciso olhar para o
+relevo — escolhas do Duarte (margem 1000 ft, ≥ FL100, entre GO e MARGINAL; GAMET
+também, com o mesmo limite). Onde:
+- **GAMET**: TURB/ICE/MTW SEV cuja camada é só `ABV FLnnn` ou `FLaaa/FLbbb`
+  (`inferior_camada`, com tendência opcional) e o limite ≥ FL100, **todas** as
+  SEV desse tipo na célula (uma SEV sem limite ou abaixo → NO-GO como antes).
+  Mais de um nível na mesma linha (`SEV ABV FL120 SFC/FL050`) → a camada guarda
+  todos (`_varios_niveis`) e nunca dá GO COND. MTW MOD continua MARGINAL. Casos
+  reais: `ICE: … MOD/SEV ABV FL100/FL120` (10 GAMETs do arquivo a 21-nov,
+  conjunto fixo em `test_v70`); `ABV FL090` (4 GAMETs) continua NO-GO. A TURB do
+  GAMET vem sempre desde a superfície: não muda.
+- **SIGMET**: a mesma lista branca da 6.0 (`nivel_sigmet_lista_branca`) com o
+  limite inferior entre o FL100 e o FL195 (`sigmet_condicional`) → bloco
+  `SIGMET_COND` (camada `FLnnn`) na área + 10 NM e MOV. Casos reais: I01 de
+  17-nov (`SEV ICE … FL120/210`), I01/I02 de 18-nov e I01 de 20-nov (FL100), U02
+  de 21-nov (`SEV TURB … FL170`) — 9 no arquivo. Faixa `≥ FLnnn` (azul) e aviso
+  `aviso` se todos os SIGMETs em vigor forem condicionais/altos; com um a dar
+  NO-GO, como antes. Só referido no GAMET sem o texto → toda a área NO-GO.
+`decision()` junta o motivo condicional ("ICE SEV ABV FL120 — risco severo — GO
+abaixo do FL110", "SIGMET I01 (SEV ICE) — … — GO abaixo do FL110") e só no fim,
+se a célula ainda for GO, passa a GO COND.; numa zona MARGINAL/NO-GO o motivo
+fica como condição extra. `classificar_motivo` dá-lhe o nível GO COND. e o
+limite (`FL110`). Os scripts conhecem a decisão (`comparar_versoes.py`,
+`comparar_piloto.py` — "GO COND.", "GO condicional", "GO-COND" —, `analisar.py`).
+Testes: `test_v70.py`. Os módulos que comparam com motores fixos anteriores
+correm com a regra **desligada** (`conftest._regra_70_desligada`:
+`_COND_MIN_FL` inatingível = a 6.1), e o `test_v70` verifica no arquivo
+(manual e `arquivo_hist`) que a 7.0 só é menos severa do que essa decisão onde
+há um motivo condicional, e nunca abaixo de GO COND. Três casos do
+`test_v60.test_continua_no_go_como_antes` (FL150/250, FL195/300, SEV ICE
+FL100/190) passaram para o `test_v70` como GO COND.
 
 **`D OF LINE …` (4.5, pedido do Duarte a 1-nov-2026).** Casos reais: SIGMET
 T01 311035/311330 (`SW OF LINE N3508 W01641 - N35 W01628 AND W OF LINE N35
