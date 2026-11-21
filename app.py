@@ -34,7 +34,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "6.0.2"
+APP_VERSION = "6.1"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -1878,6 +1878,48 @@ def campos_nao_interpretados(text):
     sem_fenomeno = []
     parse_gamet(text, sem_fenomeno=sem_fenomeno)
     return sem_fenomeno
+
+
+# (6.1) Nomes de campo da Secção I que a máquina de estados conhece (os de
+# _CAMPO_INI_RE). Um "NOME:" que não acabe num destes não abre campo: o texto
+# fica colado ao campo anterior (como continuação, e pode recortá-lo) ou, logo
+# depois de SECN I, é ignorado — foi assim que "SFC WIND:" passou em silêncio
+# até à 4.7.5 (relatório W45, g.2).
+_CAMPO_CONHECIDO_FIM_RE = re.compile(
+    r"(?:^|\s)(?:SFC\s+VIS|SIG\s+VIS|VIS|SIG\s+CLD|CLD|SIGWX|TURB|ICE|MT\s+OBSC"
+    r"|SFC\s+(?:WSPD|WIND)|MTW|VA)$")
+# O nome é a palavra (só letras, 2 ou mais) imediatamente antes de ":", com a
+# anterior só se for SFC, SIG ou MT (as 1.as palavras dos nomes de duas): sem
+# isto o aviso mostrava a última palavra do campo anterior ("BR WINDS:").
+_NOME_CAMPO_RE = re.compile(r"\b((?:(?:SFC|SIG|MT)[ \t]+)?[A-Z]{2,})[ \t]*:")
+
+
+def campos_desconhecidos(text):
+    """
+    (6.1, relatório W45 g.2; pedido do Duarte a 20-nov-2026) Campos da
+    Secção I com um nome que a app não conhece ("SFC WINDS: …"). Lista de
+    textos "NOME: conteúdo" (o conteúdo até ao "NOME:" seguinte, no máximo
+    120 caracteres), para o aviso "Campo desconhecido" do briefing e para o
+    scripts/analisar.py. A Secção I vai de "SECN I" até "SIGMET APPLICABLE" ou
+    "SECN II". Só avisa: a leitura e a decisão não mudam.
+    """
+    norm = re.sub(r"\s+", " ", normalize(text))
+    m = re.search(r"\bSECN\s+I\b", norm)
+    if not m:
+        return []
+    secn1 = re.split(r"\bSIGMET\s+APPLICABLE\b|\bSECN\s+II\b", norm[m.end():])[0]
+    nomes = list(_NOME_CAMPO_RE.finditer(secn1))
+    out = []
+    for i, n in enumerate(nomes):
+        nome = n.group(1)
+        if _CAMPO_CONHECIDO_FIM_RE.search(nome):
+            continue
+        fim = nomes[i + 1].start() if i + 1 < len(nomes) else len(secn1)
+        conteudo = secn1[n.end():fim].strip().rstrip("=").strip()
+        if len(conteudo) > 120:
+            conteudo = conteudo[:117].rstrip() + "…"
+        out.append(f"{nome}: {conteudo}".strip())
+    return out
 
 
 # Conteúdo que não pede fenómeno: vazio, só pontuação, só a janela ou NIL.
@@ -5292,6 +5334,14 @@ def analisar_gamet(texto, fonte="manual", boletins=None, boletins_at=None,
         av.append(("aviso", f"⚠️ **Campo não interpretado** — «`{s.replace('`', '')}`»: a "
                             "app não conseguiu ler este texto e ele **NÃO entra na "
                             "decisão**. Lê o GAMET original."))
+    # Falhar em voz alta (6.1, relatório W45 g.2): nome de campo da Secção I
+    # que a app não conhece — o texto não abre campo e fica colado ao campo
+    # anterior (ou é ignorado). Só aviso: não muda a decisão.
+    for s in campos_desconhecidos(texto):
+        av.append(("aviso", f"⚠️ **Campo desconhecido** — «`{s.replace('`', '')}`»: a app "
+                            "não conhece este nome de campo e **não o lê como campo** "
+                            "(o texto pode ter ficado junto do campo anterior). Lê o "
+                            "GAMET original."))
     # Falhar em voz alta (3.4): a subentrada foi aplicada a toda a FIR porque
     # a área não foi lida. O texto vai como código; as interfaces escapam-no.
     for s in sem_area:

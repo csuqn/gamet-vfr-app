@@ -128,6 +128,9 @@ def analisar(eng, texto):
     # Mesma verificação do aviso do briefing (3.9): por subentrada, no motor.
     for p in eng.campos_nao_interpretados(texto):
         r["alertas"].append(f"Campo sem fenómeno gerado → {p}")
+    # (6.1) Nome de campo que a app não conhece — o mesmo aviso do briefing.
+    for p in eng.campos_desconhecidos(texto):
+        r["alertas"].append(f"Campo desconhecido → {p}")
     desc = palavras_desconhecidas(secn1)
     if desc:
         r["alertas"].append("Palavras desconhecidas: " + " ".join(desc))
