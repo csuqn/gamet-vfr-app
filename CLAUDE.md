@@ -710,7 +710,18 @@ prova e é ignorado se não se sobrepõe ao GAMET ou já terminou (4.8.1, aprova
 pelo Duarte a 12-nov-2026; até à 4.8 bloqueava sempre a prova: no GAMET real 110300/110900 de 11-nov-2026 o T01
 de 10-nov no arquivo impedia de dar como terminado o T01 de 11-nov, expirado às
 04:45Z → NO-GO em toda a área; `test_v481.py`). Sem nenhum do dia, o id
-continua a contar em toda a área. Se se sobrepõe ao GAMET e está activo ou
+continua a contar em toda a área. **Excepção (6.0.2, pedido do Duarte a 21-nov-2026):** o
+boletim de outro dia que estava **em vigor no início da validade do GAMET**
+(`ini ≤ início < fim`) é o que o GAMET refere e serve de prova como um do
+próprio dia (expirado/CNL → terminado; activo → conta). GAMET real 210300/210900
+de 21-nov: `SIGMET APPLICABLE:U02`, só havia o U02 202355/210355 de 20-nov
+(SEV TURB SFC/FL070 no N e centro); até à 6.0.1, na fonte `ipma`, depois das
+03:55Z a app forçava NO-GO em toda a área até às 09Z (os 10 pontos do sul GO
+fora dos SIGMETs). Vale também para o caso da 3.3 (AMD 180030/180300 a
+referir o T02 172045/180045 do dia 17: depois das 00:45 deixa de contar;
+`test_v33.test_h_…` actualizado — mudança de regra, decisão do Duarte a
+21-nov-2026). Os outros boletins de outro dia ficam como na 4.8.1
+(`test_v602.py`). Se se sobrepõe ao GAMET e está activo ou
 futuro, continua a bloquear (revisor do #46: um AMD emitido depois das 00Z pode
 referir o T01 de ontem ainda em vigor). Um CNL só cancela o boletim concreto (mesmo id **e** validade;
 sem validade, o que estava em vigor no início do CNL — `_boletins_cancelados`,
@@ -875,7 +886,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-2744 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 41 do `test_v476.py` + 65 do `test_v48.py` + 10 do `test_v481.py` + 50 do `test_v49.py` + 8 dos conjuntos fixos de 15/16-nov (#50) + 78 do `test_v51.py` + 135 do `test_v60.py` + 31 do `test_comparar_piloto.py` + 26 do `test_v61.py` + 94 do `test_v70.py` − 2 do `test_v60.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2715 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
+2751 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 41 do `test_v476.py` + 65 do `test_v48.py` + 10 do `test_v481.py` + 50 do `test_v49.py` + 8 dos conjuntos fixos de 15/16-nov (#50) + 78 do `test_v51.py` + 135 do `test_v60.py` + 31 do `test_comparar_piloto.py` + 7 do `test_v602.py` + 26 do `test_v61.py` + 94 do `test_v70.py` − 2 do `test_v60.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2722 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -1190,6 +1201,10 @@ python3 -m pytest
   passa do FL195, e então igual ao GAMET sem o SIGMET); arquivo em
   `arquivo_hist` (nenhum SIGMET alto dá NO-GO; sem eles, decisões iguais); os
   casos optimistas do agente `parser` continuam a contar
+- `tests/test_v602.py` — SIGMET de outro dia em vigor no início do GAMET serve
+  de prova (GAMET real 210300 com o U02 de 20-nov: às 04:30/06:30Z os pontos do
+  sul GO, aviso "já não está em vigor"; activo, de outro dia sem estar em vigor
+  no início, ou com um do próprio dia activo → continua a contar)
 - `tests/test_comparar_piloto.py` — `scripts/comparar_piloto.py` (GAMET real
   141500): diferenças nos dois sentidos, decisão da app = briefing manual,
   formas do ponto (nome, indicativo, negrito, sem acentos) e da decisão (`NO GO`,

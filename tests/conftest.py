@@ -519,14 +519,17 @@ def motivos_sem_camada_471(motivos):
     # Também nos motivos parciais da 4.7.3 ("parte da zona: MTW MOD ABV FL050 …";
     # primeiro caso no arquivo: GAMET 191500/192100 de 19-nov-2026), em que o
     # prefixo vinha antes e o ^ da expressão não casava.
+    # Sem a camada, dois motivos podem ficar iguais (GAMET real 210900/211500 de
+    # 21-nov-2026: TURB SEV SFC/FL070 em 09/12 e em 12/15; o motor antigo dava
+    # "TURB SEV SFC/FL070" e "TURB SEV SFC/FL070/SFC/FL070" na mesma região
+    # fundida, a 4.7.1+ só o primeiro). Conta-se cada motivo uma vez.
     out = []
     for m in motivos:
         p = MOTIVO_PARCIAL_473 if m.startswith(MOTIVO_PARCIAL_473) else ""
-        out.append(p + _CAMADA_471_RE.sub(r"\1", m[len(p):]))
-    # Sem repetidos: numa região fundida a 4.1 tinha "TURB SEV SFC/FL070" e
-    # "TURB SEV SFC/FL070/SFC/FL070" (duas fatias), que depois da 4.7.1 são o
-    # mesmo motivo e a união deixa um só (GAMET real 210900/211500 de 21-nov).
-    return list(dict.fromkeys(out))
+        n = p + _CAMADA_471_RE.sub(r"\1", m[len(p):])
+        if n not in out:
+            out.append(n)
+    return out
 
 
 # 4.7.3: numa região fundida, o motivo que só vale numa das partes passou a
