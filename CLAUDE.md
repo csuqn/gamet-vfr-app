@@ -660,7 +660,10 @@ próprio dia (expirado/CNL → terminado; activo → conta). GAMET real 210300/2
 de 21-nov: `SIGMET APPLICABLE:U02`, só havia o U02 202355/210355 de 20-nov
 (SEV TURB SFC/FL070 no N e centro); até à 6.0.1, na fonte `ipma`, depois das
 03:55Z a app forçava NO-GO em toda a área até às 09Z (os 10 pontos do sul GO
-fora dos SIGMETs). Os outros boletins de outro dia ficam como na 4.8.1
+fora dos SIGMETs). Vale também para o caso da 3.3 (AMD 180030/180300 a
+referir o T02 172045/180045 do dia 17: depois das 00:45 deixa de contar;
+`test_v33.test_h_…` actualizado — mudança de regra, decisão do Duarte a
+21-nov-2026). Os outros boletins de outro dia ficam como na 4.8.1
 (`test_v602.py`). Se se sobrepõe ao GAMET e está activo ou
 futuro, continua a bloquear (revisor do #46: um AMD emitido depois das 00Z pode
 referir o T01 de ontem ainda em vigor). Um CNL só cancela o boletim concreto (mesmo id **e** validade;

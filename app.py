@@ -4103,9 +4103,10 @@ def sigmets_terminados(conhecidos, ref, periodo_gamet=(None, None)):
         # do do próprio dia). Se se sobrepõe e está activo ou futuro, o GAMET
         # pode estar a referi-lo (AMD emitido depois das 00Z a referir o T01
         # de ontem ainda em vigor; revisor do #46): o id fica por provar. Se
-        # não houver nenhum do dia, o id também fica por provar (ex.: GAMET
-        # AMD 180030 a referir "T02" e o único T02 conhecido ser o do dia 17
-        # → toda a área).
+        # não houver nenhum do dia, o id também fica por provar — excepto se o
+        # de outro dia estava em vigor no início do GAMET (6.0.2, abaixo; até
+        # à 6.0.1 o AMD 180030 a referir o T02 172045/180045 do dia 17 dava
+        # toda a área).
         if ini.date() != g_ini.date():
             # (6.0.2, pedido do Duarte a 21-nov-2026) Um boletim de outro dia
             # UTC que estava em vigor no início da validade do GAMET é o que o
