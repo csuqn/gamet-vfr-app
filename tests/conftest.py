@@ -489,7 +489,10 @@ def motivos_sem_camada_471(motivos):
     for m in motivos:
         p = MOTIVO_PARCIAL_473 if m.startswith(MOTIVO_PARCIAL_473) else ""
         out.append(p + _CAMADA_471_RE.sub(r"\1", m[len(p):]))
-    return out
+    # Sem repetidos: numa região fundida a 4.1 tinha "TURB SEV SFC/FL070" e
+    # "TURB SEV SFC/FL070/SFC/FL070" (duas fatias), que depois da 4.7.1 são o
+    # mesmo motivo e a união deixa um só (GAMET real 210900/211500 de 21-nov).
+    return list(dict.fromkeys(out))
 
 
 # 4.7.3: numa região fundida, o motivo que só vale numa das partes passou a
