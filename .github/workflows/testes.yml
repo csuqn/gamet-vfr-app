@@ -2,6 +2,9 @@ name: Testes
 
 # Corre a suite completa em cada pull request para o main e em cada push
 # para o main. O relatório diário só faz merge de um PR com este check verde.
+# Desde 24-nov-2026 (W47 g.1, pedido do Duarte) corre também os testes do
+# arquivo: o ramo `dados` (GAMETs e SIGMETs reais) é posto em `dados/`, como
+# no relatório diário. Sem ele esses testes saltavam e só falhavam localmente.
 on:
   pull_request:
     branches: [main]
@@ -11,9 +14,14 @@ on:
 jobs:
   pytest:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: dados
+          path: dados
+          fetch-depth: 1
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

@@ -1506,6 +1506,14 @@ Tarefa agendada às 08:00 (Lisboa). Cadeia:
 
 1. `scripts/analisar.py` — leitura pelo parser (determinística, não é agente).
 2. `piloto` × N — um por GAMET das últimas 24 h, em paralelo, **às cegas**.
+   Excepção (W47 g.3, decisão do Duarte a 24-nov-2026, para poupar o
+   plano): um GAMET cuja Secção I é **só** `HAZARDOUS WX NIL` (entre `SECN I`
+   e `SECN II` não há mais nada, nem `SIGMET APPLICABLE` com identificador) não
+   leva piloto — a decisão é GO nos 52 pontos sem leitura a fazer. Em vez do
+   piloto, verifica-se que a app dá GO em todos os 52 pontos (modo manual) e
+   nenhum aviso de campo; se não der, lança-se o piloto como nos outros. Nas
+   Métricas contam como "NIL, sem piloto" (aeródromos comparados com a app:
+   52 cada).
 3. `scripts/comparar_piloto.py` — lê a tabela de cada piloto e a decisão da
    app (só o texto do GAMET, modo manual, decisão principal) e lista os pontos
    em que diferem (determinístico; recomendação g.4 da W46). Tabela com
@@ -1513,7 +1521,9 @@ Tarefa agendada às 08:00 (Lisboa). Cadeia:
    e a comparação não se dá por boa. `comparador` — só classifica as
    diferenças que o script listou (já não as conta).
 4. Para cada erro do parser confirmado: `editor` (ramo `proposta/...` com
-   teste do GAMET real) → PR → check "Testes" (GitHub Actions) →
+   teste do GAMET real) → PR → check "Testes" (GitHub Actions; desde
+   24-nov-2026 corre com o ramo `dados` em `dados/`, por isso os testes do
+   arquivo também contam — W47 g.1) →
    `revisor` (independente; inclui `scripts/comparar_versoes.py` sobre todo o
    arquivo, que lista as decisões que ficam MAIS PERMISSIVAS; com `--indice`
    inclui os SIGMETs arquivados).
