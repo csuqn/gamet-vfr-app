@@ -1147,6 +1147,13 @@
    "inicio": "2026-11-24T03:00Z",
    "fim": "2026-11-24T09:00Z",
    "tipo": "GAMET"
+  },
+  {
+   "ficheiro": "gamets/2026/11/20261124T0852Z_240900-241500_1b9a8f5d1f.txt",
+   "recolhido": "2026-11-24T08:52Z",
+   "inicio": "2026-11-24T09:00Z",
+   "fim": "2026-11-24T15:00Z",
+   "tipo": "GAMET"
   }
  ],
  "sigmets": [
