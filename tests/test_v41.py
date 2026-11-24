@@ -31,6 +31,7 @@ from shapely.geometry import Point
 
 import conftest
 from conftest import build_gamet
+from test_v39 import AVISOS_ESPERADOS_ARQUIVO
 
 GRAV = {"GO": 0, "GO COND.": 0.5, "MARGINAL": 1, "NO-GO": 2}
 RAIZ = Path(__file__).resolve().parent.parent
@@ -264,8 +265,15 @@ def test_arquivo_contra_40(eng, eng40):
         if conftest.linha_48(t):
             continue  # 4.8: "D OF LINE" no GAMET, verificado em test_v48.py
         _comparar(eng, eng40, t)
-        # Nenhum aviso "Campo não interpretado" novo
-        if not eng40.campos_nao_interpretados(t):
+        # Nenhum aviso "Campo não interpretado" novo, excepto os verdadeiros do
+        # conjunto fixo (test_v39.AVISOS_ESPERADOS_ARQUIVO: 230900 de 23-nov,
+        # `SFC WIND:` com uma visibilidade, que a 4.0 ignorava em silêncio),
+        # que têm de lá estar tal e qual.
+        if p.name in AVISOS_ESPERADOS_ARQUIVO:
+            assert eng40.campos_nao_interpretados(t) == [], p.name
+            assert (eng.campos_nao_interpretados(t)
+                    == AVISOS_ESPERADOS_ARQUIVO[p.name]), p.name
+        elif not eng40.campos_nao_interpretados(t):
             assert eng.campos_nao_interpretados(t) == [], p.name
 
 

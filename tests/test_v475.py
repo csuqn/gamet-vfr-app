@@ -430,9 +430,63 @@ def test_arquivo_hist_contra_4_7_4(eng, eng474):
     assert n > 100
 
 
+# GAMETs do arquivo cujo `SFC WIND:` não traz vento nenhum (nenhum `KT` no
+# campo). Conjunto fixo: `test_arquivo_sfc_wind_sem_vento` falha se aparecer
+# outro, para se confirmar a leitura. 230900/231500 de 23-nov-2026: `SFC
+# WIND:09/11 N OF N3930 AND E OF W00835 LCA 0200-5000M FG/BR` — gralha do IPMA
+# (uma visibilidade com o rótulo de vento). Não gera bloco WSPD e dá o aviso
+# "Campo não interpretado" (verdadeiro; test_v39.AVISOS_ESPERADOS_ARQUIVO).
+SFC_WIND_SEM_VENTO = {"20261123T0847Z_230900-231500_4f1944bc65.txt"}
+
+_CAMPO_SFC_WIND_RE = re.compile(
+    r"\bSFC\s+WIND\b(?!/)\s*:?(.*?)(?=\bSFC\s+(?:VIS|WSPD|WIND)\b|\bSIG\s*CLD\b|"
+    r"\bSIGWX\b|\bTURB\b|\bICE\b|\bMTW\b|\bMT\s+OBSC\b|\bVA\s*:|"
+    r"\bSIGMET\s+APPLICABLE\b|\bSECN\s+II\b|$)", re.DOTALL)
+
+
+def _sfc_wind_sem_vento(texto):
+    """True se algum campo `SFC WIND` da Secção I não tem nenhum `KT`."""
+    secn1 = re.split(r"SECN\s+II", eng_norm(texto), maxsplit=1)[0]
+    campos = [m.group(1) for m in _CAMPO_SFC_WIND_RE.finditer(secn1)]
+    return any("KT" not in c for c in campos)
+
+
+def test_arquivo_sfc_wind_sem_vento(eng):
+    """Conjunto fixo dos GAMETs com `SFC WIND` sem vento: nenhum bloco WSPD
+    sai do campo, o aviso "Campo não interpretado" aponta-o e a decisão é a
+    mesma que com o campo lido como `SFC VIS` (nunca mais permissiva)."""
+    indice = _arquivo()
+    achados = set()
+    for entrada in indice.get("gamets", []):
+        f = DADOS / entrada["ficheiro"]
+        if not f.exists():
+            continue
+        texto = f.read_text(encoding="utf-8")
+        if not _sfc_wind_sem_vento(texto):
+            continue
+        achados.add(f.name)
+        blocos, *_ = eng.parse_gamet(texto)
+        assert _wspd(blocos) == [], f.name
+        (sub,) = eng.campos_nao_interpretados(texto)
+        assert sub.startswith("SFC WIND:") and "KT" not in sub, f.name
+        ini = eng._iso_utc(entrada.get("inicio"))
+        kw = {"agora": ini + timedelta(minutes=30)} if ini else {}
+        r = eng.analisar_gamet(texto, "manual", **kw)
+        assert [x for _t, x in r["avisos"]
+                if "Campo não interpretado" in x and sub.split(":", 1)[1].strip() in x], f.name
+        lido = re.sub(r"\bSFC(\s+)WIND\b", r"SFC\1VIS", texto, count=1)
+        rv = eng.analisar_gamet(lido, "manual", **kw)
+        for nome, (la, lo) in eng.AERODROMES.items():
+            a = eng.find_region_for_point(r["regioes"], la, lo)["decision"]
+            b = eng.find_region_for_point(rv["regioes"], la, lo)["decision"]
+            assert RANK[a] >= RANK[b], (f.name, nome, a, b)
+    assert achados == SFC_WIND_SEM_VENTO
+
+
 def test_arquivo_so_mudam_blocos_wspd(eng, eng474):
     """Em todo o arquivo, a 4.7.5 só acrescenta blocos WSPD aos GAMETs com
-    SFC WIND; os outros blocos ficam iguais."""
+    SFC WIND (excepto os de `SFC_WIND_SEM_VENTO`, que não têm vento: nenhum
+    bloco WSPD); os outros blocos ficam iguais."""
     indice = _arquivo()
     for entrada in indice.get("gamets", []):
         f = DADOS / entrada["ficheiro"]
@@ -459,6 +513,8 @@ def test_arquivo_so_mudam_blocos_wspd(eng, eng474):
             assert a.polygon.symmetric_difference(b.polygon).area < 1e-12, f.name
         if not _tem_sfc_wind(texto):
             assert len(_wspd(bn)) == len(_wspd(bv)), f.name
+        elif f.name in SFC_WIND_SEM_VENTO:
+            assert _wspd(bn) == [] and _wspd(bv) == [], f.name
         else:
             assert len(_wspd(bn)) > len(_wspd(bv)), f.name
 
@@ -484,7 +540,16 @@ def test_arquivo_sfc_wind_igual_a_sfc_wspd(eng):
         ra = eng.analisar_gamet(texto, "manual", **kw)
         rb = eng.analisar_gamet(trocado, "manual", **kw)
         _iguais(eng, eng, ra["regioes"], rb["regioes"], f.name)
-        for campo in ("por_dec", "avisos", "faixa_sig"):
+        for campo in ("por_dec", "faixa_sig"):
             assert ra.get(campo) == rb.get(campo), (f.name, campo)
+        if f.name in SFC_WIND_SEM_VENTO:
+            # Sem vento no campo, o aviso "Campo não interpretado" cita o texto
+            # tal como está: só o nome do campo difere; os outros avisos iguais.
+            aviso = [x for _t, x in ra["avisos"] if "Campo não interpretado" in x]
+            assert aviso and "SFC WIND" in aviso[0], f.name
+            assert ra["avisos"] == [(t, x.replace("SFC WSPD", "SFC WIND"))
+                                    for t, x in rb["avisos"]], f.name
+        else:
+            assert ra.get("avisos") == rb.get("avisos"), (f.name, "avisos")
         n += 1
     assert n >= 2
