@@ -154,6 +154,6 @@ Este relatório devia ter saído na segunda-feira, 23-nov, mas só foi escrito a
 **Decidida já depois da semana:**
 - 24-nov: VIS escrita em `SFC WIND` (230900) — não alterar; corrigir só se voltar a aparecer.
 
-**Pendentes:**
-- Testes do arquivo no CI (W46 e W47).
-- Não lançar piloto nos GAMETs NIL (g.3).
+- 24-nov: testes do arquivo no CI (g.1) e GAMETs NIL sem piloto (g.3) — **não alterar o processo**, fica como está (PR #68 fechado sem merge).
+
+**Pendentes:** nenhuma.
