@@ -137,7 +137,7 @@ Este relatório devia ter saído na segunda-feira, 23-nov, mas só foi escrito a
 2. **Manter o merge automático tal como está.** Só entraram PRs de testes, todos aprovados, e nenhum foi revertido.
 3. **Reduzir o custo do diário**, já que o plano esgotou. Quando a Secção I é `HAZARDOUS WX NIL`, não lançar o piloto: o resultado é trivialmente GO e o `comparar_piloto.py` pode comparar com uma tabela gerada. Isto é uma mudança às instruções da tarefa, por isso decides tu.
 4. **Prioridades para a W48:**
-   - decidir a VIS dentro de `SFC WIND` (230900 de 23-nov);
+   - vigiar se a VIS dentro de `SFC WIND` (230900 de 23-nov) volta a aparecer (decidiste a 24-nov não alterar por agora);
    - acompanhar os primeiros GO COND. reais da 7.0 nos briefings;
    - rever se a pergunta repetida dos pilotos sobre a base LCA merece uma regra ou só uma nota no CLAUDE.md.
 
@@ -151,7 +151,9 @@ Este relatório devia ter saído na segunda-feira, 23-nov, mas só foi escrito a
 - 20-nov: h.2 "como for mais lógico e real" (6.0.1); script de comparação ponto a ponto (g.4); aviso "Campo desconhecido" (6.1).
 - 21-nov: SIGMET da véspera em vigor no início do GAMET serve de prova (6.0.2); GO COND. com margem de 1000 ft, só a partir do FL100, entre GO e MARGINAL, também no GAMET e não no AIRMET (7.0).
 
+**Decidida já depois da semana:**
+- 24-nov: VIS escrita em `SFC WIND` (230900) — não alterar; corrigir só se voltar a aparecer.
+
 **Pendentes:**
-- VIS escrita em `SFC WIND` (23-nov).
 - Testes do arquivo no CI (W46 e W47).
 - Não lançar piloto nos GAMETs NIL (g.3).
