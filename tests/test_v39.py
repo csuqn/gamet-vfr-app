@@ -13,6 +13,7 @@ Os testes usam o GAMET real 201500 com a gralha "HTF" (já lida desde a 3.7)
 trocada por uma gralha nova, "HTX".
 """
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -153,13 +154,54 @@ def test_gamets_reais_nao_avisam(eng, g):
     assert eng.campos_nao_interpretados(g) == []
 
 
+# GAMETs do arquivo em que o aviso é verdadeiro (conjunto fixo; falhar em voz
+# alta). 230900/231500 de 23-nov-2026: `SFC WIND:` com uma visibilidade
+# (`LCA 0200-5000M FG/BR`), gralha do IPMA — o campo de vento não tem vento e
+# não gera fenómeno. A decisão não muda: o `SIG CLD:09/11 … LCA BKN 002…` da
+# mesma área e janela já dá NO-GO nesses pontos.
+AVISOS_ESPERADOS_ARQUIVO = {
+    "20261123T0847Z_230900-231500_4f1944bc65.txt": [
+        "SFC WIND: 09/11 N OF N3930 AND E OF W00835 LCA 0200-5000M FG/BR"],
+}
+
+
 def test_arquivo_inteiro_nao_avisa(eng):
     fich = sorted(ARQUIVO.rglob("*.txt")) if ARQUIVO.exists() else []
     if not fich:
         pytest.skip("arquivo de GAMETs não disponível neste checkout")
     falsos = {p.name: eng.campos_nao_interpretados(p.read_text(encoding="utf-8"))
               for p in fich}
-    assert {k: v for k, v in falsos.items() if v} == {}
+    avisos = {k: v for k, v in falsos.items() if v}
+    # Os avisos esperados têm de lá estar, exactamente; nenhum outro GAMET avisa.
+    for nome, esperado in AVISOS_ESPERADOS_ARQUIVO.items():
+        if nome in falsos:
+            assert avisos.pop(nome, []) == esperado, nome
+    assert avisos == {}
+
+
+def test_arquivo_230900_sfc_wind_com_visibilidade(eng):
+    p = next(iter(ARQUIVO.rglob("20261123T0847Z_230900-231500_4f1944bc65.txt")),
+             None) if ARQUIVO.exists() else None
+    if p is None:
+        pytest.skip("arquivo de GAMETs não disponível neste checkout")
+    texto = p.read_text(encoding="utf-8")
+    blocos, *_ = eng.parse_gamet(texto)
+    # O `SFC WIND` não tem vento: nenhum bloco WSPD nem VIS sai dele.
+    assert not [b for b in blocos if b.phenomenon == "WSPD"]
+    assert not [b for b in blocos if b.phenomenon == "VIS"]
+    agora = datetime(2026, 11, 23, 9, 30, tzinfo=timezone.utc)
+    r = eng.analisar_gamet(texto, "manual", agora=agora)
+    ((tipo, aviso),) = [(t, x) for t, x in r["avisos"] if "Campo não interpretado" in x]
+    assert tipo == "aviso" and "LCA 0200-5000M FG/BR" in aviso
+    # A base de 200 ft do SIG CLD (mesma área e janela) está lida …
+    base = [b for b in blocos if b.phenomenon == "BASE_AGL"]
+    assert base and min(b.value for b in base) == 200
+    # … e a decisão é a mesma que daria o campo lido como SFC VIS: a gralha
+    # não deixa nenhum ponto mais permissivo.
+    lido = texto.replace("SFC WIND:09/11", "SFC VIS:09/11", 1)
+    r2 = eng.analisar_gamet(lido, "manual", agora=agora)
+    assert _decisoes(eng, r["regioes"]) == _decisoes(eng, r2["regioes"])
+    assert "NO-GO" in _decisoes(eng, r["regioes"]).values()
 
 
 @pytest.mark.parametrize("corpo", [

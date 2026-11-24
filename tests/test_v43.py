@@ -880,6 +880,19 @@ def test_arquivo_igual_a_4_2(eng, eng42):
         assert eng.nuvens_baixas_secn2(t) == eng42.nuvens_baixas_secn2(t)
 
 
+# GAMETs do arquivo com uma janela `HH/24` que a 4.2 não lia (só lia até 23:
+# deixava a subentrada sem janela, ambígua, a contar sempre no resto) e que a
+# 4.3 lê (`test_arquivo_igual_a_4_2` já aceita `–24Z`). Aí, passada a janela e
+# a margem de 1 h, o resto do período da 4.3 pode ser menos severo do que o da
+# 4.2 — só se todos os blocos ignorados tiverem janela própria terminada a
+# `–24Z`. Conjunto fixo (o teste falha se aparecer outro ou se este deixar de o
+# ser). 212100/220300 de 21-nov-2026: `SIG CLD:21/24 E OF W00800 LCA BKN
+# 002-008/010HFT AGL` e `SIGWX:21/24 N OF N3920 AND E OF W00800 EMBD TS`; às
+# 02:45Z (2h45 depois do fim da janela) os 17 pontos a E de W00800 ficam GO no
+# resto (na 4.2 NO-GO).
+RESTO_JANELA_24 = {"20261121T2040Z_212100-220300_254d1e725a.txt"}
+
+
 def test_arquivo_analise_completa_e_resto(eng, eng42):
     fich = _arquivo()
     if not fich:
@@ -888,6 +901,7 @@ def test_arquivo_analise_completa_e_resto(eng, eng42):
         json.loads(INDICE.read_text(encoding="utf-8")) if INDICE.exists() else None)),
         eng))  # 4.5, 4.6, 4.5.1
     entradas = {e["ficheiro"]: e for e in (indice or {}).get("gamets", [])}
+    menos_severos = set()
     for f in fich:
         texto = conftest.sfc_wind_475(f.read_text(encoding="utf-8"))  # 4.7.5
         if conftest.linha_48(texto):
@@ -909,13 +923,56 @@ def test_arquivo_analise_completa_e_resto(eng, eng42):
                 if args[0] == "arquivo_hist" and not entrada:
                     continue
                 # Sem janelas a meio da linha no arquivo: o resto nunca é
-                # menos severo do que o da 4.2 (estrito)
-                _m, novo, antigo = _resto_contra_42(eng, eng42, texto, agora, f.name,
-                                                    estrito=True, fonte=args[0], **kw)
+                # menos severo do que o da 4.2 (estrito), excepto nos GAMETs com
+                # janela `HH/24` de RESTO_JANELA_24 (só com janela própria
+                # `–24Z` terminada há mais da margem de 1 h)
+                janela_24 = f.name in RESTO_JANELA_24
+                menos, novo, antigo = _resto_contra_42(eng, eng42, texto, agora, f.name,
+                                                       estrito=not janela_24,
+                                                       fonte=args[0], **kw)
+                if menos:
+                    menos_severos.add(f.name)
+                    for b in novo["resto"]["ignorados"]:
+                        assert b.window.endswith("–24Z"), (f.name, b.window, b.parte)
+                        iv = eng.janela_intervalo(b.window, ini)
+                        assert iv[1] + eng._RESTO_MARGEM <= agora, (f.name, b.window)
                 assert novo["por_dec"] == antigo["por_dec"], f.name
                 assert avisos_redaccao_43(novo["avisos"]) == antigo["avisos"], f.name
                 assert [g["decision"] for g in novo["regioes"]] == \
                        [g["decision"] for g in antigo["regioes"]]
+    assert menos_severos == {n for n in RESTO_JANELA_24 if any(f.name == n for f in fich)}
+
+
+def test_arquivo_212100_janela_24_ignorada_as_0245(eng, eng42):
+    """GAMET real 212100/220300 (RESTO_JANELA_24): às 02:45Z a 4.3+ ignora no
+    resto os blocos das 21–24Z (terminados há 2h45) e os 17 pontos a E de W00800
+    ficam menos severos do que na 4.2, que deixava o `21/24` sem janela
+    (ambíguo)."""
+    f = RAIZ / "dados" / "gamets" / "2026" / "11" / "20261121T2040Z_212100-220300_254d1e725a.txt"
+    if not f.exists():
+        pytest.skip("arquivo (ramo dados) não disponível")
+    texto = f.read_text(encoding="utf-8")
+    agora = datetime(2026, 11, 22, 2, 45, tzinfo=timezone.utc)
+    menos, rn, rv = _resto_contra_42(eng, eng42, texto, agora, f.name, fonte="manual")
+    assert menos
+    # A 4.2 deixava todos os blocos 21/24 sem janela e ambíguos
+    bv = eng42.parse_gamet(texto)[0]
+    assert all(b.window == "" for b in bv if b.phenomenon in ("BASE_AGL", "TS", "CB"))
+    ign = rn["resto"]["ignorados"]
+    assert ign and {b.window for b in ign} == {"21–24Z"}
+    assert {b.phenomenon for b in ign} >= {"BASE_AGL", "TS"}
+    menos_pts = {n for n, (la, lo) in eng.AERODROMES.items()
+                 if GRAV[_resto_ponto(eng, rn, la, lo)] < GRAV[_resto_ponto(eng42, rv, la, lo)]}
+    # Os 17 pontos a E de W00800 (todos GO no resto; na 4.2 NO-GO)
+    assert menos_pts == {
+        "Faro (LPFR)", "Beja (LPBJ)", "Évora (LPEV)", "Vila Real (LPVR)", "Bragança (LPBG)",
+        "Castelo Branco (LPCB)", "Chaves (LPCH)", "Mirandela (LPMI)", "Mogadouro (LPMU)",
+        "Proença-a-Nova (LPPN)", "Seia (LPSE)", "Viseu (LPVZ)", "Beja UL (LP51)",
+        "Cabeceiras de Basto (LP53)", "Campinho (LP54)", "Herdade da Lameira (LP57)",
+        "Cabeço da Vaca (LP66)"}
+    assert all(eng.AERODROMES[n][1] > -8.0 for n in menos_pts)
+    # A decisão principal (pior caso do período) não muda
+    assert rn["por_dec"] == rv["por_dec"]
 
 
 # --- Contra o motor da 4.2: subentradas geradas -------------------------------------
