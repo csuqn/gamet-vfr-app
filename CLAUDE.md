@@ -392,7 +392,8 @@ Três pormenores que já causaram erros reais:
   3000-5000M BR/RA/DZ MT ABV 035HFT AMSL 0200-5000M SN`, o 250300 com `N OF
   N3830`, o 250900 sem superfície e com `045HFT`). Até à 7.0 os dois valores
   ficavam na área da subentrada, os dois com o LCA (VIS 200 m LCA → MARGINAL em
-  toda a terra) e a montanha perdia-se. `_corte_mt` parte a linha antes de `MT
+  toda a terra) e a montanha perdia-se. **Só na SFC VIS** (o caso real e o que o
+  Duarte decidiu; revisor do PR #70): `_corte_mt` parte a linha antes de `MT
   ABV nnnHFT AMSL` (ou `nnnnFT AMSL`) e a parte a seguir passa para uma linha à
   parte (continuação da subentrada: herda a área e a janela). **A parte de
   antes** fica como está (área, superfície; LCA só o que está escrito nela —
@@ -402,8 +403,7 @@ Três pormenores que já causaram erros reais:
   com MEF ≥ limiar — ≥ 3500 ft para `035HFT`, escolha do Duarte; sem ajuste à
   margem do MEF), **sem o LCA** da linha (só se estiver escrito depois do `MT
   ABV`: o LCA qualifica o 1.º valor; 200 m → NO-GO no relevo) e com a janela da
-  parte. O nível do `MT ABV` não é valor (no SIG CLD a 7.0 lia `035HFT AMSL`
-  como base de 3500 ft AMSL). O motivo é o de sempre ("VIS 200m < 1500m"); o
+  parte. O motivo é o de sempre ("VIS 200m < 1500m"); o
   alcance vai nas notas da região ("VIS: apenas junto ao relevo com MEF ≥ 3500
   ft …", `MetBlock.relevo`, fora da igualdade) e num aviso `aviso` "**Valor só
   junto ao relevo**" (`avisos_relevo`; "entra na decisão" → etiqueta "conta para
@@ -416,21 +416,31 @@ Três pormenores que já causaram erros reais:
   superfície, LCA ou janela antes — `LAN LCA MT ABV …`, depois de `11/15` ou de
   uma superfície a meio), janela, superfície ou algo com ar de área depois, ou
   intersecção vazia (`S OF N3800 … MT ABV 050HFT`; aí o LCA da parte volta a
-  valer para os dois, como na 7.0). Uma parte `MT ABV` sem nenhum valor lido
-  (`MT ABV 035HFT AMSL SN`) avisa "Campo não interpretado". `leituras_relevo`
-  (e `scripts/analisar.py`, "Área não reconhecida (MT ABV …)") lista as
-  leituras. As leituras das versões anteriores (`_modo42`/`_modo475`/`_modo476`)
+  valer para os dois, como na 7.0), ou o que vem depois não passa a **lista
+  branca** (`_mt_vis_lista_branca`): tem de haver pelo menos um valor de VIS
+  lido (100–9999 m ou KM) e nada além de valores de VIS, tempo presente
+  (`_MT_VIS_WX`: `SN`, `FG`, `BR`, `RA`, `DZ`, `HZ`, `FU`, `SHSN`… e combinações
+  com `/`), `LCA` e pontuação — `MT ABV 035HFT AMSL SN`, `… OBSC`, `… IN CLD`,
+  `… 0200M SN BKN 002HFT AGL` ficam na dúvida. **Noutro campo** (SIG CLD, ICE,
+  TURB, SFC WSPD/WIND, MTW, SIGWX, MT OBSC, VA) a linha fica **exactamente como
+  na 7.0** — no SIG CLD com a base de 3500 ft AMSL que a 7.0 lê no nível do `MT
+  ABV` (NO-GO no relevo) — e com o aviso "**MT ABV não interpretado**" (etiqueta
+  "verificar"). Revisor do PR #70 (e06475f, rejeitado): a 1.ª versão lia o `MT
+  ABV` em todos os campos e tratava como lida uma parte sem valor ou com
+  palavras por ler — `SIG CLD:LAN BKN 010/030HFT AGL MT ABV 035HFT AMSL OBSC`
+  (ou `IN CLD`, `OBSC BKN 020/XXXHFT`, `ISOL TCU/CB 020/XXXHFT`) perdia a base e
+  passava de NO-GO a GO/MARGINAL em 29 pontos. `leituras_relevo` (tipos "ok",
+  "duvida", "outro") e `scripts/analisar.py` ("Área não reconhecida (MT ABV …)",
+  "MT ABV não interpretado (campo …)") listam as leituras. As leituras das versões anteriores (`_modo42`/`_modo475`/`_modo476`)
   partem as linhas da mesma forma e dão a mesma área à parte do `MT ABV` — a
   garantia (`_area_42`) não a anula. **A Secção II e o AIRMET sintético ficam
   como na 7.0** (`parse_gamet(…, _mt=False)`: a nota nunca perde bases). `MT
-  OBSC` não muda. **Mais permissivo do que a 7.0 só fora do relevo, por
-  leitura** (aceite pelo Duarte): fora das quadrículas de montanha o valor do
-  `MT ABV` deixa de contar — num texto hipotético `LAN 6000M MT ABV 035HFT AMSL
-  0200M` a 7.1 dá GO fora do relevo e a 7.0 dava NO-GO em toda a terra (e no SIG
-  CLD sai a base fantasma de 3500 ft AMSL, que dava NO-GO em quadrículas com MEF
-  > 3000 ft — aí, sem caso real, pode ser mais permissivo também no relevo: a
-  confirmar com o Duarte se aparecer); fora do SIG CLD, dentro das quadrículas ≥
-  limiar nunca é mais permissivo (`test_v71`, em linhas geradas de SFC VIS). Nos 4 GAMETs reais (modo manual): os 21
+  OBSC` não muda. **Mais permissivo do que a 7.0 só por leitura: SFC VIS fora
+  do relevo** (aceite pelo Duarte): fora das quadrículas de montanha o valor do
+  `MT ABV` deixa de contar — num texto hipotético `SFC VIS:LAN 6000M MT ABV
+  035HFT AMSL 0200M` a 7.1 dá GO fora do relevo e a 7.0 dava NO-GO em toda a
+  terra. Dentro das quadrículas ≥ limiar nunca é mais permissivo, e fora da SFC
+  VIS é exactamente a 7.0 (`test_v71`, em linhas geradas de todos os campos). Nos 4 GAMETs reais (modo manual): os 21
   pontos (12 no 250900) nas quadrículas de montanha dentro da área da VIS ficam
   NO-GO; mudam só **LPCB, LPPN e LP57** (MARGINAL → NO-GO) no 241500, 242100 e
   250300 — os outros já eram NO-GO (base 200–400 ft LCA a N de N4000) —, e nada
@@ -945,7 +955,7 @@ lógica com dados concretos.
 python3 -m pytest
 ```
 
-2815 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 41 do `test_v476.py` + 65 do `test_v48.py` + 10 do `test_v481.py` + 50 do `test_v49.py` + 8 dos conjuntos fixos de 15/16-nov (#50) + 78 do `test_v51.py` + 135 do `test_v60.py` + 31 do `test_comparar_piloto.py` + 7 do `test_v602.py` + 26 do `test_v61.py` + 94 do `test_v70.py` − 2 do `test_v60.py` + 3 dos conjuntos fixos de 24-nov: `test_v39`, `test_v43`, `test_v475` + 1 do conjunto fixo de 25-nov, `test_v43.SECN2_JANELA_43` + 60 do `test_v71.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2786 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
+2835 testes (contados com `python3 -m pytest --collect-only -q`, com a NiceGUI instalada: 2078 até à 4.6 + 18 do `test_v461.py` + 18 do `test_v47.py` + 7 do `test_v471.py` + 25 do `test_v472.py` + 12 do `test_v473.py` + 13 do `test_v474.py` + 37 do `test_v475.py` + 41 do `test_v476.py` + 65 do `test_v48.py` + 10 do `test_v481.py` + 50 do `test_v49.py` + 8 dos conjuntos fixos de 15/16-nov (#50) + 78 do `test_v51.py` + 135 do `test_v60.py` + 31 do `test_comparar_piloto.py` + 7 do `test_v602.py` + 26 do `test_v61.py` + 94 do `test_v70.py` − 2 do `test_v60.py` + 3 dos conjuntos fixos de 24-nov: `test_v39`, `test_v43`, `test_v475` + 1 do conjunto fixo de 25-nov, `test_v43.SECN2_JANELA_43` + 80 do `test_v71.py`). Sem a NiceGUI não correm 29: os 5 do `test_nicegui.py` e os 18 do `test_v461.py` (o módulo inteiro), os 3 de NiceGUI do `test_v47.py` e 1 em cada um de `test_v39.py`, `test_v40.py` e `test_v42.py` — o pytest mostra "2806 passed, 8 skipped", porque um módulo saltado conta como um só. Devem passar a 100%.
 
 - `tests/test_parser.py` — VIS, base, TS, TURB/ICE, MT OBSC, VA
 - `tests/test_geometry.py` — geometria, SIGMET, **invariantes**
@@ -1286,17 +1296,21 @@ python3 -m pytest
   campo colado, AIRMET sintético); arquivo: conjunto fixo dos GAMETs com
   `cond_70` e, manual e `arquivo_hist`, menos severo só onde há tecto e nunca
   abaixo de GO COND.
-- `tests/test_v71.py` — `MT ABV nnnHFT AMSL` a meio da linha (GAMETs reais
+- `tests/test_v71.py` — `MT ABV nnnHFT AMSL` a meio da linha, só na SFC VIS (GAMETs reais
   241500, 242100, 250300 e 250900: a parte a seguir só nas quadrículas ≥ limiar
   ∩ superfície ∩ subentrada, sem LCA e sem janela, calculada à parte; 52 pontos:
   na montanha NO-GO, fora igual à 7.0, LPCB/LPPN/LP57 mudam; aviso "Valor só
   junto ao relevo" com os aeródromos, etiqueta, nota de alcance e motivo normal;
-  Streamlit em "A ter em conta"; `analisar.py`); 21 formas que ficam como na 7.0
-  com aviso; LCA depois do `MT ABV`; SIG CLD com base; `nnnnFT` e outros
+  Streamlit em "A ter em conta"; `analisar.py`); 28 formas de SFC VIS que ficam
+  como na 7.0 com aviso (lista branca: `OBSC`, `IN CLD`, sem valor, outra
+  nuvem…); 15 noutros campos (os 4 do revisor do PR #70 em SIG CLD, ICE, TURB,
+  WSPD/WIND, MTW, SIGWX, MT OBSC) iguais à 7.0 com o aviso "MT ABV não
+  interpretado"; LCA depois do `MT ABV`; `nnnnFT` e outros
   limiares; área da subentrada e superfície; janelas; superfície a meio; Secção
   II e AIRMET iguais à 7.0; MT OBSC; mais permissivo só fora do relevo
-  (documentado); propriedade em linhas geradas (no relevo nunca mais permissivo,
-  fora igual à 7.0 sem o `MT ABV`); arquivo contra o motor da **7.0**
+  (documentado); propriedade em linhas geradas (fora da SFC VIS exactamente a
+  7.0; em VIS no relevo nunca mais permissivo, fora igual à 7.0 sem o `MT ABV`,
+  em dúvida igual à 7.0); arquivo contra o motor da **7.0**
   (`tests/referencia/app_7_0.py`, cópia fixa do `app.py` do main 810bd55; não
   editar): conjunto fixo dos 4, manual com grelha e `arquivo_hist`
 - `tests/test_v35_contra_34.py` — 400 subentradas geradas (qualificadores

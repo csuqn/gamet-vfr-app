@@ -650,7 +650,7 @@ def _regra_71_desligada(request, monkeypatch):
             motores.append(request.getfixturevalue("eng"))
         for m in motores:
             if hasattr(m, "_corte_mt"):
-                monkeypatch.setattr(m, "_corte_mt", lambda linha: None)
+                monkeypatch.setattr(m, "_corte_mt", lambda *a, **k: None)
     yield
 
 

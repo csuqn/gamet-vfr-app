@@ -1863,7 +1863,8 @@ def leituras_relevo(text):
     """
     (7.1) Leituras de "MT ABV nnnHFT AMSL …" na Secção I: lista de
     (tipo, campo, texto, limiar) — tipo "ok" (o que vem depois só nas
-    quadrículas de relevo ≥ limiar) ou "duvida" (fica como na 7.0).
+    quadrículas de relevo ≥ limiar), "duvida" (SFC VIS que não se lê com
+    segurança: fica como na 7.0) ou "outro" (outro campo: fica como na 7.0).
     """
     relevo = []
     parse_gamet(text, relevo=relevo)
@@ -2109,9 +2110,36 @@ def _cortes_superficie(linha, cortes_janela=()):
 _MT_ABV_RE = re.compile(r"(?<![\w/])MT\s+ABV\b")
 _MT_ABV_OK_RE = re.compile(r"MT\s+ABV\s+(?:(\d{3})HFT|(\d{4,5})FT)\s+AMSL\b")
 _SUP_SOLTA_RE = re.compile(r"(?<![\w/\-])(?:MAR|LAN|COT)\b")
+# (7.1, revisor do PR #70) Só a SFC VIS (o caso real e o que o Duarte decidiu).
+# O que vem depois do "MT ABV" tem de ser só valores de VIS, tempo presente, LCA
+# e pontuação (lista branca), com pelo menos um valor de VIS lido; senão fica
+# como na 7.0 ("OBSC", "IN CLD", "BKN 002HFT"…).
+_MT_VIS_VALOR_RE = re.compile(
+    r"(?<![\w/.\-])(?:(?:BLW|ABV)\s+(\d{3,4})M|(\d{3,4})-(\d{3,4})M|(\d{3,4})M"
+    r"|(?:\d{1,2},\d+|\d+(?:\.\d+)?)\s*KM|(\d{4})(?:-(\d{4}))?)(?![\w/\-])")
+_MT_VIS_WX = {"SN", "FG", "BR", "RA", "DZ", "HZ", "FU", "DU", "SA", "SG", "GS", "PL", "IC",
+              "SHSN", "SHRA", "SHGS", "SHRASN", "SHSNRA", "RASN", "SNRA", "DZRA", "RADZ",
+              "BCFG", "MIFG", "PRFG", "FZFG", "BLSN", "DRSN", "FZRA", "FZDZ"}
 
 
-def _corte_mt(linha):
+def _mt_vis_lista_branca(resto):
+    """(7.1) True se `resto` (o que vem depois do "MT ABV …") tem pelo menos um
+    valor de VIS legível (100–9999 m, ou KM) e nada além de valores de VIS,
+    tempo presente (combinações com "/"), LCA e pontuação."""
+    lido = False
+    for m in _MT_VIS_VALOR_RE.finditer(resto):
+        nums = [int(g) for g in m.groups() if g]
+        if not nums or any(100 <= n <= 9999 for n in nums):
+            lido = True
+    sobra = _MT_VIS_VALOR_RE.sub(" ", resto)
+    for t in re.findall(r"[^\s,;.=]+", sobra):
+        if t == "LCA" or all(w.lstrip("+-") in _MT_VIS_WX for w in t.split("/")):
+            continue
+        return False
+    return lido
+
+
+def _corte_mt(linha, campo="VIS"):
     """
     (7.1) Onde partir a linha num "MT ABV nnnHFT AMSL" (ou "nnnnFT AMSL") que
     vem depois de conteúdo do campo e é seguido de valores: (posição, limiar em
@@ -2119,11 +2147,16 @@ def _corte_mt(linha):
     segurança — limiar ilegível ou sem AMSL, nada a seguir, mais de um "MT ABV"
     na linha, no início do campo/subentrada/parte (só área, superfície, LCA ou
     janela antes, como uma área ilegível), ou com janela, superfície ou algo
-    com ar de área depois (a linha fica como na 7.0, com aviso).
+    com ar de área depois, ou nada que a lista branca da SFC VIS aceite
+    (`_mt_vis_lista_branca`) — a linha fica como na 7.0, com aviso. "outro" se
+    o campo (`campo`, o estado da máquina) não é a VIS: fica como na 7.0, com
+    aviso "MT ABV não interpretado".
     """
     ms = list(_MT_ABV_RE.finditer(linha))
     if not ms:
         return None
+    if campo != "VIS":
+        return "outro"
     if len(ms) > 1:
         return "duvida"
     m = ms[0]
@@ -2135,7 +2168,8 @@ def _corte_mt(linha):
     if (_SEM_CONTEUDO_RE.fullmatch(resto) or _SUP_SOLTA_RE.search(resto)
             or _AREA_ALGURES_RE.search(resto) or _DIAGONAL_RE.search(resto)
             or any(not _NAO_JANELA_RE.match(resto, j.end())
-                   for j in re.finditer(r"(?<!\S)\d{2}/\d{2}(?=\s|$)", resto))):
+                   for j in re.finditer(r"(?<!\S)\d{2}/\d{2}(?=\s|$)", resto))
+            or not _mt_vis_lista_branca(resto)):
         return "duvida"
     # O "MT ABV" tem de vir depois de conteúdo do campo, dentro da sua parte
     # (desde o início da linha, ou a última janela/superfície que a parte)
@@ -2196,7 +2230,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
                 _areas42=None, _modo475=False, _modo476=False, _cb_solto=True,
                 relevo=None, _mt=True):
     # relevo (7.1): lista que recebe as leituras de "MT ABV nnnHFT AMSL" —
-    # ("ok", campo, texto, limiar, área) ou ("duvida", campo, texto, None, None).
+    # ("ok", campo, texto, limiar) ou ("duvida"|"outro", campo, texto, None).
     # _mt (7.1): False na Secção II e no AIRMET sintético, que ficam como na 7.0.
     # As leituras das versões anteriores (_modo42/_modo475/_modo476) partem as
     # linhas da mesma forma (os números das linhas da garantia têm de bater
@@ -2321,13 +2355,20 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
     # uma linha à parte (continuação da subentrada: herda a área e a janela),
     # com o limiar em mt_linhas. Na dúvida a linha fica inteira (como na 7.0)
     # e vai para mt_duvida (aviso).
-    mt_linhas, mt_duvida = {}, set()
+    # (7.1, revisor do PR #70) Só na SFC VIS: noutro campo a linha fica como
+    # na 7.0, com aviso (mt_duvida guarda o tipo: "duvida" ou "outro").
+    mt_linhas, mt_duvida = {}, {}
     if _mt:
-        novas = []
+        novas, campo_l = [], None
         for l in lines:
-            c = _corte_mt(l)
-            if c == "duvida":
-                mt_duvida.add(len(novas))
+            if re.match(r"SFC\s+VIS|SIG\s+VIS|VIS\s*:", l):
+                campo_l = "VIS"
+            elif re.match(r"SIG\s+CLD|CLD\s*:|SIGWX|TURB|ICE|MT\s+OBSC|SFC\s+(?:WSPD|WIND)\b"
+                          r"|MTW\s*:|VA\b|SECN\s+I\b|SIGMET", l):
+                campo_l = re.match(r"\S+", l).group(0)
+            c = _corte_mt(l, campo_l)
+            if c in ("duvida", "outro"):
+                mt_duvida[len(novas)] = c
             elif c is not None and l[:c[0]].strip():
                 novas.append(l[:c[0]].rstrip())
                 mt_linhas[len(novas)] = c[1]
@@ -2592,7 +2633,7 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
         if (n_linha in mt_duvida and n_linha not in mt_avisadas and relevo is not None
                 and _MT_ABV_RE.search(content)):
             mt_avisadas.add(n_linha)
-            relevo.append(("duvida", campo_txt, content475, None))
+            relevo.append((mt_duvida[n_linha], campo_txt, content475, None))
 
         # Linha partida por "HH/HH MAR|LAN|COT" (4.1): a área da 4.0 para a
         # linha inteira, calculada antes de a 1.ª parte mexer na área.
@@ -5650,6 +5691,12 @@ def avisos_relevo(relevo, blocos):
     av = []
     for tipo, campo, txt, limiar in relevo:
         t = f"{campo}: {txt}".replace("`", "")
+        if tipo == "outro":
+            av.append(("aviso", f"⚠️ **MT ABV não interpretado** — «`{t}`»: neste campo a app "
+                                "não lê o `MT ABV` (só na SFC VIS): a linha é lida **como "
+                                "até à 7.0** (o nível pode ter sido lido como um valor). "
+                                "Confirma no texto do GAMET onde se aplica."))
+            continue
         if tipo == "duvida":
             av.append(("aviso", f"⚠️ **Área não reconhecida** em «`{t}`» — o `MT ABV` não "
                                 "foi lido: os valores ficam na **área da subentrada**, "

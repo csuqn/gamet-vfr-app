@@ -129,6 +129,9 @@ def analisar(eng, texto):
         if tipo == "duvida":
             r["alertas"].append(f"Área não reconhecida (MT ABV, fica na área da subentrada) "
                                 f"→ {campo}: {txt}")
+        elif tipo == "outro":
+            r["alertas"].append(f"MT ABV não interpretado (campo {campo}, lido como na 7.0) "
+                                f"→ {campo}: {txt}")
     for s, leitura in eng.subentradas_alargadas(texto):
         r["alertas"].append(f"Cardinal solto antes de BTN (área alargada a {leitura}) → {s}")
     # Mesma verificação do aviso do briefing (3.9): por subentrada, no motor.

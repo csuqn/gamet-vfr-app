@@ -17,6 +17,10 @@ linha ∩ as quadrículas de relevo (MEF, `_TERRAIN_MAX_FT`) ≥ o limiar, sem o
 (só se estiver escrito depois do "MT ABV") e com a janela da parte. Na dúvida,
 fica como na 7.0, com aviso.
 
+Só na SFC VIS (revisor do PR #70): o que vem depois tem de passar uma lista
+branca (valores de VIS, tempo presente, LCA, pontuação); noutro campo a linha
+fica exactamente como na 7.0, com o aviso "MT ABV não interpretado".
+
 Fora das quadrículas de montanha o valor do "MT ABV" deixa de contar: num texto
 hipotético "LAN 6000M MT ABV 035HFT AMSL 0200M" a 7.1 dá GO fora do relevo,
 onde a 7.0 dava NO-GO — **mais permissivo do que a 7.0 só fora do relevo, por
@@ -328,6 +332,9 @@ def test_analisar_py_sem_alertas(eng):
                        for a in alertas), (nome, alertas)
     t = _g("SFC VIS:LAN LCA 3000-5000M BR MT ABV XXXHFT AMSL 0200-5000M SN")
     assert any(a.startswith("Área não reconhecida (MT ABV") for a in analisar.analisar(eng, t)["alertas"])
+    t = _g("SIG CLD:LAN BKN 010/030HFT AGL MT ABV 035HFT AMSL OBSC")
+    assert any(a.startswith("MT ABV não interpretado (campo SIG CLD")
+               for a in analisar.analisar(eng, t)["alertas"])
 
 
 # ------------------------------------------------------- na dúvida, como na 7.0
@@ -352,8 +359,38 @@ DUVIDA = [
     "SFC VIS:LAN 3000M BR MT ABV 035HFT AMSL 0200M SN NW OF W00800",
     "SFC VIS:S OF N3800 LAN LCA 3000-5000M BR MT ABV 050HFT AMSL 0200M SN",  # intersecção vazia
     "SFC VIS:LAN LCA 3000-5000M BR MT ABV 080HFT AMSL 0200M SN",           # nenhuma quadrícula
+    # Lista branca da SFC VIS (revisor do PR #70): sem valor de VIS lido, ou com
+    # palavras que não são valor de VIS, tempo presente, LCA ou pontuação
+    "SFC VIS:LAN LCA 3000-5000M BR MT ABV 035HFT AMSL SN",
+    "SFC VIS:LAN LCA 3000-5000M BR MT ABV 035HFT AMSL OBSC",
+    "SFC VIS:LAN LCA 3000-5000M BR MT ABV 035HFT AMSL IN CLD",
+    "SFC VIS:LAN LCA 3000-5000M BR MT ABV 035HFT AMSL 0200M SN OBSC",
+    "SFC VIS:LAN LCA 3000-5000M BR MT ABV 035HFT AMSL OBSC 0200M SN",
+    "SFC VIS:LAN LCA 3000-5000M BR MT ABV 035HFT AMSL 0200M SN BKN 002HFT AGL",
+    "SFC VIS:LAN LCA 3000-5000M BR MT ABV 035HFT AMSL 0200M SN ISOL TS",
+    "SFC VIS:LAN LCA 3000-5000M BR MT ABV 035HFT AMSL 0050M SN",
+    "SFC VIS:LAN LCA 3000-5000M BR MT ABV 035HFT AMSL 0200M XYZ",
+]
+
+# Outros campos (revisor do PR #70): o MT ABV só é lido na SFC VIS. Os 4 da
+# tabela do revisor (SIG CLD: a 7.0 lia "035HFT AMSL" como base de 3500 ft
+# AMSL — NO-GO no relevo — e assim fica) e um por campo.
+OUTROS = [
+    "SIG CLD:LAN BKN 010/030HFT AGL MT ABV 035HFT AMSL OBSC",
+    "SIG CLD:LAN BKN 010/030HFT AGL MT ABV 035HFT AMSL IN CLD",
+    "SIG CLD:LAN BKN 010/030HFT AGL MT ABV 035HFT AMSL OBSC BKN 020/XXXHFT AGL",
+    "SIG CLD:LAN BKN 010/030HFT AGL MT ABV 035HFT AMSL ISOL TCU/CB 020/XXXHFT AGL",
+    "SIG CLD:LAN BKN 012-020/030HFT AGL MT ABV 035HFT AMSL BKN 002-005/010HFT AGL",
     "SIG CLD:LAN BKN 012-020/030HFT AGL MT ABV 035HFT 002HFT AGL",
-    "SIG CLD:S OF N3800 BKN 012HFT AGL MT ABV 060HFT AMSL BKN 002HFT AGL",  # vazia (CLD)
+    "SIG CLD:S OF N3800 BKN 012HFT AGL MT ABV 060HFT AMSL BKN 002HFT AGL",
+    "ICE:LAN MOD ABV FL070 MT ABV 035HFT AMSL SEV ABV FL050",
+    "TURB:LAN MOD SFC/FL050 MT ABV 035HFT AMSL SEV SFC/FL080",
+    "SFC WSPD:LAN 25KT MT ABV 035HFT AMSL 35KT",
+    "SFC WIND:LAN 250/25KT MT ABV 035HFT AMSL 250/35KT",
+    "MTW:LAN MOD FL050 MT ABV 035HFT AMSL SEV FL080",
+    "SIGWX:LAN ISOL TS MT ABV 035HFT AMSL OCNL TS",
+    "MT OBSC:LAN BY CLD MT ABV 035HFT AMSL",
+    "SFC VIS:LAN 6000M SIG CLD:LAN BKN 012HFT AGL MT ABV 035HFT AMSL BKN 002HFT AGL",
 ]
 
 
@@ -373,10 +410,29 @@ def test_na_duvida_como_na_7_0_com_aviso(eng, eng70, corpo):
         eng70.analisar_gamet(t, "manual")["avisos"]
 
 
-def test_mt_abv_sem_valor_lido_avisa_campo_nao_interpretado(eng):
-    t = _g("SFC VIS:LAN LCA 3000-5000M BR MT ABV 035HFT AMSL SN")
-    assert [b.value for b in eng.parse_gamet(t)[0]] == [3000]
-    assert eng.campos_nao_interpretados(t) == ["SFC VIS: MT ABV 035HFT AMSL SN"]
+@pytest.mark.parametrize("corpo", OUTROS)
+def test_outros_campos_como_na_7_0_com_aviso(eng, eng70, corpo):
+    t = _g(corpo)
+    assert _assin(eng.parse_gamet(t)[0]) == _assin(eng70.parse_gamet(t)[0])
+    assert _decisoes(eng, t) == _decisoes(eng70, t)
+    assert not any(getattr(b, "relevo", 0) for b in eng.parse_gamet(t)[0])
+    r = eng.analisar_gamet(t, "manual")
+    av = [(tp, md) for tp, md in r["avisos"] if "MT ABV não interpretado" in md]
+    assert len(av) == 1, r["avisos"]
+    assert eng.titulo_aviso(av[0][1]) == "MT ABV não interpretado"
+    assert eng.etiqueta_aviso(*av[0]) == "verificar"
+    assert [a for a in r["avisos"] if "MT ABV não interpretado" not in a[1]] == \
+        eng70.analisar_gamet(t, "manual")["avisos"]
+    assert eng.campos_nao_interpretados(t) == eng70.campos_nao_interpretados(t)
+
+
+def test_sig_cld_tabela_do_revisor_continua_no_go_no_relevo(eng):
+    """Os casos do revisor do PR #70: a 7.0 dava NO-GO em 29 pontos (a base de
+    3500 ft AMSL lida no nível do MT ABV); a 7.1 também."""
+    for corpo in OUTROS[:4]:
+        d = _decisoes(eng, _g(corpo))
+        assert sum(v == "NO-GO" for v in d.values()) >= 29, corpo
+        assert d["Seia (LPSE)"] == "NO-GO", corpo
 
 
 def test_mt_obsc_nao_muda(eng, eng70):
@@ -422,35 +478,6 @@ def test_mais_permissivo_que_a_7_0_so_fora_do_relevo(eng, eng70):
     assert n_perm > 10
 
 
-def test_sig_cld_com_base(eng, eng70):
-    """Noutro campo: a base depois do MT ABV só no relevo. O nível do MT ABV
-    não é base de nuvem (a 7.0 lia "035HFT AMSL" como base de 3500 ft AMSL)."""
-    t = _g("SIG CLD:LAN BKN 012-020/030HFT AGL MT ABV 035HFT AMSL BKN 002-005/010HFT AGL")
-    blocos = eng.parse_gamet(t)[0]
-    assert sorted((b.phenomenon, b.value, b.relevo) for b in blocos) == [
-        ("BASE_AGL", 200, 3500), ("BASE_AGL", 1200, 0)]
-    assert ("BASE_AMSL", 3500) in [(b.phenomenon, b.value) for b in eng70.parse_gamet(t)[0]]
-    mt = next(b for b in blocos if b.relevo)
-    esperada = _area_vis(eng, None, "LAN").intersection(_montanha(eng, 3500))
-    assert mt.polygon.symmetric_difference(esperada).area < 1e-6
-    d = _decisoes(eng, t)
-    for k, (la, lo) in eng.AERODROMES.items():
-        dentro = (eng._terrain_elevation_ft(lo, la) >= 3500
-                  and eng.surface_polygon("LAN").contains(Point(lo, la)))
-        assert d[k] == ("NO-GO" if dentro else "GO"), k
-    assert eng.campos_nao_interpretados(t) == []
-
-
-def test_sig_cld_sem_a_base_fantasma_da_7_0(eng, eng70):
-    """Sem caso real: no SIG CLD a 7.0 lia o nível do MT ABV como base de 3500 ft
-    AMSL (NO-GO nas quadrículas com MEF > 3000 ft). A 7.1 não o lê como base —
-    aqui fica mais permissiva também no relevo (documentado no CLAUDE.md)."""
-    t = _g("SIG CLD:LAN BKN 012HFT AGL MT ABV 035HFT AMSL BKN 020HFT AGL")
-    novo, velho = _decisoes(eng, t), _decisoes(eng70, t)
-    assert novo["Seia (LPSE)"] == "GO" and velho["Seia (LPSE)"] == "NO-GO"
-    assert all(GRAV[novo[k]] <= GRAV[velho[k]] for k in novo)
-
-
 def test_em_pes_e_outros_limiares(eng):
     for txt, lim in (("3500FT", 3500), ("045HFT", 4500), ("050HFT", 5000), ("060HFT", 6000)):
         t = _g(f"SFC VIS:LAN LCA 3000-5000M BR MT ABV {txt} AMSL 0200-5000M SN")
@@ -486,13 +513,12 @@ def test_janela(eng):
 def test_superficie_a_meio_da_linha_antes_do_mt(eng):
     """Com uma superfície a meio da linha (4.7.6), o MT ABV fica com a superfície
     da parte de onde vem."""
-    t = _g("SIG CLD:LCA BKN 006-008/012HFT AGL MAR AND COT ISOL TCU/CB 020HFT AGL "
-           "MT ABV 035HFT AMSL BKN 002HFT AGL")
-    mt = [b for b in _parte_mt(eng, t) if b.phenomenon == "BASE_AGL"]
-    assert [(b.value, b.surface) for b in mt] == [(200, "COT/MAR")]
+    t = _g("SFC VIS:LCA 3000M BR MAR AND COT 2000M RA MT ABV 035HFT AMSL 0200M SN")
+    mt = _parte_mt(eng, t)
+    assert [(b.value, b.surface, b.qualifier) for b in mt] == [(200, "COT/MAR", "")]
     esperada = (eng.FIR_POLYGON.intersection(eng.surface_polygon("COT/MAR"))
                 .intersection(_montanha(eng, 3500)))
-    assert mt[0].polygon.buffer(1e-9).contains(esperada)
+    assert mt[0].polygon.symmetric_difference(esperada).area < 1e-6
 
 
 def test_seccao_ii_e_airmet_iguais_a_7_0(eng, eng70):
@@ -519,40 +545,71 @@ LIMS = ["030HFT", "035HFT", "045HFT", "050HFT", "3500FT", "060HFT", "070HFT"]
 VIS = ["0200", "0800", "1200", "2000", "3000", "4000", "6000"]
 
 
+OUTROS_GER = {
+    "SIG CLD": ("BKN 010/030HFT AGL", ["BKN 002/010HFT AGL", "OBSC", "ISOL TCU/CB 020/XXXHFT AGL",
+                                       "BKN 020/XXXHFT AGL", "IN CLD"]),
+    "ICE": ("MOD ABV FL070", ["SEV ABV FL050", "SEV FL030/FL080", "MOD"]),
+    "TURB": ("MOD SFC/FL050", ["SEV SFC/FL080", "MOD ABV FL060"]),
+    "SFC WSPD": ("25KT", ["35KT", "28KT"]),
+    "MTW": ("MOD FL050", ["SEV FL080", "MOD"]),
+    "SIGWX": ("ISOL TS", ["OCNL TS", "EMBD TS", "SQL"]),
+}
+SUFIXOS = ["", "", "", " OBSC", " BKN 002HFT AGL", " SN/FG", " LCA", " IN CLD"]
+
+
 def _corpo(rng):
     q, s = rng.choice(QUALS), rng.choice(SUPS)
+    lim = rng.choice(LIMS)
+    pre = " ".join(x for x in (q, s) if x)
+    if rng.random() < 0.3:
+        campo = rng.choice(sorted(OUTROS_GER))
+        v1, vs = OUTROS_GER[campo]
+        corpo = f"{campo}:" + " ".join(x for x in (pre, v1) if x)
+        return campo, corpo, f" MT ABV {lim} AMSL {rng.choice(vs)}"
     lca1 = rng.choice(["", "LCA "])
     lca2 = rng.choice(["", "", "LCA "])
     v1, v2 = rng.choice(VIS), rng.choice(VIS)
-    lim = rng.choice(LIMS)
-    corpo = "SFC VIS:" + " ".join(x for x in (q, s, f"{lca1}{v1}M BR") if x)
-    return corpo, f" MT ABV {lim} AMSL {lca2}{v2}M SN"
+    corpo = "SFC VIS:" + " ".join(x for x in (pre, f"{lca1}{v1}M BR") if x)
+    return "SFC VIS", corpo, f" MT ABV {lim} AMSL {lca2}{v2}M SN{rng.choice(SUFIXOS)}"
 
 
 def test_propriedade_nunca_mais_permissivo_no_relevo(eng, eng70):
-    """Em linhas geradas: nas quadrículas com MEF ≥ limiar nunca mais permissivo
-    do que a 7.0; fora delas, igual à 7.0 sem a parte do MT ABV (o valor não
-    conta — leitura literal); em dúvida, igual à 7.0 em todo o lado."""
+    """Em linhas geradas: fora da SFC VIS, exactamente a 7.0 (blocos e decisões).
+    Na SFC VIS lida: nas quadrículas com MEF ≥ limiar nunca mais permissivo do
+    que a 7.0; fora delas, igual à 7.0 sem a parte do MT ABV (o valor não conta —
+    a única leitura mais permissiva, declarada); em dúvida, igual à 7.0."""
     rng = random.Random(71)
     pts = [("g", p) for p in GRELHA] + list(eng.AERODROMES.items())
     pts = [(f"{k}{i}", p) for i, (k, p) in enumerate(pts)
            if eng.FIR_POLYGON.contains(Point(p[1], p[0]))]
-    n_ok = 0
-    for _ in range(40):
-        pre, mt = _corpo(rng)
+    n_ok = n_outro = n_duv = 0
+    for _ in range(60):
+        campo, pre, mt = _corpo(rng)
         t, t_sem = _g(pre + mt), _g(pre)
         lim = int(re.search(r"ABV (\d+)", mt).group(1))
         lim = lim * 100 if "HFT" in mt else lim
-        lido = [x for x in eng.leituras_relevo(t) if x[0] == "ok"]
+        leit = eng.leituras_relevo(t)
+        lido = [x for x in leit if x[0] == "ok"]
         novo, velho = _decisoes(eng, t, pts), _decisoes(eng70, t, pts)
-        sem = _decisoes(eng70, t_sem, pts) if lido else velho
+        if campo != "SFC VIS":
+            assert [x[0] for x in leit] == ["outro"], t
+            assert _assin(eng.parse_gamet(t)[0]) == _assin(eng70.parse_gamet(t)[0]), t
+            assert novo == velho, t
+            n_outro += 1
+            continue
+        if not lido:
+            assert [x[0] for x in leit] == ["duvida"], t
+            assert novo == velho, t
+            n_duv += 1
+            continue
+        sem = _decisoes(eng70, t_sem, pts)
         for k, (la, lo) in pts:
             if eng._terrain_elevation_ft(lo, la) >= lim:
                 assert GRAV[novo[k]] >= GRAV[velho[k]], (t, k, novo[k], velho[k])
             else:
                 assert novo[k] == sem[k], (t, k, novo[k], sem[k])
-        n_ok += bool(lido)
-    assert n_ok > 20
+        n_ok += 1
+    assert n_ok > 15 and n_outro > 10 and n_duv > 5, (n_ok, n_outro, n_duv)
 
 
 # ------------------------------------------------------------------- arquivo
