@@ -34,7 +34,7 @@ from datetime import datetime, timezone, timedelta
 # CONFIG
 # -------------------------------------------------
 
-APP_VERSION = "7.0"
+APP_VERSION = "7.1"
 
 st.set_page_config(page_title="LPPC GAMET – VFR", page_icon="✈️", layout="wide")
 
@@ -1082,6 +1082,10 @@ class MetBlock:
     # (5.1.5) Texto completo do SIGMET (só nos blocos "SIGMET"), para o briefing
     # dizer o que ele avisa. Fora da igualdade.
     texto: str = field(default="", repr=False, compare=False)
+    # (7.1) Valor de uma parte "MT ABV nnnHFT AMSL …": a área foi recortada às
+    # quadrículas de relevo com MEF ≥ este valor (ft). 0 = não. Para a nota de
+    # alcance e o aviso; fora do repr e da igualdade.
+    relevo: int = field(default=0, repr=False, compare=False)
 
 # -------------------------------------------------
 # NORMALIZE
@@ -1855,6 +1859,17 @@ def subentradas_sem_area(text):
     return sem_area
 
 
+def leituras_relevo(text):
+    """
+    (7.1) Leituras de "MT ABV nnnHFT AMSL …" na Secção I: lista de
+    (tipo, campo, texto, limiar) — tipo "ok" (o que vem depois só nas
+    quadrículas de relevo ≥ limiar) ou "duvida" (fica como na 7.0).
+    """
+    relevo = []
+    parse_gamet(text, relevo=relevo)
+    return relevo
+
+
 def subentradas_alargadas(text):
     """
     Subentradas com um cardinal solto antes de BTN ("S BTN N3720 - N3800"),
@@ -2082,6 +2097,71 @@ def _cortes_superficie(linha, cortes_janela=()):
     return cortes
 
 
+# "MT ABV nnnHFT AMSL" a meio da linha (7.1, decisão do Duarte a 25-nov-2026;
+# GAMETs reais 241500, 242100, 250300 e 250900 de 24/25-nov-2026: "SFC VIS:LAN
+# LCA 3000-5000M BR/RA/DZ MT ABV 035HFT AMSL 0200-5000M SN"). Até à 7.0 os dois
+# valores ficavam na área da subentrada, ambos com o LCA (VIS 200 m LCA →
+# MARGINAL em toda a terra) e a montanha perdia-se. Agora o "MT ABV …" abre uma
+# parte nova, numa linha à parte: o que vem antes fica como estava; o que vem
+# depois fica com a área da subentrada ∩ a superfície da linha ∩ as quadrículas
+# de relevo (MEF) ≥ o limiar, sem o LCA (só se estiver escrito depois) e com a
+# janela da parte. Na dúvida fica como na 7.0, com aviso.
+_MT_ABV_RE = re.compile(r"(?<![\w/])MT\s+ABV\b")
+_MT_ABV_OK_RE = re.compile(r"MT\s+ABV\s+(?:(\d{3})HFT|(\d{4,5})FT)\s+AMSL\b")
+_SUP_SOLTA_RE = re.compile(r"(?<![\w/\-])(?:MAR|LAN|COT)\b")
+
+
+def _corte_mt(linha):
+    """
+    (7.1) Onde partir a linha num "MT ABV nnnHFT AMSL" (ou "nnnnFT AMSL") que
+    vem depois de conteúdo do campo e é seguido de valores: (posição, limiar em
+    pés). None se a linha não tem "MT ABV"; "duvida" se tem e não se lê com
+    segurança — limiar ilegível ou sem AMSL, nada a seguir, mais de um "MT ABV"
+    na linha, no início do campo/subentrada/parte (só área, superfície, LCA ou
+    janela antes, como uma área ilegível), ou com janela, superfície ou algo
+    com ar de área depois (a linha fica como na 7.0, com aviso).
+    """
+    ms = list(_MT_ABV_RE.finditer(linha))
+    if not ms:
+        return None
+    if len(ms) > 1:
+        return "duvida"
+    m = ms[0]
+    mo = _MT_ABV_OK_RE.match(linha, m.start())
+    if not mo:
+        return "duvida"
+    limiar = int(mo.group(1)) * 100 if mo.group(1) else int(mo.group(2))
+    resto = linha[mo.end():]
+    if (_SEM_CONTEUDO_RE.fullmatch(resto) or _SUP_SOLTA_RE.search(resto)
+            or _AREA_ALGURES_RE.search(resto) or _DIAGONAL_RE.search(resto)
+            or any(not _NAO_JANELA_RE.match(resto, j.end())
+                   for j in re.finditer(r"(?<!\S)\d{2}/\d{2}(?=\s|$)", resto))):
+        return "duvida"
+    # O "MT ABV" tem de vir depois de conteúdo do campo, dentro da sua parte
+    # (desde o início da linha, ou a última janela/superfície que a parte)
+    pos_j = [c[0] for c in _cortes_janela(linha)]
+    lim = [0] + [x for x in pos_j + _cortes_superficie(linha, pos_j) if x < m.start()]
+    ini = max(lim)
+    antes = linha[ini:m.start()]
+    if ini == 0:
+        mc = _CAMPO_LINHA_RE.match(antes)
+        if mc:
+            antes = antes[mc.end():]
+    if all(_SO_AREA_TOK_RE.fullmatch(t) or not re.search(r"[A-Z0-9]", t)
+           for t in re.findall(r"[^\s:,;.=]+", antes)):
+        return "duvida"
+    return m.start(), limiar
+
+
+def _relevo_acima(limiar):
+    """(7.1) Quadrículas de relevo inteiras com MEF ≥ `limiar` (ft), dentro da
+    área do GAMET (sem ajuste à margem do MEF). Vazio se nenhuma."""
+    caixas = [_tile_box(k) for k, v in _TERRAIN_MAX_FT.items() if v >= limiar]
+    if not caixas:
+        return Polygon()
+    return _clean_poly(unary_union(caixas).intersection(FIR_POLYGON))
+
+
 def _domina(n, v):
     """O bloco `n` (4.3) é pelo menos tão severo como o `v` (4.2): mesmo
     fenómeno, valor igual ou pior, LCA só se `v` também o era, área que
@@ -2113,7 +2193,14 @@ def _domina(n, v):
 
 
 def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=False,
-                _areas42=None, _modo475=False, _modo476=False, _cb_solto=True):
+                _areas42=None, _modo475=False, _modo476=False, _cb_solto=True,
+                relevo=None, _mt=True):
+    # relevo (7.1): lista que recebe as leituras de "MT ABV nnnHFT AMSL" —
+    # ("ok", campo, texto, limiar, área) ou ("duvida", campo, texto, None, None).
+    # _mt (7.1): False na Secção II e no AIRMET sintético, que ficam como na 7.0.
+    # As leituras das versões anteriores (_modo42/_modo475/_modo476) partem as
+    # linhas da mesma forma (os números das linhas da garantia têm de bater
+    # certo) e dão à parte do "MT ABV" a mesma área: a garantia não a anula.
     # _modo42 / _areas42 (4.3, uso interno): leitura da 4.2 (só a partição da
     # 4.1), que regista a área de cada parte em _areas42 — a garantia de que
     # a leitura nova nunca é mais permissiva (ver "Janela a meio da linha").
@@ -2230,6 +2317,24 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
             lines[i] = lines[i][:mj.start()].rstrip()
             lines[i + 1] = f"{mj.group(1)} {lines[i + 1]}"
 
+    # (7.1) "MT ABV nnnHFT AMSL" a meio da linha: a parte a seguir passa para
+    # uma linha à parte (continuação da subentrada: herda a área e a janela),
+    # com o limiar em mt_linhas. Na dúvida a linha fica inteira (como na 7.0)
+    # e vai para mt_duvida (aviso).
+    mt_linhas, mt_duvida = {}, set()
+    if _mt:
+        novas = []
+        for l in lines:
+            c = _corte_mt(l)
+            if c == "duvida":
+                mt_duvida.add(len(novas))
+            elif c is not None and l[:c[0]].strip():
+                novas.append(l[:c[0]].rstrip())
+                mt_linhas[len(novas)] = c[1]
+                l = l[c[0]:]
+            novas.append(l)
+        lines = novas
+
     # Leitura da 4.2: "HH/HH MAR|LAN|COT" no meio da linha abre uma subentrada
     # nova (4.1). Cada parte leva a linha inteira (a leitura da 4.0), para que
     # a sua área nunca fique menor do que a que a 4.0 dava à linha toda.
@@ -2293,12 +2398,12 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
             # seus valores, e um bloco da 4.7.5 sem bloco novo que o domine
             # entra tal como a 4.7.5 o lia.
             blocos42 = parse_gamet(text, _modo475=True, _areas42=areas42,
-                                   _modo476=_modo476, _cb_solto=False)[0]
+                                   _modo476=_modo476, _cb_solto=False, _mt=_mt)[0]
         elif [(it[3], it[4], it[6]) for it in itens] != [(it[3], it[4], "") for it in itens42] \
                 or any(it[1] for it in itens42):
             # Há linhas lidas de outra forma: a leitura da 4.2, para a garantia
             blocos42 = parse_gamet(text, _modo42=True, _areas42=areas42,
-                                   _modo476=_modo476, _cb_solto=False)[0]
+                                   _modo476=_modo476, _cb_solto=False, _mt=_mt)[0]
         else:
             itens = itens42         # igual à 4.2, sem custo
 
@@ -2363,6 +2468,8 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
 
     area_40, sup_40 = None, ""
     sup_ant = (None, "")            # (4.3) (nº da linha, superfície) da parte anterior
+    qual_ant = (None, "")           # (7.1) (nº da linha, LCA) da parte anterior
+    mt_avisadas = set()             # (7.1) linhas com "MT ABV" em dúvida já avisadas
 
     # (4.3) Partes de cada linha: nº de blocos, descartada, texto. Uma linha
     # partida com uma parte sem fenómeno ("09/11 0800M FG 11/15 BR") não é
@@ -2381,6 +2488,12 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
         for b in blocks[item_atual["n0"]:]:
             b.parte = item_atual["txt"]
             b.linha = item_atual.get("linha", False)
+            if item_atual.get("relevo") and not b.cb_solto:
+                b.relevo = item_atual["relevo"]
+        # (7.1) Parte "MT ABV …" sem nenhum valor lido: nunca em silêncio
+        if (item_atual.get("relevo") and not item_atual["nb"] and not item_atual["desc"]
+                and sem_fenomeno is not None):
+            avisos_pend.append((item_atual["mt_txt"], None))
 
     def _fim_linha(i):
         nonlocal current_ambigua
@@ -2473,6 +2586,13 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
 
         if state == "IDLE":
             continue
+
+        # (7.1) Parte "MT ABV nnnHFT AMSL …" (linha à parte) e linhas em dúvida
+        mt_lim = mt_linhas.get(n_linha) if k_parte == 0 else None
+        if (n_linha in mt_duvida and n_linha not in mt_avisadas and relevo is not None
+                and _MT_ABV_RE.search(content)):
+            mt_avisadas.add(n_linha)
+            relevo.append(("duvida", campo_txt, content475, None))
 
         # Linha partida por "HH/HH MAR|LAN|COT" (4.1): a área da 4.0 para a
         # linha inteira, calculada antes de a 1.ª parte mexer na área.
@@ -2588,7 +2708,13 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
         surface = "/".join(superficies)
         if so_valores and not surface and sup_ant[0] == n_linha:
             surface = sup_ant[1]
+        if mt_lim is not None:
+            # (7.1) A superfície e o LCA da parte de onde a linha foi cortada
+            # (o LCA só serve se a parte ficar como na 7.0, ver abaixo)
+            surface = sup_ant[1] if sup_ant[0] == n_linha - 1 else ""
+            mt_q = qual_ant[1] if qual_ant[0] == n_linha - 1 else ""
         sup_ant = (n_linha, surface)
+        qual_ant = (n_linha, qualifier)
 
         # Recortar a área pelo qualificador de superfície. Antes isto era
         # apenas anotado no briefing, por falta de linha de costa; com a
@@ -2598,6 +2724,33 @@ def parse_gamet(text, sem_area=None, alargadas=None, sem_fenomeno=None, _modo42=
             sp = surface_polygon(surface)
             if sp is not None:
                 poly = _clean_poly(poly.intersection(sp))
+
+        # (7.1) "MT ABV nnnHFT AMSL …": a área da subentrada ∩ superfície ∩ as
+        # quadrículas de relevo ≥ limiar; o LCA só se vier escrito depois (o da
+        # linha qualifica o 1.º valor: leitura conservadora). O nível do MT ABV
+        # não é valor (no SIG CLD a 7.0 lia-o como base AMSL). Intersecção vazia
+        # → como na 7.0 (a área, o LCA da linha e o texto todo), com aviso.
+        if mt_lim is not None and not poly.is_empty:
+            p_mt = _clean_poly(poly.intersection(_relevo_acima(mt_lim)))
+            if p_mt.is_empty:
+                qualifier = "LCA" if (mt_q == "LCA" or qualifier == "LCA") else ""
+                if qualifier:
+                    # Na 7.0 o LCA de qualquer ponto da parte valia para ela toda
+                    po = partes_por_linha.get(n_linha - 1)
+                    if po:
+                        for b in blocks[po[-1]["n0"]:po[-1]["n0"] + po[-1]["nb"]]:
+                            b.qualifier = "LCA"
+                if relevo is not None:
+                    relevo.append(("duvida", campo_txt, content, None))
+                mt_lim = None
+            else:
+                poly = p_mt
+                content = content[_MT_ABV_OK_RE.match(content).end():].strip()
+                qualifier = "LCA" if re.search(r"\bLCA\b", content) else ""
+                item_atual["relevo"] = mt_lim
+                item_atual["mt_txt"] = f"{campo_txt}: {line}"
+                if relevo is not None:
+                    relevo.append(("ok", campo_txt, line, mt_lim))
 
         # Parte de uma linha partida por "HH/HH MAR|LAN|COT" (4.1): nunca com
         # menos área do que a 4.0 dava à linha inteira (ex.: "09/11 MAR …
@@ -3368,6 +3521,10 @@ def compute_dynamic_regions(blocks):
                           f"(área já recortada)")
             if getattr(b, "window", ""):
                 notas.add(f"{rotulo}: apenas {b.window}")
+            if getattr(b, "relevo", 0):
+                # (7.1) "MT ABV nnnHFT AMSL …": só nas quadrículas de relevo
+                notas.add(f"{rotulo}: apenas junto ao relevo com MEF ≥ {b.relevo} ft "
+                          "(MT ABV no GAMET; junto às serras, não necessariamente na pista)")
 
         dec_result = decision(events)
         if any(por_origem.keys() - {""}):
@@ -4586,7 +4743,8 @@ def ler_airmet(texto, ref=None):
             # Base de 1–2 algarismos antes da barra (Anexo 3: "OVC CLD
             # 0/1000FT"). Só no AIRMET — no GAMET podia ser uma janela "06/".
             cont = re.sub(r"(?<![\d/])(\d{1,2})(?=\s*/)", lambda x: x.group(1).zfill(3), cont)
-        blocos_c, *_ = parse_gamet(f"SECN I {campo}: {' '.join(cont.split())}")
+        # (7.1) Sem os cortes por "MT ABV": o AIRMET fica como na 7.0
+        blocos_c, *_ = parse_gamet(f"SECN I {campo}: {' '.join(cont.split())}", _mt=False)
         # (7.0, revisor do PR #66) O GO COND. é só para o GAMET e os SIGMETs
         # (decisão do Duarte): um AIRMET com TURB/ICE/MTW SEV fica NO-GO como
         # na 6.1 — a camada deixa de ser só "ABV FLnnn".
@@ -5310,7 +5468,8 @@ def nuvens_baixas_secn2(texto):
     cab = partes[0].split("SECN I", 1)[0]
     sem_area = []
     texto_cld = f"{cab} SECN I SIG CLD:{conteudo} SECN II"
-    blocos, *_ = parse_gamet(texto_cld, sem_area, _cb_solto=False)
+    # (7.1) Sem os cortes por "MT ABV": a nota fica como na 7.0 (nunca perde bases)
+    blocos, *_ = parse_gamet(texto_cld, sem_area, _cb_solto=False, _mt=False)
     # (4.8, revisor do PR #45) Garantia da nota: com "LINE" no campo, cada
     # base fica com a área da 4.8 unida com a que a 4.7.6 dava à mesma base
     # (fenómeno e valor), e uma base da 4.7.6 sem nenhuma igual na 4.8 entra
@@ -5322,7 +5481,7 @@ def nuvens_baixas_secn2(texto):
     # de "S OF LINE … FEW/SCT SC/CU …" pode valer para toda a FIR — a nota
     # mantém LPBG/LPSE/LP66. A Secção I não muda.
     if _LINE_RE.search(conteudo):
-        antigos = [v for v in parse_gamet(texto_cld, _modo476=True, _cb_solto=False)[0]
+        antigos = [v for v in parse_gamet(texto_cld, _modo476=True, _cb_solto=False, _mt=False)[0]
                    if v.phenomenon in ("BASE_AGL", "BASE_AMSL")]
         novos = []
         for b in blocos:
@@ -5479,6 +5638,41 @@ def resto_par(r, regiao=None, ponto=None):
     return (resto["janela"], dec) if dec else None
 
 
+def avisos_relevo(relevo, blocos):
+    """
+    (7.1) Avisos das leituras de "MT ABV nnnHFT AMSL …" (`parse_gamet(…,
+    relevo=…)`). Lido: tipo "aviso" — muda onde o valor conta, por isso
+    "entra na decisão" (etiqueta "conta para a decisão"), com os aeródromos
+    abrangidos e a ressalva da nota AMSL da 4.4 (o MEF é o relevo mais alto da
+    quadrícula, não a pista). Em dúvida: "Área não reconhecida" — o valor fica
+    na área da subentrada, como na 7.0.
+    """
+    av = []
+    for tipo, campo, txt, limiar in relevo:
+        t = f"{campo}: {txt}".replace("`", "")
+        if tipo == "duvida":
+            av.append(("aviso", f"⚠️ **Área não reconhecida** em «`{t}`» — o `MT ABV` não "
+                                "foi lido: os valores ficam na **área da subentrada**, "
+                                "como até à 7.0. Confirma no texto do GAMET onde se "
+                                "aplica."))
+            continue
+        polys = [b.polygon for b in blocos if b.relevo == limiar and b.parte == txt]
+        area = unary_union(polys) if polys else Polygon()
+        cod = []
+        for nome, (la, lo) in AERODROMES.items():
+            if not area.is_empty and area.buffer(1e-9).contains(Point(lo, la)):
+                c = re.search(r"\(([A-Z0-9]{4})\)", nome)
+                cod.append(c.group(1) if c else nome)
+        alvo = (f"aeródromos abrangidos: {', '.join(cod)}" if cod
+                else "nenhum dos aeródromos da lista")
+        av.append(("aviso", f"⛰️ **Valor só junto ao relevo** — «`{t}`»: o que vem depois "
+                            f"do `MT ABV` **entra na decisão** só nas quadrículas com "
+                            f"relevo mais alto (MEF) ≥ **{limiar} ft**, sem o LCA da "
+                            "linha — junto às serras, não necessariamente na pista; "
+                            f"{alvo}. O resto da linha vale como escrito."))
+    return av
+
+
 def analisar_gamet(texto, fonte="manual", boletins=None, boletins_at=None,
                    boletins_fonte="", indice=None, entrada=None, agora=None,
                    boletins_arquivo=None):
@@ -5507,8 +5701,9 @@ def analisar_gamet(texto, fonte="manual", boletins=None, boletins_at=None,
             av.append(("aviso", f"⏱️ {r['validity_label']} — ⚠️ **FORA DO PERÍODO DE "
                                 "VALIDADE**: os dados podem estar desactualizados."))
 
-    sem_area, alargadas, sem_fenomeno = [], [], []
-    blocks, fz, qnh, wind = parse_gamet(texto, sem_area, alargadas, sem_fenomeno)
+    sem_area, alargadas, sem_fenomeno, relevo = [], [], [], []
+    blocks, fz, qnh, wind = parse_gamet(texto, sem_area, alargadas, sem_fenomeno,
+                                        relevo=relevo)
     has_sigmet, sigmet_text = extract_sigmet_applicable(texto)
     # Falhar em voz alta (3.9, pedido do Duarte a 21-out-2026): subentrada da
     # Secção I com conteúdo que não gerou nenhum fenómeno — quase sempre uma
@@ -5539,6 +5734,7 @@ def analisar_gamet(texto, fonte="manual", boletins=None, boletins_at=None,
         av.append(("aviso", f"⚠️ **Área alargada** em «`{s.replace('`', '')}`» — cardinal "
                             f"solto antes de BTN: lido como **{leitura}** (inclui a faixa "
                             "BTN). Confirma no texto do GAMET onde se aplica."))
+    av.extend(avisos_relevo(relevo, blocks))
 
     if fonte == "arquivo_hist":
         av.append(("aviso", "📚 **GAMET DO ARQUIVO — não é o GAMET actual.** Serve para rever "

@@ -225,6 +225,10 @@ Em cada zona, a app aplica estas regras. Fica a pior decisão que se aplicar.
 - **Na dúvida, a leitura conservadora.** Errar para o lado pessimista é
   incómodo; errar para o lado optimista é perigoso. Quando há vários valores
   numa zona, conta o pior (visibilidade e base mínimas).
+- **Montanha acima de um nível** (`MT ABV 035HFT AMSL 0200-5000M SN`, desde a
+  7.1): o valor que vem depois conta só nas quadrículas de relevo (MEF) com
+  3500 ft ou mais — junto às serras, não necessariamente na pista —, e a app
+  avisa-o com os aeródromos abrangidos.
 - **Bases em AMSL** são convertidas para AGL contra a **elevação máxima** do
   terreno na zona (MEF do SkyDemon por quadrícula de 1° × 30'), ou seja, a
   pior situação que se encontra lá.
@@ -298,7 +302,7 @@ Algarve não afecta Lisboa.
 
 ## 10. Qualidade e testes
 
-- **2755 testes automáticos** cobrem a leitura do texto, a geometria, as
+- **2815 testes automáticos** cobrem a leitura do texto, a geometria, as
   decisões, os dados aeronáuticos e a app completa. Cada erro alguma vez
   encontrado tem um teste que impede que volte a aparecer.
 - **Verificação cruzada:** em centenas de GAMETs gerados, a decisão de cada
@@ -318,7 +322,7 @@ Algarve não afecta Lisboa.
 pip install -r requirements.txt -r requirements-dev.txt
 streamlit run app.py               # a app principal (Streamlit)
 cd nicegui_app && python main.py   # a versão de reserva (NiceGUI), http://localhost:8080
-python3 -m pytest                  # os testes (2755)
+python3 -m pytest                  # os testes (2815)
 ```
 
 | Ficheiro / pasta | Conteúdo |

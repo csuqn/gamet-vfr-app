@@ -632,3 +632,31 @@ def cb_49(eng, texto):
     if not hasattr(eng, "_CB_GRUPO_RE"):
         return False
     return any(getattr(b, "cb_solto", False) for b in eng.parse_gamet(texto)[0])
+
+
+# 7.1: "MT ABV nnnHFT AMSL" a meio da linha abre uma parte nova, só nas
+# quadrículas de relevo ≥ limiar (decisão do Duarte a 25-nov-2026; GAMETs reais
+# 241500, 242100, 250300 e 250900 de 24/25-nov-2026). Os módulos que comparam
+# com motores fixos anteriores (os de `_MODULOS_SEM_70`) verificam OUTRAS
+# mudanças: correm com a leitura DESLIGADA (`_corte_mt` nunca parte = a leitura
+# da 7.0). A leitura nova é verificada contra a 7.0 em test_v71.py (no arquivo a
+# 25-nov-2026 mudam só os 4 GAMETs com "MT ABV" na Secção I — `mt_71`; conjunto
+# fixo em `test_v71.test_arquivo_conjunto_fixo`).
+@pytest.fixture(autouse=True)
+def _regra_71_desligada(request, monkeypatch):
+    if request.module.__name__.rsplit(".", 1)[-1] in _MODULOS_SEM_70:
+        motores = [_motor_actual()]
+        if "eng" in request.fixturenames:
+            motores.append(request.getfixturevalue("eng"))
+        for m in motores:
+            if hasattr(m, "_corte_mt"):
+                monkeypatch.setattr(m, "_corte_mt", lambda linha: None)
+    yield
+
+
+_MT_71_RE = re.compile(r"\bMT\s+ABV\b")
+
+
+def mt_71(texto):
+    """True se a Secção I do GAMET tem "MT ABV" (a 7.1 pode lê-lo de outra forma)."""
+    return bool(_MT_71_RE.search(re.split(r"SECN\s+II", texto.upper(), maxsplit=1)[0]))
