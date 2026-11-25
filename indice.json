@@ -1168,6 +1168,13 @@
    "inicio": "2026-11-24T21:00Z",
    "fim": "2026-11-25T03:00Z",
    "tipo": "GAMET"
+  },
+  {
+   "ficheiro": "gamets/2026/11/20261125T0241Z_250300-250900_98469ed44c.txt",
+   "recolhido": "2026-11-25T02:41Z",
+   "inicio": "2026-11-25T03:00Z",
+   "fim": "2026-11-25T09:00Z",
+   "tipo": "GAMET"
   }
  ],
  "sigmets": [
@@ -1835,6 +1842,13 @@
    "inicio": "2026-11-24T11:00Z",
    "fim": "2026-11-24T14:00Z",
    "texto": "LPPC SIGMET I02 VALID 241100/241400 LPPT- LPPC LISBOA FIR SEV ICE FCST N OF N3940 AND E OF W00745 FL070/200 MOV E 15KT WKN"
+  },
+  {
+   "ficheiro": "sigmets/2026/11/20261125T0241Z_SIGMETU01_250300-250700_86e646ce2b.txt",
+   "recolhido": "2026-11-25T02:41Z",
+   "inicio": "2026-11-25T03:00Z",
+   "fim": "2026-11-25T07:00Z",
+   "texto": "LPPC SIGMET U01 VALID 250300/250700 LPPT- LPPC LISBOA FIR SEV TURB FCST N OF N4043 AND E OF W00926 FL180/380 MOV E 30KT NC"
   }
  ]
 }
