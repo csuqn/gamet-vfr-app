@@ -848,6 +848,57 @@ def _arquivo():
     return sorted(ARQUIVO.rglob("*.txt")) if ARQUIVO.exists() else []
 
 
+# GAMETs do arquivo em que a nota "Nuvens baixas na Secção II" difere da 4.1/4.2
+# só na janela de uma base: desde a 4.3 a janela a meio da linha abre parte
+# (`_cortes_janela`, comportamento documentado no CLAUDE.md) e a base antes dela
+# fica com a janela da parte; a 4.1/4.2 davam-lhe todo o período (janela '').
+# Conjunto fixo: {ficheiro: {índice da base na nota: janela nova}} — os testes
+# do arquivo contra a 4.1/4.2 falham se aparecer outro GAMET lido de outra
+# forma ou se este deixar de o ser. A nota é informativa (não entra na decisão).
+# 250300/250900 de 25-nov-2026: `CLD:SCT/BKN SC/CU 012-030/045HFT AGL 03/06
+# FEW/SCT AS/AC 060-090/100-130HFT AMSL 06/09 N OF N3730 SCT/BKN AS/AC
+# 060-090/120-150HFT AMSL` — a 1.ª base AS/AC 6000 ft AMSL fica 03–06Z (na
+# 4.2 sem janela); mesmos pontos (LPBG, LPSE, LP66), valores e referências.
+SECN2_JANELA_43 = {"20261125T0241Z_250300-250900_98469ed44c.txt": {0: "03–06Z"}}
+
+
+def secn2_como_42(nome, nuvens):
+    """`nuvens_baixas_secn2` da 4.3+ com as janelas de SECN2_JANELA_43 repostas
+    como a 4.2 as lia (''). Verifica que a janela nova é a esperada; o resto
+    (valor, referência, superfície, pontos, área lida, LCA) fica por comparar."""
+    if nome not in SECN2_JANELA_43:
+        return nuvens
+    conteudo, saida = nuvens
+    saida = list(saida)
+    for i, janela in SECN2_JANELA_43[nome].items():
+        base = saida[i]
+        assert base[2] == janela, (nome, i, base)
+        saida[i] = base[:2] + ("",) + base[3:]
+    return conteudo, saida
+
+
+def avisos_secn2_como_42(nome, avisos):
+    """Avisos da 4.3+ com a janela das bases de SECN2_JANELA_43 tirada da linha
+    da nota "Nuvens baixas na Secção II" (como na 4.1/4.2). Cada janela tem de
+    lá estar exactamente uma vez, na linha da base certa."""
+    if nome not in SECN2_JANELA_43:
+        return avisos
+    out, achou = [], 0
+    for tipo, texto in avisos:
+        if "Nuvens baixas na Secção II" in texto:
+            linhas = texto.split("\n")
+            bases = [k for k, ln in enumerate(linhas) if ln.startswith("- base ")]
+            for i, janela in SECN2_JANELA_43[nome].items():
+                k = bases[i]
+                assert linhas[k].count(f", {janela} — ") == 1, (nome, linhas[k])
+                linhas[k] = linhas[k].replace(f", {janela} — ", " — ")
+            texto = "\n".join(linhas)
+            achou += 1
+        out.append((tipo, texto))
+    assert achou == 1, nome
+    return out
+
+
 def test_arquivo_igual_a_4_2(eng, eng42):
     """Nenhum GAMET do arquivo tem janelas a meio da linha que mudem: os
     blocos, as decisões e os avisos são iguais aos da 4.2. Única diferença: a
@@ -859,6 +910,7 @@ def test_arquivo_igual_a_4_2(eng, eng42):
     sig = lambda bl: [(b.phenomenon, b.value, b.qualifier, b.surface,  # noqa: E731
                        round(b.polygon.area, 9)) for b in bl]
     lidas_24 = 0
+    secn2_janela = set()
     for p in fich:
         t = conftest.sfc_wind_475(p.read_text(encoding="utf-8").strip())  # 4.7.5
         if conftest.superficie_476(eng, t):
@@ -877,7 +929,11 @@ def test_arquivo_igual_a_4_2(eng, eng42):
                 lidas_24 += 1
         assert eng.campos_nao_interpretados(t) == eng42.campos_nao_interpretados(t)
         assert eng.subentradas_sem_area(t) == eng42.subentradas_sem_area(t)
-        assert eng.nuvens_baixas_secn2(t) == eng42.nuvens_baixas_secn2(t)
+        nuvens = eng.nuvens_baixas_secn2(t)
+        if nuvens != eng42.nuvens_baixas_secn2(t):
+            secn2_janela.add(p.name)
+        assert secn2_como_42(p.name, nuvens) == eng42.nuvens_baixas_secn2(t), p.name
+    assert secn2_janela == {n for n in SECN2_JANELA_43 if any(p.name == n for p in fich)}
 
 
 # GAMETs do arquivo com uma janela `HH/24` que a 4.2 não lia (só lia até 23:
@@ -937,7 +993,9 @@ def test_arquivo_analise_completa_e_resto(eng, eng42):
                         iv = eng.janela_intervalo(b.window, ini)
                         assert iv[1] + eng._RESTO_MARGEM <= agora, (f.name, b.window)
                 assert novo["por_dec"] == antigo["por_dec"], f.name
-                assert avisos_redaccao_43(novo["avisos"]) == antigo["avisos"], f.name
+                # SECN2_JANELA_43: só a janela da base na nota da Secção II
+                assert (avisos_secn2_como_42(f.name, avisos_redaccao_43(novo["avisos"]))
+                        == antigo["avisos"]), f.name
                 assert [g["decision"] for g in novo["regioes"]] == \
                        [g["decision"] for g in antigo["regioes"]]
     assert menos_severos == {n for n in RESTO_JANELA_24 if any(f.name == n for f in fich)}
@@ -974,6 +1032,44 @@ def test_arquivo_212100_janela_24_ignorada_as_0245(eng, eng42):
     # A decisão principal (pior caso do período) não muda
     assert rn["por_dec"] == rv["por_dec"]
 
+
+
+def test_arquivo_250300_secn2_janela_a_meio_da_linha(eng, eng42):
+    """GAMET real 250300/250900 de 25-nov-2026 (SECN2_JANELA_43): na Secção II
+    `… AGL 03/06 FEW/SCT AS/AC 060-090/100-130HFT AMSL 06/09 N OF N3730 SCT/BKN
+    AS/AC 060-090/120-150HFT AMSL` a 4.3+ lê as duas bases AS/AC 6000 ft AMSL
+    com as janelas 03–06Z e 06–09Z (a 4.2 dava à 1.ª todo o período). A nota é
+    informativa: as decisões nos 52 pontos são iguais às da 4.2."""
+    nome = "20261125T0241Z_250300-250900_98469ed44c.txt"
+    f = RAIZ / "dados" / "gamets" / "2026" / "11" / nome
+    if not f.exists():
+        pytest.skip("arquivo (ramo dados) não disponível")
+    texto = f.read_text(encoding="utf-8")
+    pontos = ["Bragança (LPBG)", "Seia (LPSE)", "Cabeço da Vaca (LP66)"]
+    conteudo, nuvens = eng.nuvens_baixas_secn2(texto)
+    assert conteudo.startswith("SCT/BKN SC/CU 012-030/045HFT AGL 03/06 FEW/SCT AS/AC")
+    # A base AGL de 1200 ft não é baixa (≥ 1000 ft): só as duas AMSL
+    assert nuvens == [(6000, "AMSL", "03–06Z", "", pontos, True, False),
+                      (6000, "AMSL", "06–09Z", "", pontos, True, False)]
+    # A 4.2 lia a 1.ª sem janela; o resto igual
+    _c, nuvens42 = eng42.nuvens_baixas_secn2(texto)
+    assert nuvens42 == [(6000, "AMSL", "", "", pontos, True, False),
+                        (6000, "AMSL", "06–09Z", "", pontos, True, False)]
+    for agora in (datetime(2026, 11, 25, h, m, tzinfo=timezone.utc)
+                  for h, m in ((3, 30), (6, 30), (8, 45))):
+        rn = eng.analisar_gamet(texto, agora=agora)
+        rv = eng42.analisar_gamet(texto, agora=agora)
+        (nota,) = [x for t, x in rn["avisos"] if "Nuvens baixas na Secção II" in x]
+        assert "6000 ft AMSL**, 03–06Z — " in nota
+        assert "6000 ft AMSL**, 06–09Z — " in nota
+        assert all(c in nota for c in ("LPBG", "LPSE", "LP66"))
+        assert rn["por_dec"] == rv["por_dec"]
+        for n, (la, lo) in eng.AERODROMES.items():
+            assert (eng.find_region_for_point(rn["regioes"], la, lo)["decision"]
+                    == eng42.find_region_for_point(rv["regioes"], la, lo)["decision"]), n
+            assert _resto_ponto(eng, rn, la, lo) == _resto_ponto(eng42, rv, la, lo), n
+        # Fora a janela da nota, os avisos são os da 4.2
+        assert avisos_secn2_como_42(nome, avisos_redaccao_43(rn["avisos"])) == rv["avisos"]
 
 # --- Contra o motor da 4.2: subentradas geradas -------------------------------------
 
