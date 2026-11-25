@@ -30,6 +30,7 @@ import pytest
 
 import conftest
 from conftest import avisos_redaccao_43, build_gamet, indice_sem_graus, indice_sem_linhas, motivos_sem_camada_471
+from test_v43 import avisos_secn2_como_42
 
 GRAV = {"GO": 0, "GO COND.": 0.5, "MARGINAL": 1, "NO-GO": 2}
 RAIZ = Path(__file__).resolve().parent.parent
@@ -296,9 +297,11 @@ def test_html_resto_escapado_e_nunca_mais_severo(eng):
 
 # --- Propriedade: todo o arquivo, várias horas, contra a 4.1 -------------------
 
-def _iguais(novo, antigo):
+def _iguais(novo, antigo, nome=""):
     assert novo["por_dec"] == antigo["por_dec"]
-    assert avisos_redaccao_43(novo["avisos"]) == antigo["avisos"]
+    # test_v43.SECN2_JANELA_43 (conjunto fixo): só a janela de uma base na nota
+    # da Secção II pode mudar (janela a meio da linha, 4.3)
+    assert avisos_secn2_como_42(nome, avisos_redaccao_43(novo["avisos"])) == antigo["avisos"]
     assert novo["faixa_sig"] == antigo["faixa_sig"]
     assert len(novo["regioes"]) == len(antigo["regioes"])
     for a, b in zip(novo["regioes"], antigo["regioes"]):
@@ -379,13 +382,13 @@ def test_arquivo_principal_igual_a_41_e_resto_nunca_mais_severo(eng, eng41):
         entrada = entradas.get(str(f.relative_to(RAIZ / "dados")))
         for agora in _horas(ini, fim):
             novo = eng.analisar_gamet(texto, agora=agora)
-            _iguais(novo, eng41.analisar_gamet(texto, agora=agora))
+            _iguais(novo, eng41.analisar_gamet(texto, agora=agora), f.name)
             com_resto += _verifica_resto(eng, novo, agora)
             if entrada:
                 novo = eng.analisar_gamet(texto, "arquivo_hist", indice=indice,
                                           entrada=entrada, agora=agora)
                 _iguais(novo, eng41.analisar_gamet(texto, "arquivo_hist", indice=indice,
-                                                   entrada=entrada, agora=agora))
+                                                   entrada=entrada, agora=agora), f.name)
                 com_resto += _verifica_resto(eng, novo, agora)
     assert com_resto > 0          # o arquivo tem janelas que terminam
 
