@@ -123,6 +123,15 @@ def analisar(eng, texto):
         r["alertas"].append("GAMET considerado ilegível pela app")
     for s in eng.subentradas_sem_area(texto):
         r["alertas"].append(f"Área não reconhecida (aplicada a toda a FIR) → {s}")
+    # (7.1) "MT ABV nnnHFT AMSL" que a app não leu (fica como na 7.0)
+    for tipo, campo, txt, _lim in (eng.leituras_relevo(texto)
+                                   if hasattr(eng, "leituras_relevo") else []):
+        if tipo == "duvida":
+            r["alertas"].append(f"Área não reconhecida (MT ABV, fica na área da subentrada) "
+                                f"→ {campo}: {txt}")
+        elif tipo == "outro":
+            r["alertas"].append(f"MT ABV não interpretado (campo {campo}, lido como na 7.0) "
+                                f"→ {campo}: {txt}")
     for s, leitura in eng.subentradas_alargadas(texto):
         r["alertas"].append(f"Cardinal solto antes de BTN (área alargada a {leitura}) → {s}")
     # Mesma verificação do aviso do briefing (3.9): por subentrada, no motor.
