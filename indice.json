@@ -1184,6 +1184,13 @@
    "tipo": "GAMET"
   },
   {
+   "ficheiro": "gamets/2026/11/20261126T1233Z_260900-261500_manual.txt",
+   "recolhido": "2026-11-26T12:33Z",
+   "inicio": "2026-11-26T09:00Z",
+   "fim": "2026-11-26T15:00Z",
+   "tipo": "GAMET"
+  },
+  {
    "ficheiro": "gamets/2026/11/20261126T1440Z_261500-262100_9bd98be9ff.txt",
    "recolhido": "2026-11-26T14:40Z",
    "inicio": "2026-11-26T15:00Z",
